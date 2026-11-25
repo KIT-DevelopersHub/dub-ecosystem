@@ -27,7 +27,13 @@ export * as member from "./member"; // member-service (運営メンバー管理;
 export * as appRegistry from "./app-registry"; // canonical launcher app set ↔ per-app RBAC keys (SoT)
 export * as policy from "./policy"; // RBAC policy layer (PDP): 無効/閲覧/編集 levels, capability flags, decisions
 export * as lp from "./lp"; // lp-analytics (LP管理: 公開版切り替え)
+export * as lpMarkdown from "./lp-markdown"; // LP お知らせ詳細の Markdown 描画・Google ドライブ画像 URL の正規化（LP Worker と LP管理で共用）
 export * as meeting from "./meeting"; // drive-share-service /meetings (カレンダー > ミーティング)
 export * as hr from "./hr"; // member-service /members/hr/* (人事: 応募→選考→参加→オンボーディング)
+export * as hrForm from "./hr-interview-form"; // 人事: 面談申し込みフォーム (編集できる質問 + 回答 → 応募者)
+export * as hrInterview from "./hr-interview"; // 人事: 面談の日程調整 (面談枠・案内メールの保留・公開の日程選択)
+export * as hrResult from "./hr-interview-result"; // 人事: 面談結果の登録 (合否メール・合格のアカウント発行)
+export * as goal from "./goal"; // member-service /members/goals (目標管理: チームの月間目標と KPI)
+export * as sponsor from "./sponsor"; // member-service /members/sponsor/* (スポンサー: 名刺の共有)
 
 export const CONTRACT_VERSION = "1.0.0";

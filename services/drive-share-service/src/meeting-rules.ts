@@ -10,12 +10,14 @@ export const TITLE_MAX = 200;
 export const DESCRIPTION_MAX = 5000;
 export const DURATION_MIN = 5;
 export const DURATION_MAX = 720;
+const LAST_OCCURRENCE_WINDOW_MS = 62 * 24 * 60 * 60 * 1000;
 
 /** The validated, normalised shape every write works on. */
 export interface MeetingFields {
   title: string;
   description: string | null;
-  targetId: string;
+  /** Who is invited (never empty). The event's calendar is calendarTargetOf(targets). */
+  targets: meeting.MeetingTargetRef[];
   /** UTC ISO (toISOString). */
   startsAt: string;
   durationMinutes: number;
@@ -88,12 +90,23 @@ export function endsAt(f: Pick<MeetingFields, "startsAt" | "durationMinutes">): 
   return new Date(Date.parse(f.startsAt) + f.durationMinutes * 60_000).toISOString();
 }
 
+/** When the last occurrence can end at the latest (epoch ms); null = a series with no end date. */
+export function lastEndMs(m: Pick<MeetingFields, "startsAt" | "durationMinutes" | "recurrence" | "until">): number | null {
+  if (m.recurrence === "none") return Date.parse(endsAt(m));
+  if (!m.until) return null;
+  // Every kind repeats within this window; asking for it alone keeps a long series under the
+  // occurrence cap. Google-side edits of single instances are not seen (occurrenceStarts).
+  const from = jstDate(new Date(Date.parse(`${m.until}T00:00:00+09:00`) - LAST_OCCURRENCE_WINDOW_MS).toISOString());
+  const last = meeting.occurrenceStarts(m, from, m.until).at(-1);
+  return Date.parse(last?.startsAt ?? `${m.until}T23:59:59+09:00`) + m.durationMinutes * 60_000;
+}
+
 type Input = Partial<meeting.CreateMeetingRequest>;
 
 /**
  * Validate a create body, or an update body merged over the stored fields (`base`). Role
- * existence is checked by the caller (needs identity); here targetId must merely be a non-empty
- * string. Messages are Japanese, shown as-is by the SPA.
+ * existence is checked by the caller (needs identity); here the targets must merely be
+ * well-formed (meeting.parseMeetingTargets). Messages are Japanese, shown as-is by the SPA.
  */
 export function validateMeeting(body: unknown, base?: MeetingFields): MeetingFields {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
@@ -116,9 +129,10 @@ export function validateMeeting(body: unknown, base?: MeetingFields): MeetingFie
     throw errors.validationFailed([{ field: "description", reason: "too_long" }], `説明は ${DESCRIPTION_MAX} 文字以内で入力してください。`);
   }
 
-  const targetId = pick("targetId");
-  if (typeof targetId !== "string" || targetId.length === 0) {
-    throw errors.validationFailed([{ field: "targetId", reason: "required" }], "対象（ロールまたは全体）を選んでください。");
+  // targets[] (or the legacy single targetId) from the body, else the stored ones.
+  const targets = "targets" in b || "targetId" in b ? meeting.parseMeetingTargets(b) : base?.targets ?? meeting.parseMeetingTargets(b);
+  if (!targets) {
+    throw errors.validationFailed([{ field: "targets", reason: "required" }], "対象（全体・ロール・メンバー）を1つ以上選んでください。");
   }
 
   const startsAtRaw = pick("startsAt");
@@ -156,7 +170,7 @@ export function validateMeeting(body: unknown, base?: MeetingFields): MeetingFie
   return {
     title: title.trim(),
     description,
-    targetId,
+    targets,
     startsAt,
     durationMinutes,
     recurrence: recurrence as meeting.MeetingRecurrence,

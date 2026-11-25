@@ -1,6 +1,7 @@
 // 公開設定: GET /lp/site-config・PUT draft・POST draft/reset・POST publish（LP管理）+ GET /lp/internal/site-config（LP Worker）。
 import { describe, it, expect } from "vitest";
 import { createDbClient } from "@dub/db";
+import { errors } from "@dub/errors";
 import { lp } from "@dub/types";
 import type { D1Database } from "@cloudflare/workers-types";
 import { memoryD1 } from "../../../infra/d1/src/node-d1";
@@ -51,9 +52,9 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config (%s repo)", (kind) => 
   });
 
   it("published.release follows the existing endpoints (they stay the source of truth)", async () => {
-    const { app } = await publisher(kind);
+    const { app, ticketRelease } = await publisher(kind);
     await app.fetch(send("POST", "/lp/publish", { versionId: "v3.2" }));
-    await app.fetch(send("POST", "/lp/tickets/enabled", { enabled: true }));
+    ticketRelease.state.ticketsEnabled = true;
     await app.fetch(send("POST", "/lp/proposals/enabled", { enabled: true }));
     const s = await body<lp.LpSiteConfigState>(await app.fetch(get("/lp/site-config")));
     expect(s.published.release).toEqual({ versionId: "v3.2", ticketsEnabled: true, ticketsCtaEnabled: false, proposalsEnabled: true });
@@ -122,7 +123,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config (%s repo)", (kind) => 
   });
 
   it("publish writes layout + release (version / tickets / proposals) and one history row", async () => {
-    const { app, repo } = await publisher(kind);
+    const { app, repo, ticketRelease } = await publisher(kind);
     const next = config({ versionId: "v3.5", ticketsEnabled: true, ticketsCtaEnabled: true, proposalsEnabled: true });
     const res = await app.fetch(send("POST", "/lp/site-config/publish", { config: next, revision: 0 }));
     expect(res.status).toBe(200);
@@ -135,7 +136,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config (%s repo)", (kind) => 
     // existing tables / endpoints reflect it
     expect((await body<lp.LpPublishState>(await app.fetch(get("/lp/publish")))).versionId).toBe("v3.5");
     expect(await body(await app.fetch(get("/lp/internal/publish", INTERNAL)))).toEqual({ versionId: "v3.5" });
-    expect(await body(await app.fetch(get("/lp/tickets")))).toMatchObject({ enabled: true, ctaEnabled: true });
+    expect(ticketRelease.writes).toEqual([{ release: { ticketsEnabled: true, ticketsCtaEnabled: true }, updatedBy: "usr_admin" }]);
     expect(await body(await app.fetch(get("/lp/proposals")))).toMatchObject({ enabled: true });
 
     const history = await repo.listSiteConfigHistory(lp.LP_PUBLISH_SITE, 10);
@@ -146,22 +147,16 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config (%s repo)", (kind) => 
 
   it("publish only rewrites the release rows whose value changed (who/when of the rest is kept)", async () => {
     const { app, clock } = await publisher(kind);
-    await app.fetch(send("POST", "/lp/tickets/enabled", { enabled: true }));
     clock.set("2026-10-08T00:00:00.000Z");
     const res = await app.fetch(
       send("POST", "/lp/site-config/publish", { config: config({ ticketsEnabled: true, proposalsEnabled: true }), revision: 0 }, OTHER),
     );
     expect(res.status).toBe(200);
-    expect(await body(await app.fetch(get("/lp/tickets")))).toMatchObject({
-      enabled: true,
-      updatedBy: "usr_admin",
-      updatedAt: "2026-10-07T03:00:00.000Z",
-    });
     expect(await body(await app.fetch(get("/lp/proposals")))).toMatchObject({ enabled: true, updatedBy: "usr_other" });
   });
 
   it("stale publish → 409 and writes nothing (no layout, no release, no history)", async () => {
-    const { app, repo } = await publisher(kind);
+    const { app, repo, ticketRelease } = await publisher(kind);
     expect((await app.fetch(send("PUT", "/lp/site-config/draft", { config: config(), revision: 0 }))).status).toBe(200);
     const stale = await app.fetch(
       send("POST", "/lp/site-config/publish", { config: config({ versionId: "v3.5", ticketsEnabled: true, proposalsEnabled: true }), revision: 0 }),
@@ -172,6 +167,33 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config (%s repo)", (kind) => 
     expect(s.published).toEqual({ layout: lp.defaultLayout(), release: DEFAULT_RELEASE });
     expect(s.publishedAt).toBeNull();
     expect(await repo.listSiteConfigHistory(lp.LP_PUBLISH_SITE, 10)).toEqual([]);
+    expect(ticketRelease.writes).toEqual([]);
+  });
+
+  it("lp-tickets の書き込み失敗: 5xx を返し、販売状態は元のまま・読み直すと実際の値が見える", async () => {
+    const { app, ticketRelease } = await publisher(kind);
+    const fail = async () => {
+      throw errors.upstreamUnavailable("lp-tickets");
+    };
+    const realSet = ticketRelease.set;
+    ticketRelease.set = fail;
+    const res = await app.fetch(send("POST", "/lp/site-config/publish", { config: config({ versionId: "v3.5", ticketsEnabled: true }), revision: 0 }));
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    ticketRelease.set = realSet;
+    const s = await body<lp.LpSiteConfigState>(await app.fetch(get("/lp/site-config")));
+    expect(s.published.release).toMatchObject({ versionId: "v3.5", ticketsEnabled: false });
+    // 読み直した revision で再度本番反映すれば揃う。
+    const retry = await app.fetch(send("POST", "/lp/site-config/publish", { config: config({ versionId: "v3.5", ticketsEnabled: true }), revision: s.revision }));
+    expect(retry.status).toBe(200);
+    expect(ticketRelease.state.ticketsEnabled).toBe(true);
+  });
+
+  it("lp-tickets が読めない時は既定値に倒さず失敗する（false を見せて販売を止める本番反映を防ぐ）", async () => {
+    const { app, ticketRelease } = await publisher(kind);
+    ticketRelease.get = async () => {
+      throw errors.upstreamUnavailable("lp-tickets");
+    };
+    expect((await app.fetch(get("/lp/site-config"))).status).toBeGreaterThanOrEqual(500);
   });
 
   it("reset copies production into the draft; optional revision is checked", async () => {
@@ -205,6 +227,51 @@ describe.each<RepoKind>(["memory", "d1"])("lp site-config (%s repo)", (kind) => 
   });
 });
 
+describe.each<RepoKind>(["memory", "d1"])("lp site-config content (%s repo)", (kind) => {
+  const withContent: lp.LpLayout = {
+    schema: 1,
+    sections: { news: { variant: "a", visible: true, options: {} } },
+    content: {
+      news: [{ id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", mode: "link", url: "https://hokuriku-it-conf.com/tickets", body: "", highlight: true }],
+      sponsors: [{ id: "s1", tier: "title", name: "○○株式会社", logoUrl: "/sponsors/a.png", url: "", description: "説明" }],
+    },
+  };
+
+  it("items ride the draft → publish flow and reach the LP Worker via /lp/internal/site-config", async () => {
+    const { app } = await publisher(kind);
+    const saved = await app.fetch(send("PUT", "/lp/site-config/draft", { config: config({}, withContent), revision: 0 }));
+    expect(saved.status).toBe(200);
+    const s = await body<lp.LpSiteConfigState>(saved);
+    expect(s.draft.layout.content).toEqual(withContent.content);
+    // 本番はまだ空（下書きだけ）。
+    expect(s.published.layout.content).toBeUndefined();
+    expect(await body(await app.fetch(get("/lp/internal/site-config", INTERNAL)))).toEqual({ published: lp.defaultLayout(), draft: withContent });
+
+    expect((await app.fetch(send("POST", "/lp/site-config/publish", { config: config({}, withContent), revision: 1 }))).status).toBe(200);
+    expect((await body<lp.LpInternalSiteConfig>(await app.fetch(get("/lp/internal/site-config", INTERNAL)))).published).toEqual(withContent);
+  });
+
+  it("invalid items → 400 with the field path (bad URL / missing name / unknown tier / duplicate id / too long)", async () => {
+    const { app } = await publisher(kind);
+    const item = withContent.content!.sponsors![0]!;
+    const cases: [unknown, string, string][] = [
+      [{ sponsors: [{ ...item, logoUrl: "javascript:alert(1)" }] }, "config.layout.content.sponsors[0].logoUrl", "invalid_url"],
+      [{ sponsors: [{ ...item, name: " " }] }, "config.layout.content.sponsors[0].name", "required"],
+      [{ sponsors: [{ ...item, tier: "platinum" }] }, "config.layout.content.sponsors[0].tier", "invalid"],
+      [{ sponsors: [item, item] }, "config.layout.content.sponsors[1].id", "duplicate"],
+      [{ sponsors: [{ ...item, description: "あ".repeat(121) }] }, "config.layout.content.sponsors[0].description", "too_long"],
+      [{ news: [{ id: "n1", date: "2026-02-30", text: "x", url: "", highlight: false }] }, "config.layout.content.news[0].date", "invalid"],
+      [{ talks: [] }, "config.layout.content.talks", "unknown_section"],
+    ];
+    for (const [content, field, reason] of cases) {
+      const res = await app.fetch(send("PUT", "/lp/site-config/draft", { config: config({}, { schema: 1, sections: {}, content } as lp.LpLayout), revision: 0 }));
+      expect(res.status).toBe(400);
+      expect(await body<{ error: { details: unknown } }>(res)).toMatchObject({ error: { details: [{ field, reason }] } });
+    }
+    expect((await body<lp.LpSiteConfigState>(await app.fetch(get("/lp/site-config")))).revision).toBe(0);
+  });
+});
+
 describe("site-config gate", () => {
   it("publish needs lp:publish: 編集 → 403, 閲覧 + lp:publish → 403; nothing written", async () => {
     const edit = await makeApp("memory", "edit");
@@ -224,9 +291,9 @@ describe("site-config gate", () => {
     expect((await none.app.fetch(get("/lp/site-config"))).status).toBe(403);
   });
 
-  it("GET /lp/internal/site-config is s2s only (404 without x-dub-internal) and needs no user", async () => {
+  it("GET /lp/internal/site-config is s2s only (403 without x-dub-internal) and needs no user", async () => {
     const { app } = await makeApp("memory");
-    expect((await app.fetch(get("/lp/internal/site-config", {}))).status).toBe(404);
+    expect((await app.fetch(get("/lp/internal/site-config", {}))).status).toBe(403);
     expect((await app.fetch(get("/lp/internal/site-config", INTERNAL))).status).toBe(200);
   });
 
@@ -285,7 +352,7 @@ describe("publish atomicity (real D1 SQL, transactional batch like Cloudflare D1
     expect(counts()).toEqual({ batches: 1, runs: 0 });
   });
 
-  it("a failure in the last statement rolls back layout, version, tickets and history", async () => {
+  it("a failure in the last statement rolls back layout, version and history", async () => {
     const { raw, repo } = await transactionalD1();
     raw.exec(`CREATE TRIGGER lp_test_fail_ins BEFORE INSERT ON lp_proposal_settings BEGIN SELECT RAISE(ABORT, 'boom'); END;`);
     const { app } = await makeApp("d1", "edit", 5000, null, ["lp:publish"], { repo });

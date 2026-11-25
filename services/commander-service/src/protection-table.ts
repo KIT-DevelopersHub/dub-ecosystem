@@ -73,7 +73,21 @@ export const OPERATOR = "operator" as const;
  */
 export const OPEN = "open" as const;
 
-export type Protection = typeof OPERATOR | typeof OPEN;
+/**
+ * Production approval: the operator token AND the confirm switch
+ * (`COMMANDER_PR_CONFIRM_ENABLED=1`). Used only by the route that adds the `確認した` label,
+ * i.e. the one action here that lets a PR merge to main and deploy to production.
+ *
+ * Why not a role permission (e.g. `commander:confirm` granted to role_sys_admin): this
+ * service has no user identity to check one against (see WHY NOT policy-gate above). The
+ * single principal is the operator; remote use via the Dub app is already narrowed to
+ * COMMANDER_OWNER_USER_IDS by commander-relay, which is stricter than any role grant.
+ * What this word adds is a separate, default-OFF switch for the dangerous action, so a
+ * Commander set up for runs cannot approve production by accident.
+ */
+export const CONFIRM = "confirm" as const;
+
+export type Protection = typeof OPERATOR | typeof OPEN | typeof CONFIRM;
 
 /** Methods this router may register. */
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -136,6 +150,10 @@ export const PROTECTION_TABLE = defineProtectionTable({
   "DELETE /chats/:id": OPERATOR,
   "POST /chats/:id/messages": OPERATOR,
   "PATCH /chats/:id/messages/:mid": OPERATOR,
+
+  // ---- PR CI status + 「確認」 (adds the 確認した production-gate label) ----
+  "GET /prs/:number/checks": OPERATOR,
+  "POST /prs/:number/confirm": CONFIRM,
 });
 
 // ── route identity ──────────────────────────────────────────────────────────────────────
@@ -306,6 +324,9 @@ export function operatorGate(table: ProtectionTable = PROTECTION_TABLE): Middlew
     const presented = c.req.header("x-commander-token");
     if (presented === undefined || !timingSafeEqual(presented, expected)) {
       return c.json({ error: "unauthorized" }, 401);
+    }
+    if (rule === CONFIRM && c.env.COMMANDER_PR_CONFIRM_ENABLED !== "1") {
+      return c.json({ error: "confirm_disabled", reason: "pr_confirm_not_enabled" }, 403);
     }
     return next();
   };

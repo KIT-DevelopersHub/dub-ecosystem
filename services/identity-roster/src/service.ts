@@ -32,6 +32,10 @@ import type {
 const ADMIN: identity.PermissionKey = "identity:admin";
 const { MANAGED_ROLE_ID_PREFIX, AUTO_ASSIGNMENT_SOURCE: AUTO_SOURCE } = identityContract;
 /** Upper bound on one managed-role list (teams + 3 役職) — a crafted body cannot fan out unbounded writes. */
+/** 参加届からの発行で付ける唯一のロール (一般メンバーのシステムロール)。 */
+export const ONBOARD_ROLE_NAME = "member";
+/** 取り消せるのは作成直後 (同じ発行呼び出しの補償) の招待だけ。古い招待には届かない。 */
+const ONBOARD_DISCARD_WINDOW_MS = 15 * 60 * 1000;
 const MAX_MANAGED_ROLES = 200;
 const AUTHZ_TTL_SECONDS = 60;
 const MAX_BATCH_CHECKS = 20;
@@ -42,6 +46,8 @@ const MAX_DISPLAY_NAME_LEN = 80;
 // Stop-gap cap for an inline data: URL avatar (≈512KB of base64). 本番課題(TODO): store
 // avatar images in R2 and persist only the object URL, dropping this inline path.
 const MAX_AVATAR_URL_LEN = 700_000;
+/** activateInvited's audit trigger label (e.g. "participation.link"). */
+const TRIGGER_RE = /^[a-z][a-z0-9._-]{0,63}$/;
 
 export class IdentityService {
   constructor(private readonly d: Deps) {}
@@ -110,12 +116,9 @@ export class IdentityService {
   private async loadEvalContext(userId: string, orgId: string): Promise<EvalContext> {
     const user = await this.d.repo.getUser(userId);
     const assignments = user ? await this.d.repo.listAssignmentsByUser(userId, orgId) : [];
-    const roleById = new Map<string, RoleRow>();
-    for (const a of assignments) {
-      if (roleById.has(a.roleId)) continue;
-      const role = await this.d.repo.getRole(a.roleId);
-      if (role) roleById.set(role.id, role);
-    }
+    // One roles+permissions read for all of the user's roles (was getRole + permissionsOf per role).
+    const roles = assignments.length > 0 ? await this.d.repo.getRolesByIds(assignments.map((a) => a.roleId)) : [];
+    const roleById = new Map<string, RoleRow>(roles.map((r) => [r.id, r]));
     return { user, orgId, roleById, assignments };
   }
 
@@ -243,6 +246,54 @@ export class IdentityService {
     return { user: this.toIdentityUser(user, assignments) };
   }
 
+  /**
+   * 参加届からのアカウント発行 (api-gateway の onboard-account だけが呼ぶ・INTERNAL)。
+   * ロールは呼び出し側に選ばせず、ここで一般メンバーのシステムロール 1 つに固定する。
+   * 既存メールなら invite と同じ 409 EMAIL_EXISTS (既存アカウントは変更しない)。
+   */
+  async onboardInvite(orgId: string, req: { email?: unknown; displayName?: unknown; furigana?: unknown }, ctx: RequestCtx): Promise<InviteUserResponse> {
+    const role = await this.onboardRole(orgId);
+    return this.invite(
+      orgId,
+      {
+        email: typeof req.email === "string" ? req.email : "",
+        ...(typeof req.displayName === "string" && req.displayName.trim() ? { displayName: req.displayName.trim() } : {}),
+        ...(typeof req.furigana === "string" ? { furigana: req.furigana } : {}),
+        roleIds: [role.id],
+      },
+      ctx,
+    );
+  }
+
+  /**
+   * onboardInvite の取り消し (後続の段が失敗した時の補償)。作成から 15 分以内・招待中のまま・
+   * 固定ロール以外を持たないアカウントだけを消す。それ以外は 409 で触らない。
+   * 既に無ければ no-op (再実行しても安全)。
+   */
+  async discardOnboardInvite(userId: string, orgId: string, ctx: RequestCtx): Promise<{ discarded: boolean }> {
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) return { discarded: false };
+    const role = await this.onboardRole(orgId);
+    const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
+    const ageMs = Date.parse(this.d.now()) - Date.parse(user.createdAt);
+    const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= ONBOARD_DISCARD_WINDOW_MS;
+    if (user.status !== "invited" || user.source !== "manual" || !fresh || assignments.some((a) => a.roleId !== role.id)) {
+      throw errors.conflict("only an untouched onboarding invite can be discarded", { code: "IDENTITY_NOT_DISCARDABLE" });
+    }
+    for (const a of assignments) await this.d.repo.deleteAssignment(a.id);
+    const discarded = await this.d.repo.deleteInvitedUser(userId);
+    if (discarded) {
+      await this.d.audit.publish(this.record("identity.user.invite_discarded", "success", ctx, orgId, "user", userId, { email: user.email }));
+    }
+    return { discarded };
+  }
+
+  private async onboardRole(orgId: string): Promise<RoleRow> {
+    const role = await this.d.repo.getRoleByName(orgId, ONBOARD_ROLE_NAME);
+    if (!role || !role.isSystem) throw errors.internal(`onboarding role "${ONBOARD_ROLE_NAME}" is missing`);
+    return role;
+  }
+
   async provision(orgId: string, req: { email: string; displayName: string; githubLogin?: string }, ctx: RequestCtx): Promise<ProvisionUserResponse> {
     const email = requireEmail(req.email);
     const existing = await this.d.repo.getUserByEmail(orgId, email);
@@ -273,6 +324,37 @@ export class IdentityService {
     const updated = (await this.d.repo.getUser(existing.id))!;
     const assignments = await this.d.repo.listAssignmentsByUser(updated.id, orgId);
     return { status: "provisioned", user: this.toIdentityUser(updated, assignments) };
+  }
+
+  /**
+   * invited -> active for a user the 名簿 (member-service) has confirmed as 在籍 and linked to
+   * this account. Keyed by user id only (never by an email from a form). Touches nothing but
+   * an `invited` row: active is a no-op, disabled / rejected are left alone. The write is a
+   * compare-and-set on status = 'invited', so a disable that lands between the read and the
+   * write wins. Same write-ahead sync audit as provision() (fail-close), with the trigger.
+   */
+  async activateInvited(
+    userId: string,
+    orgId: string,
+    req: identity.ActivateInvitedUserRequest,
+    ctx: RequestCtx,
+  ): Promise<identity.ActivateInvitedUserResponse> {
+    const trigger = typeof req?.trigger === "string" ? req.trigger.trim() : "";
+    if (!TRIGGER_RE.test(trigger)) throw errors.validationFailed([{ field: "trigger", reason: "invalid" }]);
+    const dryRun = req.dryRun === true;
+    const user = await this.d.repo.getUser(userId);
+    if (!user || user.orgId !== orgId) throw errors.notFound("user", userId);
+    if (user.status !== "invited") {
+      return { dryRun, activated: false, previousStatus: user.status, status: user.status };
+    }
+    if (dryRun) return { dryRun, activated: true, previousStatus: "invited", status: "invited" };
+
+    await this.d.audit.logSync(
+      this.record("identity.user.provisioned", "success", ctx, orgId, "user", userId, { via: "member-roster", trigger }),
+    );
+    const activated = await this.d.repo.activateIfInvited(userId, this.d.now());
+    const after = (await this.d.repo.getUser(userId))!;
+    return { dryRun, activated, previousStatus: "invited", status: after.status };
   }
 
   async updateUser(userId: string, orgId: string, req: UpdateUserRequest, ctx: RequestCtx): Promise<identity.IdentityUser> {
@@ -631,6 +713,9 @@ export class IdentityService {
     const role = await this.d.repo.getRole(roleId);
     if (!role || role.orgId !== orgId) throw errors.notFound("role", roleId);
     if (role.isSystem) throw errors.conflict("system roles are not deletable", { code: "SYSTEM_ROLE" });
+    if (role.permissions.includes(ADMIN) && !(await this.adminSurvivesRoleDelete(roleId, orgId))) {
+      throw errors.conflict("このロールを削除すると管理者が 0 人になるため削除できません", { code: "LAST_ADMIN" });
+    }
     await this.d.repo.deleteRole(roleId);
     await this.d.audit.publish(this.record("identity.role.deleted", "success", ctx, orgId, "role", roleId, {}));
   }
@@ -858,6 +943,16 @@ export class IdentityService {
     return { dryRun, added, removed, manual };
   }
 
+  /** Lockout guard for deleteRole: does an active org-wide identity:admin remain without this role? */
+  private async adminSurvivesRoleDelete(roleId: string, orgId: string): Promise<boolean> {
+    const assignments = await this.d.repo.listAssignmentsByRole(roleId);
+    const holders = new Set(assignments.filter((a) => a.resourceType === null && a.resourceId === null).map((a) => a.userId));
+    for (const userId of await this.d.repo.usersWithOrgWidePermission(orgId, ADMIN)) {
+      if ((await this.countOrgWideAdminGrants(userId, orgId)) > (holders.has(userId) ? 1 : 0)) return true;
+    }
+    return false;
+  }
+
   private async countOrgWideAdminGrants(userId: string, orgId: string): Promise<number> {
     const assignments = await this.d.repo.listAssignmentsByUser(userId, orgId);
     let n = 0;
@@ -904,6 +999,35 @@ export class IdentityService {
   async effectivePermissions(userId: string, orgId: string): Promise<EffectivePermissionsResponse> {
     const ctx = await this.loadEvalContext(userId, orgId);
     return { userId, orgId, permissions: effectiveOrgWidePermissions(ctx) };
+  }
+
+  /**
+   * Who holds `permission` org-wide: the roles carrying it (with their member counts, as
+   * ロール管理 shows them) and the distinct ACTIVE users reached through those roles.
+   * Serves `GET /internal/permission-holders` — notification-service resolves audience
+   * recipients (notif:receive_admin / notif:receive_all) and renders 通知管理「誰に届くか」
+   * from it. Event-scoped grants never count (same rule as authz org-wide evaluation).
+   */
+  async permissionHolders(
+    orgId: string,
+    permission: string,
+  ): Promise<{ permission: string; roles: { id: string; name: string; memberCount: number }[]; userIds: string[] }> {
+    if (!isPermissionKey(permission)) {
+      throw errors.validationFailed([{ field: "key", reason: "not_in_catalog", message: permission }]);
+    }
+    const counts = await this.d.repo.roleMemberCounts(orgId);
+    const roles: { id: string; name: string; memberCount: number }[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 50; page++) {
+      const res = await this.d.repo.listRoles(orgId, 100, cursor);
+      for (const r of res.items) {
+        if (r.permissions.includes(permission)) roles.push({ id: r.id, name: r.name, memberCount: counts.get(r.id) ?? 0 });
+      }
+      if (!res.nextCursor) break;
+      cursor = res.nextCursor;
+    }
+    const userIds = await this.d.repo.usersWithOrgWidePermission(orgId, permission);
+    return { permission, roles, userIds: [...new Set(userIds)].sort() };
   }
 
   /**

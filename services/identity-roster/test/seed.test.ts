@@ -114,6 +114,37 @@ describe("seedReferenceData / system roles", () => {
     }
   });
 
+  it("chat:change_visibility starts ON for admin only (every other system role OFF)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    expect((await repo.getRoleByName(ORG_ID, "admin"))!.permissions).toContain("chat:change_visibility");
+    for (const name of ["maintainer", "organizer", "member"]) {
+      expect((await repo.getRoleByName(ORG_ID, name))!.permissions, name).not.toContain("chat:change_visibility");
+    }
+  });
+
+  it("chat:create_private starts ON for every system role that holds chat:create (0033 と同じ結果)", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    for (const name of ["admin", "maintainer", "organizer", "member"]) {
+      const perms = (await repo.getRoleByName(ORG_ID, name))!.permissions;
+      expect(perms, name).toContain("chat:create");
+      expect(perms, name).toContain("chat:create_private");
+    }
+  });
+
+  it("スポンサー (app:sponsor:* / sponsor:*) starts ON for admin only — unreleased app, other roles opt in via ロール管理", async () => {
+    const repo = new MemIdentityRepo();
+    await seedReferenceData(makeDeps(repo), ORG_ID);
+    const keys = ["app:sponsor:view", "app:sponsor:edit", "sponsor:read", "sponsor:write", "sponsor:admin"] as const;
+    const admin = (await repo.getRoleByName(ORG_ID, "admin"))!.permissions;
+    for (const k of keys) expect(admin).toContain(k);
+    for (const name of ["maintainer", "organizer", "member"]) {
+      const perms = (await repo.getRoleByName(ORG_ID, name))!.permissions;
+      for (const k of keys) expect(perms, `${name} ${k}`).not.toContain(k);
+    }
+  });
+
   it("is idempotent: re-seeding does not duplicate roles or widen admin", async () => {
     const repo = new MemIdentityRepo();
     await seedReferenceData(makeDeps(repo), ORG_ID);

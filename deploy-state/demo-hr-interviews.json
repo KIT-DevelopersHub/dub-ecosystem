@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "hr-interviews",
+  "worker": "dub-demo-hr-interviews",
+  "url": "https://dub-demo-hr-interviews.developershub-site.workers.dev",
+  "deployedSha": "f82667e4",
+  "branch": "commander/task-ctask_01M6RY27QH8Q8ZB8KXHXGFFK7C",
+  "actor": "ko-tarou",
+  "markers": ["othersBooked","fe2-hr-interviews-register"],
+  "live": true,
+  "verifiedAt": "2026-11-11T02:24:47Z",
+  "updatedAt": "2026-11-11T02:24:47Z",
+  "note": "人事 面談タブ: 他の人の枠を名前つきで薄く表示"
+}

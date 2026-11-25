@@ -73,6 +73,7 @@ kv_id() {  # kv_id TITLE — echo the namespace id, creating it if absent
 echo "== 1/4 D1 databases =="
 set_env STAGING_DUB_CORE_D1_ID     "$(d1_id "dub-core${SFX}")"
 set_env STAGING_AUTH_OUTBOX_D1_ID  "$(d1_id "auth-outbox${SFX}")"
+set_env STAGING_TICKETS_D1_ID      "$(d1_id "dub-tickets${SFX}")"
 
 echo "== 2/4 KV namespaces =="
 set_env STAGING_AUTH_KV_ID         "$(kv_id "auth-session${SFX}")"
@@ -146,6 +147,12 @@ if [ -n "$AUTH_OUTBOX_DDL" ]; then
   $WRANGLER d1 execute "auth-outbox${SFX}" --remote --yes --file "$AUTH_OUTBOX_DDL" || \
     echo "::warning::could not apply ${AUTH_OUTBOX_DDL} to auth-outbox${SFX} (apply manually)."
 fi
+
+# dub-tickets-staging holds only lp-tickets' tables (idempotent DDL). No demo orders are seeded.
+for ddl in services/lp-tickets/db/*.sql; do
+  $WRANGLER d1 execute "dub-tickets${SFX}" --remote --yes --file "$ddl" || \
+    echo "::warning::could not apply ${ddl} to dub-tickets${SFX} (apply manually)."
+done
 
 echo
 echo "staging bootstrap complete. Resource ids written to ${ENV_FILE}."

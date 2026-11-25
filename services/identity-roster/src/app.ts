@@ -207,6 +207,23 @@ export function createApp(opts: AppOptions): App {
     return c.json(await svc.provision(orgId, body, ctxOf(c)));
   });
 
+  // 名簿で在籍 (added) かつ紐付いた人の招待中アカウントを有効化 (member-service only)。
+  // By user id from the roster link — never by an email — and invited-only (see service).
+  app.post("/internal/users/:id/activate", async (c) => {
+    const body = await readJson<identity.ActivateInvitedUserRequest>(c);
+    return c.json(await svc.activateInvited(c.req.param("id"), orgId, body, ctxOf(c)));
+  });
+
+  // 参加届からのアカウント発行 (api-gateway onboard-account only)。ロールは service が固定し、
+  // body の roleIds は読まない。取り消しは招待中・固定ロールのみのアカウントだけ (補償用)。
+  app.post("/internal/users/onboard", async (c) => {
+    const body = await readJson<{ email?: unknown; displayName?: unknown; furigana?: unknown }>(c);
+    return c.json(await svc.onboardInvite(orgId, body ?? {}, ctxOf(c)), 201);
+  });
+  app.post("/internal/users/:id/discard-onboard", async (c) => {
+    return c.json(await svc.discardOnboardInvite(c.req.param("id"), orgId, ctxOf(c)));
+  });
+
   // Identity master by id — internal S2S read for the gateway /me composition.
   // External clients reach the user via /identity/users/:id (auth'd); the gateway
   // 404s this bare path, and the INTERNAL rule is the second line of defence.
@@ -239,6 +256,21 @@ export function createApp(opts: AppOptions): App {
       ...(c.req.query("cursor") ? { cursor: c.req.query("cursor")! } : {}),
     });
     return c.json(out);
+  });
+
+  // Role list — internal S2S read for drive-share-service's hourly meeting sync, which runs
+  // as the system (no user id) and so cannot pass the identity:read gate on /identity/roles.
+  // Same { items, nextCursor } page as GET /identity/roles.
+  app.get("/internal/roles", async (c) => {
+    return c.json(await svc.listRoles(orgId, numParam(c.req.query("limit")), c.req.query("cursor")));
+  });
+
+  // Permission → holders (roles + active user ids) — internal S2S read for notification
+  // audience fan-out (notif:receive_admin / notif:receive_all) and 通知管理「誰に届くか」.
+  // INTERNAL like /internal/users: the caller acts for the system, and a permission-holder
+  // list must not be reachable from outside.
+  app.get("/internal/permission-holders", async (c) => {
+    return c.json(await svc.permissionHolders(orgId, c.req.query("key") ?? ""));
   });
 
   // Login allowlist lookup — internal S2S read for auth-service password login.

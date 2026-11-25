@@ -49,10 +49,10 @@ describe("UserListPage", () => {
     expect(screen.queryByTestId("fe7-users-invite")).not.toBeInTheDocument();
   });
 
-  it("shows a placeholder pane until a user is selected", async () => {
+  it("shows no side pane until a user is selected", async () => {
     renderWithProviders(<UserListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-users-table")).toBeInTheDocument());
-    expect(screen.getByTestId("fe7-user-pane-empty")).toBeInTheDocument();
+    expect(screen.queryByText("ユーザーを選択してください")).not.toBeInTheDocument();
     expect(screen.queryByTestId("fe7-user-pane")).not.toBeInTheDocument();
   });
 
@@ -114,6 +114,24 @@ describe("UserListPage", () => {
     await user.click(toggle);
 
     await waitFor(() => expect(screen.queryByTestId("fe7-role-chip-user_bob-role_member")).not.toBeInTheDocument());
+  });
+
+  it("narrows the roster to users holding the selected role", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UserListPage />);
+    const filter = await screen.findByTestId("fe7-users-role-filter");
+    const { rows, role } = await waitFor(() => {
+      const rendered = screen.getAllByTestId(/^fe7-role-chip-/);
+      const first = rendered[0]!.getAttribute("data-testid")!.replace("fe7-role-chip-", "");
+      return { rows: rendered.length, role: first.slice(first.indexOf("-") + 1) };
+    });
+    expect(rows).toBeGreaterThan(0);
+    await user.selectOptions(filter, role);
+    await waitFor(() => expect(screen.getByTestId("fe7-users-count")).toHaveTextContent("件を表示"));
+    for (const chipsCell of screen.getAllByTestId(/^fe7-user-roles-/)) {
+      expect(within(chipsCell).getByTestId(new RegExp(`-${role}$`))).toBeInTheDocument();
+    }
+    window.history.replaceState(null, "", "/"); // 次のテストへ絞り込みを持ち越さない
   });
 
   it("shows a count summary of the loaded roster", async () => {
@@ -196,7 +214,6 @@ describe("UserListPage", () => {
 
     await user.click(within(pane).getByTestId("fe7-user-pane-close"));
     await waitFor(() => expect(screen.queryByTestId("fe7-user-pane")).not.toBeInTheDocument());
-    expect(screen.getByTestId("fe7-user-pane-empty")).toBeInTheDocument();
   });
 
   it("shows each user's フリガナ column (or 未設定 when unset)", async () => {

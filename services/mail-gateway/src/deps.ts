@@ -13,6 +13,12 @@ import { AUDIT_TOPIC, TOPIC_MAIL_AUTOMATION, TOPIC_NOTIFICATION, outboxQueue } f
 import type { AuditEnv, EventPublishEnv, InboundDeps, SendDeps } from "./types";
 import type { ArchiveForwardDeps, GmailForwardDeps } from "./gmail-forward";
 import { userForwardDisabled, type UserForwardDeps } from "./user-forward";
+import { sponsorSyncDisabled, sponsorSyncVia, type SponsorSyncPort } from "./sponsor-sync";
+
+/** スポンサーのメール連携の通知先 (SVC_MEMBER)。未結線か MAIL_SPONSOR_SYNC=off なら undefined。 */
+function sponsorPort(env: Env): SponsorSyncPort | undefined {
+  return env.SVC_MEMBER && !sponsorSyncDisabled(env.MAIL_SPONSOR_SYNC) ? sponsorSyncVia(env.SVC_MEMBER) : undefined;
+}
 
 export function buildDb(env: Env, requestId: string): DbClient {
   return createDbClient(env.DB, { namespace: "mail", requestId });
@@ -62,6 +68,7 @@ export function buildSendDeps(
     archiveCc: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     retry: sendRetryOptions(env),
     ...(blobs ? { blobs } : {}),
+    ...(ownerUserId ? spread("sponsor", sponsorPort(env)) : {}),
   };
 }
 
@@ -76,12 +83,20 @@ export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
     ...(blobs ? { blobs } : {}),
     // identity binding: resolves an inbound recipient address → roster userId (Inbox scope).
     identity: env.SVC_IDENTITY,
+    // member binding: expands a team mailing list to its members' userIds.
+    member: env.SVC_MEMBER,
     // Owner-resolution address policy. Same expressions as buildSendDeps so the address we
     // auto-CC on send is exactly the address we refuse to hand ownership to on the way
     // back in (an env override must not silently disable the exclusion).
     archiveAddress: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     sharedAddress: env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
+    ...spread("sponsor", sponsorPort(env)),
   };
+}
+
+/** exactOptionalPropertyTypes: 値がある時だけ key を足す。 */
+function spread<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
+  return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
 
 export function buildGmailForwardDeps(env: Env, ctx: RequestContext): GmailForwardDeps {

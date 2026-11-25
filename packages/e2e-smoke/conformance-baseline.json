@@ -4,11 +4,17 @@
       "GET /api/v1/admin/users/{}/password",
       "GET /api/v1/me/participation",
       "GET /api/v1/me/profile",
+      "GET /api/v1/public/hr-interview-form",
+      "POST /api/v1/admin/hr/applicants/{}/interview-result",
+      "POST /api/v1/admin/participation/{}/onboard-account",
       "POST /api/v1/admin/users/{}/account-mail",
       "POST /api/v1/admin/users/{}/password",
       "POST /api/v1/me/participation",
       "POST /api/v1/me/password",
       "POST /api/v1/me/profile",
+      "POST /api/v1/public/hr-interview-booking/book",
+      "POST /api/v1/public/hr-interview-booking/view",
+      "POST /api/v1/public/hr-interview-form",
       "POST /api/v1/public/lp-visits",
       "POST /api/v1/public/participation",
       "POST /api/v1/public/webhooks/resend"
@@ -30,7 +36,8 @@
       "POST /auth/passkey/register/options",
       "POST /auth/passkey/register/verify",
       "POST /auth/password",
-      "POST /internal/admin/users/{}/password"
+      "POST /internal/admin/users/{}/password",
+      "POST /internal/onboard/users/{}/initial-password"
     ],
     "missingInCode": []
   },
@@ -96,6 +103,7 @@
   "identity-roster": {
     "missingInSpec": [
       "DELETE /internal/webauthn/users/{}/credentials/{}",
+      "GET /internal/roles",
       "GET /internal/users",
       "GET /internal/webauthn/credentials/{}",
       "GET /internal/webauthn/users/{}/credentials",
@@ -103,7 +111,10 @@
       "POST /identity/users/sync-email-routing",
       "POST /identity/users/sync-email-routing/preview",
       "POST /identity/users/{}/offboard",
+      "POST /internal/users/avatars",
       "POST /internal/users/lookup",
+      "POST /internal/users/onboard",
+      "POST /internal/users/{}/discard-onboard",
       "POST /internal/users/{}/profile",
       "POST /internal/webauthn/challenges",
       "POST /internal/webauthn/challenges/take",
@@ -131,15 +142,20 @@
       "GET /mail/scheduled/{}",
       "GET /mail/sent",
       "GET /mail/sent/{}",
+      "GET /mail/status",
       "GET /mail/threads/{}",
       "PATCH /mail/forward",
       "PATCH /mail/scheduled/{}",
+      "POST /internal/sponsor/contacts",
       "POST /internal/webhooks/resend",
+      "POST /mail/avatars",
       "POST /mail/blocks",
+      "POST /mail/bulk",
       "POST /mail/flags/{}",
       "POST /mail/mailboxes/{}",
       "POST /mail/messages/{}/read",
       "POST /mail/outbox",
+      "POST /mail/read-state",
       "POST /mail/scheduled",
       "PUT /mail/forward"
     ],
@@ -165,8 +181,10 @@
   },
   "notification": {
     "missingInSpec": [
+      "GET /audiences",
       "GET /inbox/ws-ticket",
       "GET /manage",
+      "GET /notifications/audiences",
       "GET /notifications/inbox",
       "GET /notifications/inbox/unread-count",
       "GET /notifications/inbox/ws-ticket",
@@ -195,6 +213,7 @@
   "task-service": {
     "missingInSpec": [
       "DELETE /tasks/calendar-events/{}",
+      "GET /internal/goal-metrics",
       "PATCH /tasks/calendar-events/{}",
       "POST /tasks/calendar-events"
     ],

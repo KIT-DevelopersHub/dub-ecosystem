@@ -106,7 +106,7 @@ const ARCHIVE = ["DELETE /tasks/:id"];
 const CALENDAR_WRITES = ["PATCH /tasks/calendar-events/:id", "POST /tasks/calendar-events"];
 const CALENDAR_ARCHIVE = ["DELETE /tasks/calendar-events/:id"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
-const INTERNAL_ROUTES = ["GET /health", "POST /internal/events-async"];
+const INTERNAL_ROUTES = ["GET /health", "GET /internal/goal-metrics", "POST /internal/events-async"];
 // The whole external surface — what a caller can reach through api-gateway at most.
 const FULL = [...READS, ...WRITES, ...ARCHIVE].sort();
 const EVERY_EXTERNAL = [...FULL, ...CALENDAR_WRITES, ...CALENDAR_ARCHIVE].sort();

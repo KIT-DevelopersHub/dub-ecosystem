@@ -59,3 +59,36 @@ describe("sanitizeHtml", () => {
     expect(out).toContain("b");
   });
 });
+
+describe("sanitizeHtml mail mode", () => {
+  const mailHtml = (html: string, remoteImages = false): string => sanitizeHtml(html, { remoteImages });
+
+  it("keeps layout attributes and drops everything else", () => {
+    const out = mailHtml(`<table width="100%" onclick="x()" background="https://t/x.gif"><tr><td align="center" colspan="2" data-x="1">a</td></tr></table>`);
+    expect(out).toContain('width="100%"');
+    expect(out).toContain('align="center"');
+    expect(out).toContain('colspan="2"');
+    expect(out).not.toMatch(/onclick|background=|data-x/);
+  });
+
+  it("filters style declarations by property and by value", () => {
+    const out = mailHtml(`<p style="color: red; position: fixed; top: 0; z-index: 9; background: url(https://t/x.gif); background-color: url(x); margin: -100px; margin-top: 4px; width: expression(alert(1))">a</p>`);
+    expect(out).toBe('<p style="color: red; margin-top: 4px">a</p>');
+  });
+
+  it("removes the style attribute when nothing survives", () => {
+    expect(mailHtml(`<p style="position: fixed">a</p>`)).toBe("<p>a</p>");
+  });
+
+  it("parks images: remote behind the switch, cid for its attachment, others gone", () => {
+    expect(mailHtml(`<img src="https://t/p.gif">`)).toBe('<img data-src="https://t/p.gif">');
+    expect(mailHtml(`<img src="https://t/p.gif">`, true)).toBe('<img src="https://t/p.gif">');
+    expect(mailHtml(`<img src="cid:a@b">`)).toBe('<img data-cid="a@b">');
+    expect(mailHtml(`<img src="data:image/png;base64,AAAA">`)).toBe("<img>");
+    expect(mailHtml(`<img src="javascript:alert(1)">`)).toBe("<img>");
+  });
+
+  it("the default mode is unchanged", () => {
+    expect(sanitizeHtml(`<p style="color: red">a</p>`)).toBe("<p>a</p>");
+  });
+});

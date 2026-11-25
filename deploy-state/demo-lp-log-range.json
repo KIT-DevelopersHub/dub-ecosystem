@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-log-range",
+  "worker": "dub-demo-lp-log-range",
+  "url": "https://dub-demo-lp-log-range.developershub-site.workers.dev",
+  "deployedSha": "3d3b4723",
+  "branch": "feat/lp-log-range-filter",
+  "actor": "ko-tarou",
+  "markers": ["fe2-lp-range-custom","fe2-lp-source-filter","fe2-lp-site-referrer-filter"],
+  "live": true,
+  "verifiedAt": "2026-11-04T12:04:56Z",
+  "updatedAt": "2026-11-04T12:04:56Z",
+  "note": "LP管理 ログ: 期間指定+流入元絞り込み"
+}

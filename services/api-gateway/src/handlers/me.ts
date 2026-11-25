@@ -29,6 +29,18 @@ export async function meHandler(c: Context<{ Bindings: GatewayEnv; Variables: Ga
     svc.identity.get<PermissionsResponse>(ctx, `/internal/users/${encodeURIComponent(auth.userId)}/permissions`),
   ]);
 
+  // 代理表示: name the real admin so the shell can show its banner. user / permissions above
+  // are the SUBJECT's on purpose — that is what the member sees.
+  let impersonation: gateway.MeImpersonation | null = null;
+  if (auth.impersonation) {
+    const actor = await svc.identity.get<identity.IdentityUser>(ctx, `/users/${encodeURIComponent(auth.impersonation.actorId)}`);
+    impersonation = {
+      actor: { id: actor.id, displayName: actor.displayName, avatarUrl: actor.avatarUrl },
+      startedAt: auth.impersonation.startedAt,
+      expiresAt: auth.impersonation.expiresAt,
+    };
+  }
+
   const body: gateway.MeResponse = {
     user: { id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl, email: user.email },
     orgId: user.orgId,
@@ -38,6 +50,7 @@ export async function meHandler(c: Context<{ Bindings: GatewayEnv; Variables: Ga
     // set by the policy layer. Pure projection (no extra upstream call) — the shell reads it
     // to decide which write affordances are live instead of each feature re-deriving it.
     appAccess: policy.appAccessMap(perms.permissions),
+    ...(impersonation ? { impersonation } : {}),
   };
   return c.json(body);
 }

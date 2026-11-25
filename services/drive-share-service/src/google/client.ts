@@ -72,8 +72,7 @@ export function createGoogleDriveShareClient(deps: {
   async function readJson<T>(res: Response): Promise<T> {
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      const retryAfter = Number(res.headers.get("retry-after")) || undefined;
-      throw mapGoogleError(res.status, body, retryAfter);
+      throw mapGoogleError(res.status, body);
     }
     return (await res.json().catch(() => ({}))) as T;
   }
@@ -82,8 +81,7 @@ export function createGoogleDriveShareClient(deps: {
     // DELETE returns 204; a 404 means the permission is already gone → idempotent.
     if (res.ok || res.status === 404) return;
     const body = await res.json().catch(() => null);
-    const retryAfter = Number(res.headers.get("retry-after")) || undefined;
-    throw mapGoogleError(res.status, body, retryAfter);
+    throw mapGoogleError(res.status, body);
   }
 
   function buildQ(folderId?: string, q?: string): string {

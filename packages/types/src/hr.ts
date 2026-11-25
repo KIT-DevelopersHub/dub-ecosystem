@@ -58,6 +58,14 @@ export function requiresJoin(to: ApplicantStage, hasMember: boolean): boolean {
   return !hasMember && ROSTER_STAGES.includes(to);
 }
 
+/**
+ * 応募を削除 (論理削除) できないか = 名簿に結ばれ、オンボーディングがこの行を読む人。
+ * 辞退・不採用などへ戻した人は memberId が残っていても読まれないので消せる (名簿側はそのまま残る)。
+ */
+export function blocksRemoval(stage: ApplicantStage, hasMember: boolean): boolean {
+  return hasMember && ROSTER_STAGES.includes(stage);
+}
+
 export interface Applicant {
   id: string;
   name: string;
@@ -83,7 +91,7 @@ export interface Applicant {
   updatedAt: ISODateTime;
 }
 
-export type ApplicantEventKind = "created" | "stage" | "note" | "joined";
+export type ApplicantEventKind = "created" | "stage" | "note" | "joined" | "deleted";
 
 /** 応募者の履歴 (ステータス変更・メモ・採用)。追記のみ。 */
 export interface ApplicantEvent {

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { flushSync } from "react-dom";
 import type { identity } from "@dub/types";
 import { appRegistry } from "@dub/types";
 import { PageHeader, Breadcrumbs, Card, TextField, Button, ConfirmDialog, FormField } from "@dub/ui";
@@ -33,6 +34,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   const [perms, setPerms] = useState<identity.PermissionKey[]>(initialDraft?.permissions ?? existing?.permissions ?? []);
   const [mailVisible, setMailVisible] = useState<string[]>(initialDraft?.mailVisibleRoleIds ?? existing?.mailVisibleRoleIds ?? []);
   const [confirmSave, setConfirmSave] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // Sync once existing loads (create mode stays empty). A restored draft wins over the
   // server values, so don't overwrite it when `existing` arrives.
@@ -52,9 +54,9 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   // Dirty relative to the pristine baseline (server role, or empty in create mode).
   const original = existing ? { name: existing.name, permissions: existing.permissions, mailVisibleRoleIds: existing.mailVisibleRoleIds ?? [] } : null;
   const next = { name, permissions: perms, mailVisibleRoleIds: mailVisible };
-  const dirty = roleId
+  const dirty = !saved && (roleId
     ? original != null && !!buildRoleUpdate(original, next)
-    : name.trim() !== "" || perms.length > 0 || mailVisible.length > 0;
+    : name.trim() !== "" || perms.length > 0 || mailVisible.length > 0);
   const draft = useDraftAutosave<RoleDraft>({
     storageKey: draftKey,
     value: next,
@@ -64,6 +66,14 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
   // Renaming a system role is still disallowed (its name identifies it, e.g. "admin").
   const nameDisabled = readOnly || !!existing?.isSystem;
   const lockedKeys = existing ? lockedKeysForRole(existing) : [];
+
+  // onDone がすぐ画面遷移するので、離脱ガードが保存済みの値で評価されるよう先に確定させる。
+  function finish(title: string) {
+    flushSync(() => setSaved(true));
+    draft.clear();
+    toast({ kind: "success", title });
+    onDone?.();
+  }
 
   function save() {
     setConfirmSave(false);
@@ -75,7 +85,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
       const patch = buildRoleUpdate(original, next);
       if (!patch) { toast({ kind: "info", title: "変更はありません" }); return; }
       update.mutate(patch, {
-        onSuccess: () => { draft.clear(); toast({ kind: "success", title: "ロールを保存しました" }); onDone?.(); },
+        onSuccess: () => finish("ロールを保存しました"),
         onError: (err) => toast({ kind: "error", title: "保存に失敗しました", description: errorMessage(err) }),
       });
     } else {
@@ -83,7 +93,7 @@ export function RoleEditorPage({ roleId, onDone }: { roleId?: string; onDone?: (
       // toggles are EFFECTIVE 実効権限 (not front-end-only). Same normalization the update
       // path applies via buildRoleUpdate.
       create.mutate({ name, permissions: appRegistry.withRequiredAppDomainKeys(perms), ...(mailVisible.length > 0 ? { mailVisibleRoleIds: mailVisible } : {}) }, {
-        onSuccess: () => { draft.clear(); toast({ kind: "success", title: "ロールを作成しました" }); onDone?.(); },
+        onSuccess: () => finish("ロールを作成しました"),
         onError: (err) => toast({ kind: "error", title: "作成に失敗しました", description: errorMessage(err) }),
       });
     }

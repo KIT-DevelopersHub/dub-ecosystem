@@ -9,6 +9,8 @@
 //   POST /runs/reconcile                 -> fail orphaned pending/running runs (daemon restart)
 //   GET|POST /bundles, PATCH|DELETE /bundles/:id, DELETE /bundles/:id/tasks/:taskId
 //                                        -> staging 合体 (see ./bundles)
+//   GET  /prs/:number/checks             -> PR CI status (cached ~45s; see ./prs)
+//   POST /prs/:number/confirm            -> add 確認した (production approval; CONFIRM rule)
 //
 // The gate: `to` not on an allowed edge => 409 (段飛ばし禁止); an approval-required
 // edge without approvedByUser:true => 403 (自己承認禁止). See @dub/commander-phases.
@@ -62,6 +64,7 @@ import {
   removeBundleTask,
   updateBundle,
 } from "./bundles";
+import { confirmPr, getChecks } from "./prs";
 
 export function createApp() {
   const app = new Hono<AppBindings>();
@@ -388,6 +391,21 @@ export function createApp() {
     const message = await updateChatMessage(c.env.DB, c.req.param("mid"), { text, tools, status });
     if (!message) return c.json({ error: "message_not_found" }, 404);
     return c.json({ message });
+  });
+
+  // ── PR CI status + 「確認」 ──────────────────────────────────────────────────
+  app.get("/prs/:number/checks", async (c) => {
+    const out = await getChecks(c.env, c.req.param("number"), {
+      repo: c.req.query("repo") || undefined,
+      fresh: c.req.query("fresh") === "1",
+    });
+    return c.json(out.body, out.status as 200);
+  });
+
+  app.post("/prs/:number/confirm", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const out = await confirmPr(c.env, c.req.param("number"), body);
+    return c.json(out.body, out.status as 200);
   });
 
   return app;

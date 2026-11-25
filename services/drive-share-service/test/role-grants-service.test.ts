@@ -131,8 +131,8 @@ describe("revoke: removes only our permissions", () => {
     const shared = await spy.client.createPermission(FILE, { type: "user", role: "reader", emailAddress: "shared@example.com" });
     const gX = await store.upsertGrant({ id: "gX", orgId: "org_devhub", fileId: FILE, roleId: "role_x", driveRole: "reader", grantedBy: "u", grantedAt: "t", updatedAt: "t" });
     const gY = await store.upsertGrant({ id: "gY", orgId: "org_devhub", fileId: FILE, roleId: "role_y", driveRole: "reader", grantedBy: "u", grantedAt: "t", updatedAt: "t" });
-    await store.replaceMembers(gX.id, [{ grantId: gX.id, email: "shared@example.com", permissionId: shared.id, createdByUs: 1 }]);
-    await store.replaceMembers(gY.id, [{ grantId: gY.id, email: "shared@example.com", permissionId: shared.id, createdByUs: 1 }]);
+    await store.upsertMember({ grantId: gX.id, email: "shared@example.com", permissionId: shared.id, createdByUs: 1 });
+    await store.upsertMember({ grantId: gY.id, email: "shared@example.com", permissionId: shared.id, createdByUs: 1 });
 
     await service.revoke(FILE, "role_x");
 

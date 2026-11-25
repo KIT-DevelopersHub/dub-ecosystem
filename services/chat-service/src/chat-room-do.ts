@@ -98,6 +98,27 @@ export class ChatRoom extends DurableObject<ChatRoomEnv> {
     return delivered;
   }
 
+  /**
+   * Close every socket whose user is not in `memberIds` (RPC). Called after the channel
+   * turns private: the ticket was only checked at connect, so a non-member reading the
+   * channel while it was public must be cut off. Returns the number closed.
+   */
+  async evictNonMembers(memberIds: string[]): Promise<number> {
+    const keep = new Set(memberIds);
+    let closed = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      const meta = ws.deserializeAttachment() as SocketMeta | null;
+      if (meta && keep.has(meta.userId)) continue;
+      try {
+        ws.close(4403, "channel_private");
+        closed++;
+      } catch {
+        // already closing
+      }
+    }
+    return closed;
+  }
+
   /** Current connection count (presence primitive). */
   async presence(): Promise<number> {
     return this.ctx.getWebSockets().length;

@@ -377,3 +377,51 @@ describe("GET /internal/admin/users/:userId/password (admin view)", () => {
     expect(view.status).toBe(409);
   });
 });
+
+// ---- 参加届からのアカウント発行: 初期パスワード (members:onboard_mail) ----------------------
+describe("POST /internal/onboard/users/:userId/initial-password", () => {
+  const HR = "usr_hr0001";
+  const TARGET = "usr_new0001";
+  const TARGET_EMAIL = "new@developershub.jp";
+  const path = `/internal/onboard/users/${TARGET}/initial-password`;
+
+  function setup(): ReturnType<typeof makeHarness> {
+    const h = makeHarness();
+    h.identity.onboarders.add(HR);
+    h.identity.users.set(TARGET, fakeUser(TARGET_EMAIL, "New", { id: TARGET, status: "invited", createdAt: new Date().toISOString() }));
+    return h;
+  }
+
+  it("refuses an account that was not just created (409, nothing set)", async () => {
+    const h = setup();
+    h.identity.users.set(TARGET, fakeUser(TARGET_EMAIL, "New", { id: TARGET, createdAt: "2026-01-01T00:00:00Z" }));
+    const res = await buildApp(h.deps).request(path, jsonInit({}, { internal: true, actor: HR }));
+    expect(res.status).toBe(409);
+    expect(await h.deps.passwords.get(TARGET_EMAIL)).toBeNull();
+  });
+
+  it("generates a password once for an account that has none (mustChange)", async () => {
+    const h = setup();
+    const res = await buildApp(h.deps).request(path, jsonInit({}, { internal: true, actor: HR }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; password: string };
+    const stored = await h.deps.passwords.get(TARGET_EMAIL);
+    expect(await verifyPassword(body.password, stored!.hash)).toBe(true);
+    expect(stored!.mustChange).toBe(true);
+  });
+
+  it("never overwrites an existing password (409)", async () => {
+    const h = setup();
+    await setCredential(h.deps.passwords, { email: TARGET_EMAIL, password: "already-there" });
+    const res = await buildApp(h.deps).request(path, jsonInit({}, { internal: true, actor: HR }));
+    expect(res.status).toBe(409);
+    const stored = await h.deps.passwords.get(TARGET_EMAIL);
+    expect(await verifyPassword("already-there", stored!.hash)).toBe(true);
+  });
+
+  it("403 without members:onboard_mail, and unreachable without the internal marker", async () => {
+    const h = setup();
+    expect((await buildApp(h.deps).request(path, jsonInit({}, { internal: true, actor: "usr_random" }))).status).toBe(403);
+    expect((await buildApp(h.deps).request(path, jsonInit({}, { actor: HR }))).status).toBe(403);
+  });
+});

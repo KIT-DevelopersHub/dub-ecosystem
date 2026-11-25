@@ -843,3 +843,30 @@ describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory re
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
 });
+
+describe("GET /internal/goal-metrics", () => {
+  const seed = async (h: TestHarness, id: string, over: Record<string, unknown>) =>
+    h.repo.insert({
+      id, title: id, eventId: "evt_1", description: null, status: "todo", priority: "medium", assigneeId: null,
+      dueAt: "2026-11-10T00:00:00.000Z", origin: "internal", createdBy: "usr_alice", now: "2026-11-01T00:00:00.000Z",
+      teamId: "team_a", ...over,
+    } as Parameters<TestHarness["repo"]["insert"]>[0]);
+
+  it("counts by JST month, skipping cancelled, teamless and parent rows", async () => {
+    const { h, app } = setup();
+    await seed(h, "t1", { status: "done" });
+    await seed(h, "t2", {});
+    await seed(h, "t3", { status: "cancelled" });
+    await seed(h, "t4", { teamId: null });
+    await seed(h, "t5", { dueAt: "2026-11-30T15:00:00.000Z" }); // 12/1 JST
+    const res = await app.request("/internal/goal-metrics?month=2026-11", serviceInit("GET"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ teams: [{ teamId: "team_a", dueTotal: 2, dueDone: 1 }] });
+  });
+
+  it("is not reachable by a user and rejects a bad month", async () => {
+    const { app } = setup();
+    expect((await app.request("/internal/goal-metrics?month=2026-11", userInit("GET"))).status).toBe(403);
+    expect((await app.request("/internal/goal-metrics?month=x", serviceInit("GET"))).status).toBe(400);
+  });
+});

@@ -19,6 +19,9 @@ export interface ListMailMessagesQuery extends CursorQuery {
   // excepted). The response then carries `total` (conversations in the view). Absent = the
   // legacy message-level list (no folder filtering), kept for older clients.
   folder?: MailFolderView;
+  // ADDITIVE (folder views): false skips the view's `total` COUNT(*) (response omits it). Clients
+  // that already hold GET /mail/counts (same per-view totals) use this on background re-syncs.
+  withTotal?: boolean;
 }
 
 /** Server-side mailbox views for GET /mail/messages?folder=. `all` = every view except
@@ -51,7 +54,7 @@ export type MailFolderCounts = Record<Exclude<MailFolderView, "all">, MailFolder
 // separately spec'd — documenting it is a noted follow-up). See
 // docs/api-contracts/_wire-contract-enforcement.md.
 export const MAIL_WIRE = {
-  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId"] },
+  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId", "withTotal"] },
 } as const;
 
 // Compile-time tie: every query key the descriptor lists must be a real key of the typed
@@ -106,6 +109,9 @@ export interface MailAttachment {
   // instead of the file silently vanishing. sizeBytes carries the DECLARED size when known
   // (0 when unknown, e.g. a truncated tail). Download routes reject a non-"stored" id.
   status?: "stored" | "dropped_too_large" | "dropped_truncated";
+  // ADDITIVE: Content-ID of an inbound part (no angle brackets), so an HTML body's
+  // <img src="cid:..."> resolves to this attachment.
+  contentId?: string;
 }
 export interface SendMailResponse {
   messageId: string;
@@ -214,6 +220,21 @@ export interface MailSentListItem {
   // (mail:read_all). Absent/true = the viewer sent it. Lets a client keep someone else's
   // From out of "my addresses" (自分 labelling, reply-all exclusion, reply addressing).
   mine?: boolean;
+  // ADDITIVE (Sent → conversation, Gmail parity): the conversation this send belongs to,
+  // present only when it holds other messages the viewer can see (a reply received, or a
+  // further send of ours). Absent = a lone send.
+  conversation?: MailSentConversation;
+}
+/** The conversation a sent row belongs to (Gmail's Sent list opens the whole thread). */
+export interface MailSentConversation {
+  /** Thread id: the key of GET /threads/:id and the received rows' `threadId`. */
+  id: string;
+  /** Messages the viewer can see in it: received (in their scope) + their own sends. */
+  messageCount: number;
+  /** Newest message time in the conversation. */
+  latestAt: ISODateTime;
+  /** Distinct senders of the received messages, oldest first (newest replier last). */
+  repliedBy: MailAddress[];
 }
 /** Sent-folder detail: the list row plus the full body. htmlBody optional (present
  *  only when the send carried an HTML part) and MUST be sanitized before rendering. */
@@ -311,6 +332,44 @@ export interface MailThreadFlagsPatch {
   noReply?: boolean;
 }
 
+// ---- read state (既読 / 未読, ADDITIVE) ----
+/** POST /mail/read-state: set the viewer's OWN read state of these received messages. A
+ *  message the viewer only sees through oversight or role sharing is left untouched. */
+export interface MailReadStateRequest {
+  ids: string[];
+  read: boolean;
+}
+export const MAIL_READ_STATE_LIMIT = 500;
+/** POST /mail/bulk: apply one action to every conversation of a view, the pages the client
+ *  has not loaded included. Read state changes the viewer's own copies only (as read-state);
+ *  archive / trash are the viewer's personal flags. */
+export type MailBulkAction = "read" | "unread" | "archive" | "trash";
+export const MAIL_BULK_ACTIONS: readonly MailBulkAction[] = ["read", "unread", "archive", "trash"];
+export interface MailBulkRequest {
+  folder: MailFolderView;
+  action: MailBulkAction;
+}
+
+// ---- drafts (下書き, 0025) ----
+// A compose in progress, personal to its owner. Addresses are the raw field text: a draft may
+// hold a half-typed recipient that would not pass the send validation yet.
+export type MailDraftMode = "new" | "reply" | "replyAll" | "forward";
+export interface MailDraftInput {
+  mode: MailDraftMode;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+}
+export interface MailDraft extends MailDraftInput {
+  id: string;
+  updatedAt: ISODateTime;
+  attachments: MailAttachment[];
+}
+export const MAIL_DRAFT_LIMIT = 200;
+
 // ---- sender block list (この送信者をブロック, 0021) ----
 // Personal (per mailbox owner) list of blocked sender addresses / whole domains. Blocking
 // never deletes mail: blocked messages stay stored and are only flagged `blocked` on read.
@@ -372,6 +431,23 @@ export interface MailForwardRegisterRequest {
 /** PATCH /mail/forward body: turn forwarding on/off without re-verifying. */
 export interface MailForwardPatch {
   enabled: boolean;
+}
+
+// ---- team mailing lists (チームのメーリングリスト, 0024) ----
+// A list address delivers to every Dub account linked to the team's 運営メンバー. Membership
+// is the team roster itself, so it is not part of this DTO.
+export interface MailTeamList {
+  id: string;
+  /** Lowercased full address, e.g. design@developershub.jp. */
+  address: string;
+  localPart: string;
+  teamId: string;
+  createdAt: ISODateTime;
+}
+/** POST /mail/admin/lists body. The address is always `${localPart}@` our own zone. */
+export interface MailTeamListCreateRequest {
+  localPart: string;
+  teamId: string;
 }
 /** Registrations (= verification mails) one account may trigger per UTC day. */
 export const MAIL_FORWARD_DAILY_REGISTER_LIMIT = 5;

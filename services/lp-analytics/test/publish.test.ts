@@ -60,9 +60,9 @@ describe("publish gate", () => {
     expect((await none.app.fetch(get("/lp/publish"))).status).toBe(403);
   });
 
-  it("GET /lp/internal/publish is s2s only (404 without x-dub-internal) and needs no user", async () => {
+  it("GET /lp/internal/publish is s2s only (403 without x-dub-internal) and needs no user", async () => {
     const { app } = await makeApp("memory");
-    expect((await app.fetch(get("/lp/internal/publish", {}))).status).toBe(404);
+    expect((await app.fetch(get("/lp/internal/publish", {}))).status).toBe(403);
     const res = await app.fetch(get("/lp/internal/publish", INTERNAL));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ versionId: lp.LP_DEFAULT_PUBLISHED_VERSION });
@@ -77,5 +77,16 @@ describe("publishable list matches the public LP bundle", () => {
     ) as { default: string; versions: { id: string }[] };
     expect([...lp.LP_PUBLISHABLE_VERSION_IDS].sort()).toEqual(manifest.versions.map((v) => v.id).sort());
     expect(manifest.default).toBe(lp.LP_DEFAULT_PUBLISHED_VERSION);
+  });
+});
+
+describe.each<RepoKind>(["memory", "d1"])("GET /lp/internal/goal-metrics (%s repo)", (kind) => {
+  it("answers the month's visitor count to a service, and refuses anyone else", async () => {
+    const { app } = await makeApp(kind, "view");
+    const res = await app.fetch(get("/lp/internal/goal-metrics?month=2026-11", INTERNAL));
+    expect(res.status).toBe(200);
+    expect(await body<{ visitors: number }>(res)).toEqual({ visitors: 0 });
+    expect((await app.fetch(get("/lp/internal/goal-metrics?month=2026-11"))).status).toBe(403);
+    expect((await app.fetch(get("/lp/internal/goal-metrics?month=x", INTERNAL))).status).toBe(400);
   });
 });

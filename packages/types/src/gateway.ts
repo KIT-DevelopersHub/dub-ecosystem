@@ -20,6 +20,18 @@ export interface MeResponse {
    * client from inventing its own rule.
    */
   appAccess?: Record<string, AppAccessLevel>;
+  /**
+   * Present only while an admin is viewing the app AS this user (代理表示). `user` /
+   * `permissions` above are then the SUBJECT's — exactly what the member sees — and this
+   * names the real admin so the shell can show the 「〇〇さんとして表示中」 banner. Additive.
+   */
+  impersonation?: MeImpersonation | null;
+}
+
+export interface MeImpersonation {
+  actor: UserSummary;
+  startedAt: EpochMs;
+  expiresAt: EpochMs;
 }
 
 // ---- self profile (アカウント設定 → 表示名/アバター) -------------------------------

@@ -2,6 +2,7 @@ import type { ComponentProps, ComponentType } from "react";
 import { About } from "@/components/About";
 import { Apply } from "@/components/Apply";
 import { Contact } from "@/components/Contact";
+import { News, Partners, Speakers, Sponsors } from "@/components/ContentSections";
 import { Crowdfunding } from "@/components/Crowdfunding";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
@@ -12,11 +13,15 @@ import type { LP_SECTION_REGISTRY, LpSectionId } from "./registry";
 /** セクションごとの props（同じセクションのバリアントは同じ props を受け取る）。 */
 export interface SectionProps {
   header: ComponentProps<typeof Header>;
+  partners: ComponentProps<typeof Partners>;
+  news: ComponentProps<typeof News>;
+  speakers: ComponentProps<typeof Speakers>;
   join: ComponentProps<typeof Apply>;
   program: ComponentProps<typeof Program>;
   about: ComponentProps<typeof About>;
   crowdfunding: ComponentProps<typeof Crowdfunding>;
   vision: ComponentProps<typeof Vision>;
+  sponsors: ComponentProps<typeof Sponsors>;
   contact: ComponentProps<typeof Contact>;
   footer: ComponentProps<typeof Footer>;
 }
@@ -31,11 +36,15 @@ type VariantMap = { [S in LpSectionId]: { [V in VariantId<S>]: ComponentType<Sec
  */
 export const SECTION_VARIANTS = {
   header: { a: Header },
+  partners: { a: Partners },
+  news: { a: News },
+  speakers: { a: Speakers },
   join: { a: Apply },
   program: { a: Program },
   about: { a: About },
   crowdfunding: { a: Crowdfunding },
   vision: { a: Vision },
+  sponsors: { a: Sponsors },
   contact: { a: Contact },
   footer: { a: Footer },
 } satisfies VariantMap;

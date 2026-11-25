@@ -53,6 +53,7 @@ export const NOTIF_MEMBER_KEYS = [
   "app:notifications:view",
   "notif:inbox:self",
   "notif:prefs:self",
+  "notif:receive_all",
 ] as const;
 
 /** Everything the 通知 surface can demand — the admin role's set (migrations 0002/0006/0008):
@@ -62,6 +63,7 @@ export const NOTIF_ADMIN_KEYS = [
   "app:notifications:edit",
   "notif:admin",
   "notif:broadcast_publish",
+  "notif:receive_admin",
 ] as const;
 
 /**
@@ -131,24 +133,28 @@ export function ctx(requestId = "req_test", userId?: string): RequestContext {
 export function fakeIdentity(opts: {
   byRole?: Record<string, string[]>;
   emails?: Record<string, string>;
+  /** permission key -> holders (audience fan-out: notif:receive_all / notif:receive_admin). */
+  byPermission?: Record<string, string[]>;
+  /** permission key -> roles holding it (通知管理「誰に届くか」). */
+  rolesByPermission?: Record<string, { id: string; name: string; memberCount: number }[]>;
+  /** Shorthand: the notif:receive_all holders (broadcast / release-note recipients). */
   allUsers?: string[];
-}): IdentityPort & { roleCalls: string[]; emailCalls: string[]; allCalls: number } {
+}): IdentityPort & { roleCalls: string[]; emailCalls: string[]; permissionCalls: string[] } {
   const roleCalls: string[] = [];
   const emailCalls: string[] = [];
-  const state = { allCalls: 0 };
+  const permissionCalls: string[] = [];
   return {
     roleCalls,
     emailCalls,
-    get allCalls() {
-      return state.allCalls;
-    },
+    permissionCalls,
     async listUserIdsByRole(roleKey) {
       roleCalls.push(roleKey);
       return opts.byRole?.[roleKey] ?? [];
     },
-    async listAllUserIds() {
-      state.allCalls++;
-      return opts.allUsers ?? [];
+    async permissionHolders(key) {
+      permissionCalls.push(key);
+      const userIds = opts.byPermission?.[key] ?? (key === "notif:receive_all" ? opts.allUsers : undefined) ?? [];
+      return { roles: opts.rolesByPermission?.[key] ?? [], userIds };
     },
     async getEmail(userId) {
       emailCalls.push(userId);

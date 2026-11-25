@@ -2,7 +2,7 @@
 // PRODUCTION build served by `vite preview` in VITE_DEMO mode. Verifies:
 //   (a) the prod build is NOT a white screen (members-page renders)
 //   (b) admin: 学科/学年 show in 一覧 / 編集ダイアログ / 検索 / 組織図
-//   (c) 一般メンバー (usr_member): the 運営メンバー tile is greyed (admin限定) and a
+//   (c) 一般メンバー (usr_member): the 運営メンバー tile is hidden (admin限定) and a
 //       direct deep-link is release-gated (fe2-forbidden), NOT the working page.
 // Screenshots -> ~/DubVault/docs/member-prod-e2e/. Drives stable data-testids only.
 import { chromium } from "@playwright/test";
@@ -88,15 +88,13 @@ try {
   await page2.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page2.waitForTimeout(800);
 
-  // (c1) open the app launcher and assert the 運営メンバー tile is disabled (greyed).
+  // (c1) open the app launcher and assert the 運営メンバー tile is not listed.
   await page2.getByTestId("fe2-app-launcher-trigger").click();
-  const tile = page2.getByTestId("fe2-app-launcher-item-members");
-  await tile.waitFor({ timeout: 10000 });
-  const disabled = await tile.getAttribute("aria-disabled");
-  const isDisabledProp = await tile.isDisabled().catch(() => false);
-  if (disabled !== "true" && !isDisabledProp) fail(`(c) 運営メンバー tile not greyed for member (aria-disabled=${disabled}, disabled=${isDisabledProp})`);
-  ok("(c1) 運営メンバー tile greyed/disabled for 一般メンバー");
-  await shot(page2, "05-member-launcher-greyed.png");
+  await page2.getByTestId("fe2-app-launcher-item-mail").waitFor({ timeout: 10000 });
+  const tileCount = await page2.getByTestId("fe2-app-launcher-item-members").count();
+  if (tileCount !== 0) fail(`(c) 運営メンバー tile still listed for member (count=${tileCount})`);
+  ok("(c1) 運営メンバー tile hidden for 一般メンバー");
+  await shot(page2, "05-member-launcher-hidden.png");
 
   // (c2) direct deep-link is release-gated -> fe2-forbidden, not the working page.
   await page2.goto(`${BASE}/members`, { waitUntil: "networkidle" });

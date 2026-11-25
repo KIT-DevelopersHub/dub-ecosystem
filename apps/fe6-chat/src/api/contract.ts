@@ -112,6 +112,14 @@ export interface UpdateChannelRequest {
   version: number; // optimistic lock
 }
 
+// PUT /channels/:id/visibility (app:chat:edit + chat:change_visibility). DMs -> 400
+// (dm_visibility_fixed); stale version -> 409; same value -> current channel unchanged.
+// Going private keeps existing members; non-members get 404 from then on.
+export interface UpdateChannelVisibilityRequest {
+  visibility: ChannelVisibility;
+  version: number; // optimistic lock
+}
+
 // GET /messages?channelId=&cursor=&limit=&threadRootId=&afterMessageId=
 // afterMessageId is the RT gap-fill hint (design §8-2 A). Server returns ULID
 // ascending when afterMessageId is set; descending page otherwise.

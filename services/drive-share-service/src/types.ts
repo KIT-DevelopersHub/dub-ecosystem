@@ -133,6 +133,44 @@ export interface RoleFileGrant {
   /** Members shared only via an invite (no Google account yet) — present on the
    *  apply/reapply response so the manager can warn that their access is pending. */
   invited?: InvitedMember[];
+  /** Present on an apply/reapply that ran out of its per-request budget: POST reapply with
+   *  `?cursor=` this value to continue. Absent = finished. */
+  nextCursor?: string;
+  /** Members still to process when `nextCursor` is present. */
+  remaining?: number;
+}
+
+/** How one sharing entry differs from what the file's role grants say.
+ *  unexpected = shared with someone no role grant covers (incl. link / domain / group);
+ *  excess_role / insufficient_role = a role member holds a stronger / weaker role than granted;
+ *  missing = a role member has no access at all. */
+export type ShareDriftKind = "unexpected" | "excess_role" | "insufficient_role" | "missing";
+
+export interface ShareDriftItem {
+  kind: ShareDriftKind;
+  /** The Drive permission, or null for `missing`. */
+  permissionId: string | null;
+  granteeType: GranteeType;
+  email: string | null;
+  displayName: string | null;
+  domain: string | null;
+  /** Role in Drive now (null for `missing`). */
+  actualRole: ShareRole | null;
+  /** Role the grants call for (null for `unexpected`). */
+  expectedRole: AssignableDriveRole | null;
+  /** Names of the roles that grant this member access (empty for `unexpected`). */
+  roleNames: string[];
+}
+
+/** GET /driveshare/files/:id/drift. grantCount=0 = no role grant: every direct share is `unexpected`. */
+export interface FileShareDrift {
+  fileId: string;
+  grantCount: number;
+  /** Distinct member emails the grants expand to. */
+  expectedCount: number;
+  /** Members whose access matches the grants. */
+  matchedCount: number;
+  items: ShareDriftItem[];
 }
 
 /** POST /driveshare/files/:id/role-grants body. */
@@ -168,6 +206,9 @@ export interface GoogleAccountEntry {
   /** The grant lacks the Meet settings scope, so new Meet links cannot be opened to anyone with
    *  the link — reconnect to grant it. */
   meetMissing: boolean;
+  /** The grant lacks meetings.space.readonly, so 人事 > 出席 cannot read who was in each Meet —
+   *  reconnect to grant it. */
+  attendanceMissing: boolean;
 }
 
 /** GET /driveshare/google-account (and the result of every change). No active entry =

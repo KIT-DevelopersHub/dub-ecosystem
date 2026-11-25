@@ -105,6 +105,11 @@ export function SegmentedControl<V extends string = string>({
     if (next) btnRefs.current.get(next.value)?.focus();
   };
 
+  // Roving tabindex needs one tab stop: the selected option, or (when nothing in this
+  // strip is selected, e.g. a sibling strip owns the selection) the first enabled one.
+  const hasSelected = options.some((o) => o.value === selected);
+  const tabStop = hasSelected ? selected : firstEnabled(options);
+
   return (
     <div className={styles.root} data-size={size}>
       {caption != null ? (
@@ -149,7 +154,7 @@ export function SegmentedControl<V extends string = string>({
               // Only reflect expanded when the segment declares a controlled panel.
               aria-expanded={opt.controls != null ? active : undefined}
               disabled={opt.disabled}
-              tabIndex={active ? 0 : -1}
+              tabIndex={opt.value === tabStop ? 0 : -1}
               onClick={() => !opt.disabled && select(opt.value)}
               onKeyDown={(e) => onKeyDown(e, idx)}
               data-testid={opt.testId}

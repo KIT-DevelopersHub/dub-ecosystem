@@ -80,6 +80,10 @@ export class MemIdentityRepo implements IdentityRepo {
   async createUser(row: UserRow): Promise<void> {
     this.users.set(row.id, { ...row });
   }
+  async deleteInvitedUser(userId: string): Promise<boolean> {
+    if (this.users.get(userId)?.status !== "invited") return false;
+    return this.users.delete(userId);
+  }
   async updateUser(
     userId: string,
     patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>,
@@ -89,6 +93,12 @@ export class MemIdentityRepo implements IdentityRepo {
     if (!u) return;
     this.users.set(userId, { ...u, ...patch, updatedAt });
   }
+  async activateIfInvited(userId: string, updatedAt: string): Promise<boolean> {
+    const u = this.users.get(userId);
+    if (!u || u.status !== "invited") return false;
+    this.users.set(userId, { ...u, status: "active", updatedAt });
+    return true;
+  }
   async listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]> {
     return [...this.users.values()].filter((u) => u.orgId === orgId && u.source === source).map((u) => ({ ...u }));
   }
@@ -96,6 +106,14 @@ export class MemIdentityRepo implements IdentityRepo {
   async getRole(roleId: string): Promise<RoleRow | null> {
     const r = this.roles.get(roleId);
     return r ? { ...r, permissions: [...r.permissions] } : null;
+  }
+  async getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]> {
+    const out: RoleRow[] = [];
+    for (const id of new Set(roleIds)) {
+      const r = this.roles.get(id);
+      if (r) out.push({ ...r, permissions: [...r.permissions] });
+    }
+    return out;
   }
   async getRoleByName(orgId: string, name: string): Promise<RoleRow | null> {
     for (const r of this.roles.values()) {

@@ -12,7 +12,6 @@ import type { IngestInput } from "./types";
 import {
   FEEDBACK_ADMIN_EMAIL,
   FEEDBACK_EXCERPT_LEN,
-  FEEDBACK_NOTIFY_ROLE_IDS,
   FEEDBACK_NOTIFY_TYPE,
   INQUIRY_KIND_LABELS,
 } from "./config";
@@ -22,9 +21,10 @@ function excerpt(message: string): string {
   return oneLine.length > FEEDBACK_EXCERPT_LEN ? `${oneLine.slice(0, FEEDBACK_EXCERPT_LEN)}…` : oneLine;
 }
 
-/** Admin-facing label: "フィードバック" for the original flow, else "問い合わせ（<種別>）". */
+/** Admin-facing label: "フィードバック" / "権限の申請" as-is, else "問い合わせ（<種別>）". */
 export function inquiryHeading(item: Pick<notification.FeedbackItem, "kind">): string {
-  return item.kind === "feedback" ? "フィードバック" : `問い合わせ（${INQUIRY_KIND_LABELS[item.kind] ?? item.kind}）`;
+  if (item.kind === "feedback" || item.kind === "permission_request") return INQUIRY_KIND_LABELS[item.kind];
+  return `問い合わせ（${INQUIRY_KIND_LABELS[item.kind] ?? item.kind}）`;
 }
 
 /** 種別 + (feedback only) カテゴリ lines shared by the email and in-app bodies. */
@@ -86,8 +86,8 @@ export async function notifyAdminOfFeedback(
 }
 
 /**
- * Build the in-app notification for a stored feedback item, fanned out to admin /
- * maintainer users. in_app (+ push added by ingest; Slack / chat / email are not targeted);
+ * Build the in-app notification for a stored feedback item, fanned out to every
+ * notif:receive_admin holder. in_app (+ push added by ingest; Slack / chat / email are not targeted);
  * the dedupKey is namespaced to the feedback id so retries never create duplicates.
  */
 export function buildFeedbackNotifyInput(item: notification.FeedbackItem, requestId: string): IngestInput {
@@ -101,7 +101,7 @@ export function buildFeedbackNotifyInput(item: notification.FeedbackItem, reques
   ].join("\n");
   return {
     type: FEEDBACK_NOTIFY_TYPE,
-    recipients: { roles: [...FEEDBACK_NOTIFY_ROLE_IDS] },
+    recipients: { audiences: ["admin"] }, // notif:receive_admin holders (ロール管理)
     title: `新しい${inquiryHeading(item)}: ${excerpt(item.message)}`,
     body,
     priority: "normal",

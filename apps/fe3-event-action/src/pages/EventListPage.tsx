@@ -3,7 +3,7 @@ import type { event } from "@dub/types";
 import { Button, Icon, LoadMore, SkeletonCard } from "@dub/ui";
 import { useCan } from "../contracts/fe2";
 import { useNavigation } from "../contracts/navigation";
-import { useEventsQuery } from "../hooks/useEventQueries";
+import { useEventsInfiniteQuery } from "../hooks/useEventQueries";
 import { EventCard } from "../components/EventCard";
 import { EventCreateModal } from "../components/EventCreateModal";
 import { eventRoutes } from "../lib/routes";
@@ -19,10 +19,10 @@ export function EventListPage() {
   const canWrite = useCan("event:write");
   const [createOpen, setCreateOpen] = useState(false);
 
-  const query: event.ListEventsQuery = { includeArchived: filter.includeArchived };
+  const query: Omit<event.ListEventsQuery, "cursor"> = { includeArchived: filter.includeArchived };
   if (filter.phase) query.phase = filter.phase;
-  const { data, isLoading } = useEventsQuery(query);
-  const items = data?.items ?? [];
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useEventsInfiniteQuery(query);
+  const items = data?.pages.flatMap((p) => p.items) ?? [];
 
   const updateFilter = (patch: Partial<typeof filter>) => {
     nav.setSearch(serializeEventListFilter({ ...filter, ...patch }));
@@ -84,11 +84,9 @@ export function EventListPage() {
 
       <div style={{ marginTop: 16 }}>
         <LoadMore
-          hasMore={Boolean(data?.nextCursor)}
-          loading={isLoading}
-          onLoadMore={() => {
-            /* cursor pagination wired via query when nextCursor present (LoadMore, not infinite scroll) */
-          }}
+          hasMore={hasNextPage}
+          loading={isFetchingNextPage}
+          onLoadMore={() => void fetchNextPage()}
           testId="fe3-eventlist-loadmore"
         />
       </div>

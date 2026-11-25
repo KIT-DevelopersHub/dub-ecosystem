@@ -145,6 +145,17 @@ describe("calendar meetings (カレンダー > ミーティング)", () => {
     expect(targets.items.filter((t) => t.isMine).map((t) => t.id)).toEqual(["all", "role_lead"]);
   });
 
+  it("serves each meeting's invitees with Google-style answers (a guest on the kickoff)", async () => {
+    const a = api();
+    type Res = { items: { userId: string | null; name: string; response: string }[]; responsesAvailable: boolean };
+    const all = await a.request<Res>({ method: "GET", path: "/api/v1/meetings/mtg_all/attendees", query: { date: "2026-11-09" } });
+    expect(all.responsesAvailable).toBe(true);
+    expect(all.items).toHaveLength(7);
+    expect(new Set(all.items.map((i) => i.response)).size).toBeGreaterThan(1);
+    const kickoff = await a.request<Res>({ method: "GET", path: "/api/v1/meetings/mtg_kickoff/attendees" });
+    expect(kickoff.items.find((i) => i.userId === null)?.name).toBe("協賛企業 ご担当者");
+  });
+
   it("create → patch → delete round-trips in the session, with a fake Meet link", async () => {
     const a = api();
     const created = await a.request<Meeting>({
@@ -181,7 +192,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 79-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 97-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -190,7 +201,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(79);
+    expect(catalog).toHaveLength(97);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -476,6 +487,67 @@ describe("chat channel delete + org-wide sections (demo store)", () => {
     }
   });
 
+  it("creates channels like chat-service: 3 択の鍵どおりに private / public / DM を通す", async () => {
+    const a = api();
+    const create = async (body: unknown) => {
+      try {
+        await a.request({ method: "POST", path: "/api/v1/chat/channels", body });
+        return 201;
+      } catch (e) {
+        return (e as { status: number }).status;
+      }
+    };
+    const pub = { type: "topic", visibility: "public", name: "pub" };
+    const priv = { type: "topic", visibility: "private", name: "priv" };
+    const dm = { type: "dm", visibility: "private", name: "DM", memberIds: ["usr_bob"] };
+
+    expect(await create(priv)).toBe(201);
+    const listed = await a.request<{ name: string; visibility: string }[]>({ method: "GET", path: "/api/v1/chat/channels" });
+    expect(listed.find((c) => c.name === "priv")?.visibility).toBe("private");
+
+    try {
+      globalThis.localStorage.setItem("dub_demo_account", "usr_chat_public");
+      expect(await create(pub)).toBe(201);
+      expect(await create(priv)).toBe(403);
+      expect(await create(dm)).toBe(201);
+
+      globalThis.localStorage.setItem("dub_demo_account", "usr_chat_none");
+      expect(await create(pub)).toBe(403);
+      expect(await create(priv)).toBe(403);
+      expect(await create(dm)).toBe(403);
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
+    }
+  });
+
+  it("switches public <-> private (versioned); 403 without chat:change_visibility, 400 for a DM", async () => {
+    const a = api();
+    expect((await a.auth.me()).permissions).toContain("chat:change_visibility");
+    interface Wire { visibility: string; version: number }
+    const put = (id: string, body: unknown) => a.request<Wire>({ method: "PUT", path: `/api/v1/chat/channels/${id}/visibility`, body });
+    const status = async (p: Promise<unknown>) => {
+      try {
+        await p;
+      } catch (e) {
+        return (e as ApiError).status;
+      }
+      return 200;
+    };
+    expect(await put("chn_dev", { visibility: "private", version: 1 })).toMatchObject({ visibility: "private", version: 2 });
+    const listed = await a.request<{ id: string; visibility: string }[]>({ method: "GET", path: "/api/v1/chat/channels" });
+    expect(listed.find((c) => c.id === "chn_dev")?.visibility).toBe("private");
+    expect(await put("chn_dev", { visibility: "private", version: 2 })).toMatchObject({ visibility: "private", version: 2 });
+    expect(await status(put("chn_dev", { visibility: "public", version: 1 }))).toBe(409);
+    expect(await status(put("chn_dm_bob", { visibility: "public", version: 1 }))).toBe(400);
+    globalThis.localStorage.setItem("dub_demo_account", "usr_bob");
+    try {
+      expect((await a.auth.me()).permissions).not.toContain("chat:change_visibility");
+      expect(await status(put("chn_dev", { visibility: "public", version: 2 }))).toBe(403);
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
+    }
+  });
+
   it("hard-deletes a topic channel (and its assignment) but refuses a DM", async () => {
     const a = api();
     expect((await listSections(a)).assignments.chn_admin).toBe("sec_demo_ops");
@@ -731,5 +803,84 @@ describe("demo Gmail auto-forward (0023)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("demo 代理表示 (admin impersonation twin)", () => {
+  it("start → /me is the member + names the admin → blocked send → stop restores the admin", async () => {
+    globalThis.sessionStorage.removeItem("dub_demo_impersonation");
+    const a = api();
+    try {
+      const started = await a.request<{ impersonation: { subjectId: string; actorId: string } }>({
+        method: "POST",
+        path: "/api/v1/admin/users/usr_carol/impersonation",
+        body: {},
+      });
+      expect(started.impersonation).toMatchObject({ subjectId: "usr_carol", actorId: "usr_demo" });
+      const me = await a.auth.me();
+      expect(me.user.id).toBe("usr_carol");
+      expect(me.permissions).not.toContain("identity:admin");
+      expect(me.impersonation?.actor.displayName).toBe("デモ 管理者");
+
+      const err = await a
+        .request({ method: "POST", path: "/api/v1/mail/outbox", body: {} })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).code).toBe("IMPERSONATION_ACTION_BLOCKED");
+
+      await a.auth.stopImpersonation();
+      const back = await a.auth.me();
+      expect(back.user.id).toBe("usr_demo");
+      expect(back.impersonation).toBeUndefined();
+    } finally {
+      globalThis.sessionStorage.removeItem("dub_demo_impersonation");
+    }
+  });
+
+  it("refuses an admin target with the shared reason", async () => {
+    const err = await api()
+      .request({ method: "POST", path: "/api/v1/admin/users/usr_demo/impersonation", body: {} })
+      .catch((e: unknown) => e);
+    expect((err as ApiError).status).toBe(403);
+    expect((err as ApiError).details).toEqual({ reason: "self" });
+  });
+});
+
+describe("参加届からのアカウント発行 (人事・members:onboard_mail)", () => {
+  const as = async <T,>(account: string, fn: () => Promise<T>): Promise<T> => {
+    globalThis.localStorage.setItem("dub_demo_account", account);
+    try {
+      return await fn();
+    } finally {
+      globalThis.localStorage.removeItem("dub_demo_account");
+    }
+  };
+  const onboard = (a: ReturnType<typeof api>, body: unknown) =>
+    a.request<{ address: string; identityUserId: string; member: { identityUserId: string | null }; accountMail: { sent: boolean } }>({
+      method: "POST",
+      path: "/api/v1/admin/participation/part_seed_2/onboard-account",
+      body,
+    });
+
+  it("人事は identity:admin なしで発行でき、ロールは一般メンバー固定・既にアカウントがあれば 409", async () => {
+    await as("usr_hr", async () => {
+      const a = api();
+      const me = await a.auth.me();
+      expect(me.permissions).not.toContain("identity:admin");
+      await a.request({ method: "POST", path: "/api/v1/members/participation/part_seed_2/resolve", body: { action: "create" } });
+      const res = await onboard(a, { localPart: "minoru.tanaka", sendAccountMail: true, roleIds: ["role_sys_admin"] });
+      expect(res.address).toBe("minoru.tanaka@developershub.jp");
+      expect(res.member.identityUserId).toBe(res.identityUserId);
+      expect(res.accountMail.sent).toBe(true);
+      const again = await onboard(a, { localPart: "minoru.tanaka2" }).catch((e: unknown) => e);
+      expect(ApiError.isApiError(again) && again.status).toBe(409);
+    });
+  });
+
+  it("新しい鍵が無ければ 403", async () => {
+    await as("usr_hr_before", async () => {
+      const err = await onboard(api(), { localPart: "x" }).catch((e: unknown) => e);
+      expect(ApiError.isApiError(err) && err.status).toBe(403);
+    });
   });
 });

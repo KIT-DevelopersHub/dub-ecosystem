@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (79 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (97 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -43,17 +43,26 @@ export const PERMISSION_CATALOG = [
   { key: "notif:inbox:self", name: "Read own inbox", description: "View and manage one's own notification inbox", domain: "notif", dangerous: false },
   { key: "notif:prefs:self", name: "Manage own notification preferences", description: "View and update one's own notification preferences", domain: "notif", dangerous: false },
   { key: "notif:broadcast_publish", name: "Publish member broadcasts", description: "Publish an admin notification to all members from the Notification management screen", domain: "notif", dangerous: false },
+  // Receive-audience keys: who an audience-addressed notification is delivered to. The
+  // notification service resolves "管理者向け" / "全体" recipients as the users whose roles hold
+  // the key (identity GET /internal/permission-holders), so ロール管理 decides who gets what.
+  { key: "notif:receive_admin", name: "Receive admin notifications", description: "Receive admin-audience notifications (deploys, inquiries/feedback, 参加届, ops alerts)", domain: "notif", dangerous: false },
+  { key: "notif:receive_all", name: "Receive org-wide notifications", description: "Receive notifications addressed to all members (announcements, release notes)", domain: "notif", dangerous: false },
   { key: "mail:send", name: "Send mail", description: "Send email", domain: "mail", dangerous: true },
   { key: "mail:read", name: "Read mail", description: "View messages/threads/rules", domain: "mail", dangerous: false },
   { key: "mail:read_all", name: "Read all mail", description: "View every user's mail (oversight/archive)", domain: "mail", dangerous: true },
   { key: "mail:read_role_shared", name: "Read role-shared mail", description: "View mail delivered to other holders of a role that carries this key", domain: "mail", dangerous: true },
   { key: "mail:admin", name: "Administer mail", description: "Manage mailbox/watch/rules", domain: "mail", dangerous: true },
-  { key: "chat:create", name: "Create channels", description: "Create chat channels", domain: "chat", dangerous: false },
+  // チャンネル作成は積み上げ式の 3 択 (作成できない / パブリックのみ / プライベートも)。ロール管理は
+  // トグルではなく 1 つの選択肢として出す (policy.chatCreateScopeOf)。create_private ⇒ create。
+  { key: "chat:create", name: "Create channels", description: "Create public chat channels and start DMs", domain: "chat", dangerous: false },
+  { key: "chat:create_private", name: "Create private channels", description: "Also create private chat channels (implies chat:create)", domain: "chat", dangerous: false },
   { key: "chat:moderate", name: "Moderate chat", description: "Manage channels and delete others' messages", domain: "chat", dangerous: true },
   { key: "chat:delete_channel", name: "Delete channels", description: "Permanently delete chat channels and all their messages", domain: "chat", dangerous: true },
   { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
   { key: "chat:emoji_import", name: "Import Slack custom emoji", description: "Import the Slack workspace's custom emoji (images) for use in chat reactions", domain: "chat", dangerous: true },
   { key: "chat:manage_sections", name: "Manage chat sections", description: "Create, rename, reorder and delete the org-wide chat sidebar sections and assign channels to them", domain: "chat", dangerous: false },
+  { key: "chat:change_visibility", name: "Change channel visibility", description: "Switch a chat channel between public and private", domain: "chat", dangerous: true },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
   { key: "infra:read", name: "Read infra", description: "View sites/deployments/dns/domains", domain: "infra", dangerous: false },
   { key: "infra:deploy", name: "Deploy", description: "Execute deployments", domain: "infra", dangerous: true },
@@ -111,9 +120,27 @@ export const PERMISSION_CATALOG = [
   { key: "hr:admin", name: "Hire (add to roster) / delete applicants", description: "Mark an applicant as hired (adds them to the roster) and delete applicant records", domain: "hr", dangerous: true },
   { key: "app:hr:view", name: "Open 人事 app", description: "Open and view the 人事 app", domain: "app", dangerous: false },
   { key: "app:hr:edit", name: "Edit in 人事 app", description: "Act inside the 人事 app (implies view)", domain: "app", dangerous: false },
+  { key: "sponsor:read", name: "Read sponsor business cards", description: "View business cards (photos and contact details) shared by the sponsor team", domain: "sponsor", dangerous: false },
+  { key: "sponsor:write", name: "Share sponsor business cards", description: "Scan / register business cards and edit their contact details and notes", domain: "sponsor", dangerous: false },
+  { key: "sponsor:admin", name: "Delete sponsor business cards", description: "Delete shared business cards (photo and contact details)", domain: "sponsor", dangerous: true },
+  { key: "app:sponsor:view", name: "Open スポンサー app", description: "Open and view the スポンサー app", domain: "app", dangerous: false },
+  { key: "app:sponsor:edit", name: "Edit in スポンサー app", description: "Act inside the スポンサー app (implies view)", domain: "app", dangerous: false },
+  // 運営メンバーアプリの「範囲」(組織図まで / メール名簿以外 / 全て)。ロール管理では 3 段の選択肢として
+  // 出す (policy.membersScopeOf)。鍵は積み上げ式で、mail ⇒ roster, edit ⇒ view (policy.normalizeAppAccessKeys)。
+  { key: "members:roster_view", name: "View 運営名簿", description: "Open the 運営名簿 tab and read members' personal details (contact, student number, notes)", domain: "members", dangerous: false },
+  { key: "members:roster_edit", name: "Edit 運営名簿", description: "Edit members' personal details and link login accounts (implies view)", domain: "members", dangerous: false },
+  { key: "members:mail_view", name: "View メール名簿", description: "Open the メール名簿 tab (implies 運営名簿 view)", domain: "members", dangerous: false },
+  { key: "members:mail_edit", name: "Edit メール名簿", description: "Required to change accounts in the メール名簿 tab, on top of ロール管理 edit + identity:admin (implies view)", domain: "members", dangerous: false },
+  { key: "members:onboard_mail", name: "Issue accounts from 参加届", description: "From the 参加届 list, issue an @developershub.jp address and a login account for a person with no account yet (the server fixes the role to member; team/position roles then follow from the 名簿 as for any link), link it, and send the login info to their Gmail. Cannot change existing accounts or grant other roles", domain: "members", dangerous: true },
+  { key: "goals:read", name: "Read team goals", description: "View every team's monthly goals, KPIs and progress", domain: "goals", dangerous: false },
+  { key: "app:goals:view", name: "Open 目標管理 app", description: "Open and view the 目標管理 app", domain: "app", dangerous: false },
+  { key: "app:goals:edit", name: "Edit in 目標管理 app", description: "Set and change team goals and KPIs (implies view)", domain: "app", dangerous: false },
+  // 代理表示 (admin impersonation). Own domain so ロール管理 shows it under 「その他」 as its own
+  // group (it is an org-wide capability, not part of the roster app's 詳細設定).
+  { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 79 keys (open `${string}:${string}` template retired).
+// Closed union of the 97 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";
@@ -214,6 +241,10 @@ export interface ListUsersQuery extends CursorQuery {
 export type ListOrgsQuery = CursorQuery;
 /** GET /identity/roles — cursor-only. */
 export type ListRolesQuery = CursorQuery;
+/** GET /internal/permission-holders — the catalog permission key to resolve holders for. */
+export interface PermissionHoldersQuery {
+  key: PermissionKey;
+}
 
 // ── Wire contract (query params) ─────────────────────────────────────────────
 // SINGLE source of truth for the query-parameter *names* identity-roster's public
@@ -222,7 +253,8 @@ export type ListRolesQuery = CursorQuery;
 // CI (see @dub/e2e-smoke wire-params.test.ts). `roleKey` is intentionally listed as an
 // accepted (deprecated) alias of `role` — the server reads both; canonical is `role`.
 // The internal `/internal/users` route (not in the public spec) reads a subset of these
-// same keys, so it needs no separate entry. See docs/api-contracts/_wire-contract-enforcement.md.
+// same keys, so it needs no separate entry. `/internal/permission-holders` reads its own key
+// (`key`), so it is listed. See docs/api-contracts/_wire-contract-enforcement.md.
 export const IDENTITY_WIRE = {
   listOrgs: { method: "GET", path: "/identity/orgs", query: ["cursor", "limit"] },
   listUsers: {
@@ -231,6 +263,7 @@ export const IDENTITY_WIRE = {
     query: ["cursor", "limit", "ids", "status", "role", "roleKey", "q"],
   },
   listRoles: { method: "GET", path: "/identity/roles", query: ["cursor", "limit"] },
+  permissionHolders: { method: "GET", path: "/internal/permission-holders", query: ["key"] },
 } as const;
 
 // Compile-time tie: each endpoint's query keys must be real keys of its query type.
@@ -238,7 +271,9 @@ type _IdentityWireKeysAreTyped =
   (typeof IDENTITY_WIRE.listOrgs.query)[number] extends keyof ListOrgsQuery
     ? (typeof IDENTITY_WIRE.listUsers.query)[number] extends keyof ListUsersQuery
       ? (typeof IDENTITY_WIRE.listRoles.query)[number] extends keyof ListRolesQuery
-        ? true
+        ? (typeof IDENTITY_WIRE.permissionHolders.query)[number] extends keyof PermissionHoldersQuery
+          ? true
+          : never
         : never
       : never
     : never;
@@ -291,4 +326,23 @@ export interface PutUserManagedRolesResponse {
   removed: RoleId[];
   /** 既に手動で付いているので自動では付けなかったロール (手動を優先)。 */
   manual: RoleId[];
+}
+
+/** POST /internal/users/:id/activate — 名簿 (member-service) が「在籍 (added) でこの
+ *  アカウントに紐付いた」と確定した人の招待中アカウントを有効化する (invited -> active)。
+ *  invited 以外 (active / disabled / rejected) には触れない (冪等・停止を上書きしない)。 */
+export interface ActivateInvitedUserRequest {
+  /** どの経路で有効化したか (監査用・例 "participation.link")。 */
+  trigger: string;
+  /** true なら書き込まず、有効化される予定かだけを返す。 */
+  dryRun?: boolean;
+}
+export interface ActivateInvitedUserResponse {
+  dryRun: boolean;
+  /** invited -> active に変えた (dryRun なら変える予定)。 */
+  activated: boolean;
+  /** 呼び出し前の状態。 */
+  previousStatus: UserStatus;
+  /** 呼び出し後の状態 (dryRun なら previousStatus のまま)。 */
+  status: UserStatus;
 }

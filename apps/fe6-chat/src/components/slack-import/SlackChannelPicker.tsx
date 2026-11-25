@@ -45,7 +45,7 @@ export function SlackChannelPicker({ channels, query, onQueryChange, selected, o
         <EmptyState
           icon="search"
           title={channels.length === 0 ? "取り込めるチャンネルがありません" : "一致するチャンネルがありません"}
-          description="非公開チャンネルは Slack で LMB を招待すると表示されます。"
+          description="Private チャンネルは Slack で LMB を招待すると表示されます。"
         />
       ) : (
         <div className={styles.channelList} role="group" aria-label="Slack チャンネル" data-testid="fe6-slack-import-channels">
@@ -68,7 +68,7 @@ export function SlackChannelPicker({ channels, query, onQueryChange, selected, o
                 <span className={styles.channelName}>{c.name}</span>
                 <span className={styles.channelMeta}>
                   {c.memberCount !== null && <span>{c.memberCount} 人</span>}
-                  <Badge tone={c.isPrivate ? "warning" : "neutral"}>{c.isPrivate ? "非公開" : "公開"}</Badge>
+                  <Badge tone={c.isPrivate ? "warning" : "neutral"}>{c.isPrivate ? "Private" : "Public"}</Badge>
                   {c.isArchived && <Badge tone="neutral">アーカイブ</Badge>}
                   {badge && <Badge tone={badge.tone}>{badge.label}</Badge>}
                 </span>

@@ -2,13 +2,14 @@
 // gateway surface against seed data. Throws ApiError-shaped errors so FE5's
 // error handling (rollback / 404-drop) can be exercised without FE2.
 
-import { common } from "@dub/types";
+import { common, notification } from "@dub/types";
 import type { ApiClient, ApiError } from "../contracts/fe2";
 import type {
   AdminNotificationItem,
   GetPreferencesResponse,
   InboxItem,
   ListAdminNotificationsResponse,
+  ListAudiencesResponse,
   ListInboxResponse,
   PreferenceEntry,
   PublishBroadcastResponse,
@@ -90,6 +91,27 @@ function seedAdminItems(): AdminNotificationItem[] {
     mk(2, "release", "🎉 ガントチャートをメンバー公開しました", "タスクの期間・進捗・依存をタイムラインで確認できます。"),
     mk(3, "feedback", "新しいフィードバック: 検索が遅い", "カテゴリ: idea\n送信ユーザー: usr_alice\n\n検索ページが重いです"),
   ];
+}
+
+// 「誰に届くか」 seed: the system roles as identity migration 0028 leaves them.
+export function seedAudiences(): ListAudiencesResponse {
+  const roles = {
+    "notif:receive_all": [
+      { id: "role_sys_admin", name: "admin", memberCount: 1 },
+      { id: "role_sys_maintainer", name: "maintainer", memberCount: 3 },
+      { id: "role_sys_member", name: "member", memberCount: 32 },
+    ],
+    "notif:receive_admin": [
+      { id: "role_sys_admin", name: "admin", memberCount: 1 },
+      { id: "role_sys_maintainer", name: "maintainer", memberCount: 3 },
+    ],
+  } as Record<string, { id: string; name: string; memberCount: number }[]>;
+  return {
+    items: notification.RECEIVE_AUDIENCES.map((def) => {
+      const r = roles[def.permission] ?? [];
+      return { ...def, roles: r, recipientCount: r.reduce((n, x) => n + x.memberCount, 0) };
+    }),
+  };
 }
 
 function seedItems(): InboxItem[] {
@@ -284,6 +306,9 @@ export function createMockApiClient(seed: MockSeed = {}): ApiClient & {
           defaults: DEFAULT_PREFERENCES,
           overrides: store.overrides,
         } satisfies GetPreferencesResponse as T;
+      }
+      if (path === `${BASE}/audiences`) {
+        return seedAudiences() as T;
       }
       if (path === `${BASE}/manage`) {
         return { items: [...store.adminItems], nextCursor: null } satisfies ListAdminNotificationsResponse as T;

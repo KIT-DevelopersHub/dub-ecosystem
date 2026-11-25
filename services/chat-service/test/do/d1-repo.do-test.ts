@@ -190,12 +190,12 @@ describe("d1-repo: channels", () => {
     const row = channel({ id: id.chan(1), createdBy: id.user(1), version: 1 });
     await repo.createChannel(row);
 
-    const next: ChannelRow = { ...row, name: "renamed", topic: "t", archivedAt: AT, version: 2, updatedAt: AT };
+    const next: ChannelRow = { ...row, name: "renamed", topic: "t", visibility: "private", archivedAt: AT, version: 2, updatedAt: AT };
     expect(await repo.updateChannel(next, 999)).toBe(false); // stale version -> no write
     expect((await repo.getChannel(row.id))?.name).toBe("general"); // unchanged
     expect(await repo.updateChannel(next, 1)).toBe(true); // correct version -> write
     const after = await repo.getChannel(row.id);
-    expect(after).toMatchObject({ name: "renamed", topic: "t", archivedAt: AT, version: 2 });
+    expect(after).toMatchObject({ name: "renamed", topic: "t", visibility: "private", archivedAt: AT, version: 2 });
     expect(await repo.updateChannel(next, 1)).toBe(false); // version already advanced
   });
 });

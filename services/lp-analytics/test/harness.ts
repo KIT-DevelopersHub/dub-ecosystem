@@ -11,25 +11,11 @@ import { createApp } from "../src/app";
 import { createD1LpRepo } from "../src/d1-repo";
 import { InMemoryLpRepo } from "../src/memory-repo";
 import type { SiteTrafficSource } from "../src/site-traffic";
-import type { AppDeps, Authz, LpRepo } from "../src/types";
+import type { PermissionGranter } from "@dub/policy-gate";
+import type { AppDeps, LpRepo, TicketRelease, TicketReleaseClient } from "../src/types";
 
-export function fakeAuthz(granted: Set<identity.PermissionKey>): Authz {
-  return {
-    requireAuth(): MiddlewareHandler {
-      return async (c, next) => {
-        if (!c.req.header("x-dub-user-id")) throw new DubError("AUTH_INVALID_TOKEN", "x-dub-user-id absent", { status: 401 });
-        await next();
-      };
-    },
-    // Decide with the REAL policy module so tests share production semantics.
-    requireAppAccess(app, level, extra): MiddlewareHandler {
-      return async (_c, next) => {
-        const decision = policy.decide(granted, { app, level, ...(extra?.permission ? { permission: extra.permission } : {}) });
-        if (!decision.allowed) throw new DubError(CommonErrorCodes.FORBIDDEN, policy.denyMessage(decision), { status: 403 });
-        await next();
-      };
-    },
-  };
+export function fakeAuthz(granted: Set<identity.PermissionKey>): PermissionGranter {
+  return async (_userId, _orgId, keys) => keys.filter((k) => granted.has(k));
 }
 
 export const grants = (level: policy.AppAccessLevel): Set<identity.PermissionKey> =>
@@ -42,6 +28,27 @@ export async function makeRepo(kind: RepoKind): Promise<LpRepo> {
   const { db } = memoryD1();
   await applyAll(db);
   return createD1LpRepo(createDbClient(db, { namespace: "lp" }));
+}
+
+/** Stands in for lp-tickets (the real side is covered by services/lp-tickets/test/release.test.ts). */
+export interface FakeTicketRelease extends TicketReleaseClient {
+  state: TicketRelease;
+  writes: { release: TicketRelease; updatedBy: string }[];
+}
+
+export function fakeTicketRelease(initial: Partial<TicketRelease> = {}): FakeTicketRelease {
+  const fake: FakeTicketRelease = {
+    state: { ticketsEnabled: false, ticketsCtaEnabled: false, ...initial },
+    writes: [],
+    async get() {
+      return { ...fake.state };
+    },
+    async set(release, updatedBy) {
+      fake.writes.push({ release, updatedBy });
+      fake.state = { ...release };
+    },
+  };
+  return fake;
 }
 
 export interface Clock {
@@ -61,6 +68,7 @@ export async function makeApp(
   // ULID-like monotonic ids so "newest first by id" holds like production.
   const id = (p: string) => `${p}_${String(seq++).padStart(8, "0")}`;
   const repo = await makeRepo(kind);
+  const ticketRelease = fakeTicketRelease();
   const deps: AppDeps = {
     repo,
     authz: fakeAuthz(new Set([...grants(level), ...extraGrants])),
@@ -71,15 +79,7 @@ export async function makeApp(
     newVisitId: () => id("lpv"),
     dailyVisitCap,
     siteTraffic,
-    newTicketTypeId: () => id("tkt"),
-    newOrderId: () => id("tko"),
-    newCouponId: () => id("tkc"),
-    dailyCheckoutCap: 300,
-    stripe: null,
-    stripeWebhookSecret: null,
-    armReconcile: null,
-    paypayEnabled: false,
-    ticketPreviewKey: null,
+    ticketRelease,
     newProposalId: () => id("lpp"),
     newSiteConfigHistoryId: () => id("lph"),
     dailyProposalCap: 200,
@@ -87,7 +87,7 @@ export async function makeApp(
   };
   const app = createApp(deps);
   const clock: Clock = { set: (iso) => (now = iso) };
-  return { app, repo, clock, deps };
+  return { app, repo, clock, deps, ticketRelease };
 }
 
 const USER = { "x-dub-user-id": "usr_admin", "x-dub-request-id": "req_test" };

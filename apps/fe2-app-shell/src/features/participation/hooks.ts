@@ -4,6 +4,8 @@
 // toasts and return the resolved outcome to the page for the サンクス view.
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
+import type { member } from "@dub/types";
+import { usePermissions } from "../../auth/AuthProvider.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useParticipationApi } from "./ParticipationProvider.tsx";
@@ -29,7 +31,6 @@ export const MEMBERS_OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "over
 export const ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding");
 export const PUBLIC_ONBOARDING_KEY: QueryKey = queryKeys.feature("participation", "onboarding", "public");
 export const CANDIDATES_KEY = (id: string): QueryKey => queryKeys.feature("participation", "candidates", id);
-export const ROLES_KEY: QueryKey = queryKeys.feature("participation", "roles");
 /** 名簿の「紐付けアカウント」列が引くアカウント一覧のキー (members/hooks.ts と同じ)。 */
 const IDENTITY_USERS_KEY: QueryKey = queryKeys.feature("members", "identity-users");
 
@@ -63,9 +64,13 @@ export function useParticipationCandidates(id: string | null) {
  *  (enabled)。自動候補に載らない相手（漢字違い等）も検索して link できるようにする。 */
 export function useParticipationRosterMembers(enabled: boolean) {
   const api = useParticipationApi();
+  const { can } = usePermissions();
+  // 運営メンバーの閲覧範囲が 組織図まで なら個人情報なしの一覧 (名前で探す)。キーを共有するので
+  // useMembersOverview と同じ分岐にしておく。
+  const canReadRoster = can("members:roster_view");
   return useQuery({
     queryKey: MEMBERS_OVERVIEW_KEY,
-    queryFn: () => api.overview(),
+    queryFn: () => (canReadRoster ? api.overview() : api.orgOverview()),
     enabled,
     staleTime: 30_000,
   });
@@ -132,83 +137,23 @@ export function useResolveParticipation() {
   });
 }
 
-/** メール発行ダイアログのロール候補。ダイアログを開いた時だけ取得する。 */
-export function useParticipationRoles(enabled: boolean) {
-  const api = useParticipationApi();
-  return useQuery({ queryKey: ROLES_KEY, queryFn: () => api.listRoles(), enabled, retry: false, staleTime: 60_000 });
-}
-
-/** 発行の途中経過。失敗後の再実行は済んだ段を飛ばす (発行済みアドレスを二重発行しない)。 */
-export interface MailIssueProgress {
-  address?: string;
-  identityUserId?: string;
-  linked?: boolean;
-}
-export type MailIssueStep = "mail" | "account" | "link";
-
-/** どの段で失敗したかと、そこまでに済んだ分を運ぶ。 */
-export class MailIssueError extends Error {
-  readonly step: MailIssueStep;
-  readonly progress: MailIssueProgress;
-  readonly reason: unknown;
-  constructor(step: MailIssueStep, progress: MailIssueProgress, reason: unknown) {
-    super(ApiError.isApiError(reason) ? toDisplayableError(reason).message : "処理に失敗しました");
-    this.step = step;
-    this.progress = progress;
-    this.reason = reason;
-  }
-}
-
-export interface MailIssueInput {
-  memberId: string;
-  memberVersion: number;
-  localPart: string;
-  displayName: string;
-  furigana?: string;
-  roleIds: string[];
-  progress: MailIssueProgress;
-}
-
-/** 参加届から追加したメンバーに、アドレス発行 → アカウント作成(ロール付与) → 名簿と紐付け
- *  を一続きで行う。後からユーザー名簿で別作業にすると、付けるロールを忘れるため。 */
-export function useIssueParticipationMail() {
+/** 参加届から追加したメンバーに、アドレス発行 → アカウント作成 (一般メンバー固定) → 名簿と
+ *  紐付け → (任意) 案内メール を 1 回で行う。途中で失敗したらサーバーが作った分を戻すので、
+ *  そのまま再試行できる。 */
+export function useOnboardParticipationAccount() {
   const api = useParticipationApi();
   const qc = useQueryClient();
   const toast = useToast();
-  return useMutation<MailIssueProgress, MailIssueError, MailIssueInput>({
-    mutationFn: async (input) => {
-      const progress: MailIssueProgress = { ...input.progress };
-      const step = async <T,>(name: MailIssueStep, fn: () => Promise<T>): Promise<T> => {
-        try {
-          return await fn();
-        } catch (err) {
-          throw new MailIssueError(name, { ...progress }, err);
-        }
-      };
-      if (!progress.address) {
-        progress.address = (await step("mail", () => api.issueMailAddress(input.localPart))).address;
-      }
-      if (!progress.identityUserId) {
-        const address = progress.address;
-        const user = await step("account", () =>
-          api.inviteAccount({
-            email: address,
-            displayName: input.displayName,
-            ...(input.furigana ? { furigana: input.furigana } : {}),
-            roleIds: input.roleIds,
-          }),
-        );
-        progress.identityUserId = user.id;
-      }
-      if (!progress.linked) {
-        const identityUserId = progress.identityUserId;
-        await step("link", () => api.linkAccount(input.memberId, { identityUserId, version: input.memberVersion }));
-        progress.linked = true;
-      }
-      return progress;
-    },
+  return useMutation<member.OnboardAccountResponse, unknown, { participationId: string } & member.OnboardAccountRequest>({
+    mutationFn: ({ participationId, ...input }) => api.onboardAccount(participationId, input),
     onSuccess: (res) => {
-      toast.show({ kind: "success", title: "メールアドレスを発行しました", description: res.address });
+      const mail = res.accountMail;
+      const description = !mail.requested
+        ? res.address
+        : mail.sent
+          ? `${res.address}（ログイン情報を ${mail.to} に送りました）`
+          : `${res.address}（ログイン情報のメールは送れませんでした。管理者に送り直しを依頼してください）`;
+      toast.show({ kind: mail.requested && !mail.sent ? "warning" : "success", title: "メールアドレスを発行しました", description });
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: MEMBERS_OVERVIEW_KEY });

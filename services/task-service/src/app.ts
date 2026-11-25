@@ -157,6 +157,13 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
   app.get("/health", (c) => c.json({ ok: true, service: "task-service" }));
 
+  // ---- GET /internal/goal-metrics (目標管理の実績: チーム別の件数) ----
+  app.get("/internal/goal-metrics", async (c) => {
+    const month = c.req.query("month");
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) throw errors.validationFailed([{ field: "month", reason: "invalid" }]);
+    return c.json({ teams: await deps.repo.teamMonthCounts(month) });
+  });
+
   // ---- POST /internal/events-async (free-tier consumer landing route) ----
   // Free-plan replacement for the dub-q-evt-task Queue consumer: event-service's own
   // @dub/freeq drain POSTs each due event.archived envelope here. Runs the SAME

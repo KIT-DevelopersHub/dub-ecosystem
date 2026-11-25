@@ -73,6 +73,8 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
   // Sections are one org-wide set: everyone sees them, only these keys may organize them
   // (same keys as POST/PATCH/DELETE /chat/sections + PUT /chat/channels/:id/section).
   const canManageSections = can("app:chat:edit") && can("chat:manage_sections");
+  const canCreate = can("app:chat:edit") && can("chat:create");
+  const canCreatePrivate = canCreate && can("chat:create_private");
   // DM peers' display names (a DM is labelled by "the other side").
   const [dmUsers, setDmUsers] = useState<Record<common.UserId, identity.UserSummary>>({});
   const [dmUsersFailed, setDmUsersFailed] = useState(false);
@@ -243,6 +245,10 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
     [api, reloadChannels, onSelect],
   );
 
+  const onChannelPatched = useCallback((channelId: common.ChannelId, patch: Partial<Channel>) => {
+    setChannels((list) => list.map((c) => (c.id === channelId ? { ...c, ...patch } : c)));
+  }, []);
+
   // Hard-deleted channel: drop it locally right away, move off it, then resync.
   const onChannelDeleted = useCallback(
     (deletedId: common.ChannelId) => {
@@ -281,11 +287,11 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
         channels={channels}
         unread={unread}
         activeChannelId={laterOpen ? null : active}
-        canCreate={can("chat:create")}
+        canCreate={canCreate}
         onSelect={onSelect}
         onCreate={() => setCreateOpen(true)}
         labelOf={labelOf}
-        onNewDm={can("chat:create") ? () => setNewDmOpen(true) : undefined}
+        onNewDm={canCreate ? () => setNewDmOpen(true) : undefined}
         onCloseMobile={isMobile ? () => setMobileNavOpen(false) : undefined}
         loading={!channelsLoaded || !sections.loaded}
         sections={sections.sections}
@@ -338,6 +344,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
           onThreadOpenChange={setThreadOpen}
           onSelectChannel={onSelect}
           onChannelsChanged={() => void reloadChannels()}
+          onChannelPatched={onChannelPatched}
           onChannelDeleted={onChannelDeleted}
           onOpenMobileNav={isMobile ? () => setMobileNavOpen(true) : undefined}
           forwardTargets={forwardTargets}
@@ -371,7 +378,7 @@ function ChatAppBody({ initialChannelId, eventId, initialDetailsTab, onImportEmo
         </section>
       )}
 
-      <CreateChannelModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={onCreateChannel} />
+      <CreateChannelModal open={createOpen} canCreatePrivate={canCreatePrivate} onClose={() => setCreateOpen(false)} onCreate={onCreateChannel} />
       <SlackImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}

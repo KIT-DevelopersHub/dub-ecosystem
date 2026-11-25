@@ -123,11 +123,22 @@ describe("APP_MANIFEST — canonical app ↔ RBAC coverage", () => {
     const claimed = new Set(policy.claimedDetailKeys());
     const other = new Set(policy.otherPermissions().map((e) => e.key));
     const graded = new Set(policy.appAccessCatalogKeys());
+    const hidden = new Set(policy.HIDDEN_PERMISSION_KEYS);
     for (const entry of identity.PERMISSION_CATALOG) {
-      const buckets = [claimed.has(entry.key), other.has(entry.key), graded.has(entry.key)].filter(Boolean).length;
-      expect(buckets, `'${entry.key}' must live in exactly one bucket (app 詳細 / その他 / 段階), got ${buckets}`).toBe(1);
+      const buckets = [claimed.has(entry.key), other.has(entry.key), graded.has(entry.key), hidden.has(entry.key)].filter(Boolean).length;
+      expect(buckets, `'${entry.key}' must live in exactly one bucket (app 詳細 / その他 / 段階 / 非表示), got ${buckets}`).toBe(1);
     }
-    expect(claimed.size + other.size + graded.size).toBe(identity.PERMISSION_CATALOG.length);
+    expect(claimed.size + other.size + graded.size + hidden.size).toBe(identity.PERMISSION_CATALOG.length);
+  });
+
+  it("hidden keys are real catalog keys, and the 通知 app bundles its self-service pair", () => {
+    for (const key of policy.HIDDEN_PERMISSION_KEYS) expect(policy.catalogEntry(key), key).toBeDefined();
+    const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:notifications:view"]));
+    expect(out.has("notif:inbox:self")).toBe(true);
+    expect(out.has("notif:prefs:self")).toBe(true);
+    // the receive toggles stay opt-in (never bundled)
+    expect(out.has("notif:receive_all")).toBe(false);
+    expect(out.has("notif:receive_admin")).toBe(false);
   });
 
   it("access-key helpers agree with the manifest", () => {
@@ -139,6 +150,11 @@ describe("APP_MANIFEST — canonical app ↔ RBAC coverage", () => {
 });
 
 describe("withRequiredAppDomainKeys — per-app grant carries its domain read key(s)", () => {
+  it("チャットを有効にしても chat:create は付け直さない (「作成できない」を保存できる)", () => {
+    const out = appRegistry.withRequiredAppDomainKeys(["app:chat:edit"]);
+    expect(out).toEqual(["app:chat:edit", "app:chat:view"]);
+  });
+
   it("granting app:members:edit bundles app:members:view + identity:read (edit ⇒ view)", () => {
     const out = new Set(appRegistry.withRequiredAppDomainKeys(["app:members:edit"]));
     expect(out.has("app:members:edit")).toBe(true);
@@ -172,5 +188,42 @@ describe("withRequiredAppDomainKeys — per-app grant carries its domain read ke
 
   it("a set with no per-app keys is returned unchanged (sorted)", () => {
     expect(appRegistry.withRequiredAppDomainKeys(["event:read", "event:write"])).toEqual(["event:read", "event:write"]);
+  });
+});
+
+describe("policy — 運営メンバーの範囲", () => {
+  it("鍵が無ければ 組織図まで (既定で個人情報を出さない)", () => {
+    expect(policy.membersScopeOf(["app:members:view"], "view")).toBe("org_chart");
+    expect(policy.membersScopeOf(["app:members:edit"], "edit")).toBe("org_chart");
+  });
+
+  it("鍵は積み上げ式で読み書きが往復する", () => {
+    for (const mode of ["view", "edit"] as const) {
+      for (const scope of policy.MEMBERS_SCOPES) {
+        expect(policy.membersScopeOf(policy.setMembersScope([], mode, scope), mode)).toBe(scope);
+      }
+    }
+  });
+
+  it("編集を広げると閲覧も広がり、閲覧を狭めると編集も狭まる", () => {
+    const all = policy.setMembersScope([], "edit", "all");
+    expect(policy.membersScopeOf(all, "view")).toBe("all");
+    const narrowed = policy.setMembersScope(all, "view", "roster");
+    expect(policy.membersScopeOf(narrowed, "edit")).toBe("roster");
+  });
+
+  it("閲覧だけ広げても編集は広がらず、他の鍵に触らない", () => {
+    const next = policy.setMembersScope(["identity:read"], "view", "all");
+    expect(policy.membersScopeOf(next, "edit")).toBe("org_chart");
+    expect(next).toContain("identity:read");
+  });
+
+  it("normalizeAppAccessKeys は mail_edit から下の鍵を 1 周で全部補う", () => {
+    expect(policy.normalizeAppAccessKeys(["members:mail_edit"])).toEqual([
+      "members:mail_edit",
+      "members:mail_view",
+      "members:roster_edit",
+      "members:roster_view",
+    ]);
   });
 });

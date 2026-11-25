@@ -118,3 +118,81 @@ describe("validateSiteConfig (strict)", () => {
     expect(r.issues.map((i) => i.reason)).toEqual(["unknown_section", "unknown_variant"]);
   });
 });
+
+describe("content sections (協力団体・お知らせ・登壇者・スポンサー)", () => {
+  const news: lp.LpNewsItem = { id: "n1", date: "2026-11-22", text: "チケット販売を開始しました。", mode: "link", url: "", body: "", highlight: true };
+  const on = (content: Partial<lp.LpContent>): lp.LpLayout => ({
+    schema: 1,
+    sections: { news: { variant: "a", visible: true, options: {} } },
+    content,
+  });
+
+  it("are hidden by default and sit in the LP order (hero → news → speakers → … → sponsors → partners → contact)", () => {
+    for (const id of lp.LP_CONTENT_SECTION_IDS) {
+      expect(lp.LP_SECTION_REGISTRY[id].defaultVisible).toBe(false);
+      expect(lp.resolveSection(lp.defaultLayout(), id).visible).toBe(false);
+    }
+    expect(lp.LP_SECTION_IDS.slice(0, 4)).toEqual(["header", "news", "speakers", "join"]);
+    expect(lp.LP_SECTION_IDS.slice(-4)).toEqual(["sponsors", "partners", "contact", "footer"]);
+  });
+
+  it("layoutAttributes: shown only when visible AND it has items (the default stays attribute-free)", () => {
+    expect(lp.layoutAttributes(lp.LP_SECTION_REGISTRY, lp.defaultLayout())).toEqual({});
+    expect(lp.layoutAttributes(lp.LP_SECTION_REGISTRY, on({}))).toEqual({});
+    expect(lp.layoutAttributes(lp.LP_SECTION_REGISTRY, on({ news: [news] }))).toEqual({ "data-lp-s-news": "a" });
+    const hidden = { ...on({ news: [news] }), sections: { news: { variant: "a", visible: false, options: {} } } };
+    expect(lp.layoutAttributes(lp.LP_SECTION_REGISTRY, hidden)).toEqual({});
+  });
+
+  it("validateLayout keeps valid items and reports bad ones by path", () => {
+    const ok = lp.validateLayout(on({ news: [news] }));
+    expect(ok.issues).toEqual([]);
+    expect(ok.layout.content).toEqual({ news: [news] });
+    // 省略した visible は既定（非表示）。
+    expect(lp.validateLayout({ schema: 1, sections: { speakers: {} } }).layout.sections.speakers?.visible).toBe(false);
+    const bad = lp.validateLayout(on({ news: [{ ...news, url: "javascript:x", text: "" }] }));
+    expect(bad.issues).toEqual([
+      { field: "layout.content.news[0].text", reason: "required" },
+      { field: "layout.content.news[0].url", reason: "invalid_url" },
+    ]);
+  });
+
+  it("normalizeLayout drops broken / duplicate items but keeps the rest; no content key → none added", () => {
+    const raw = on({ news: [news, { ...news }, { id: "bad id", date: "x" } as never, { ...news, id: "n2", text: "  2件目  " }] });
+    expect(lp.normalizeLayout(raw).content).toEqual({ news: [news, { ...news, id: "n2", text: "2件目" }] });
+    expect(lp.normalizeLayout({ schema: 1, sections: {} })).toEqual(lp.defaultLayout());
+  });
+
+  it("news: items saved before mode/body existed read as link mode (no migration)", () => {
+    const old = { id: "n1", date: "2026-11-22", text: "旧", url: "https://example.com", highlight: false };
+    expect(lp.validateContentItem("news", old)).toEqual({ item: { ...old, mode: "link", body: "" }, issues: [] });
+  });
+
+  it("news dialog mode: body required only in dialog mode; the unused field is not checked", () => {
+    const dialog = { ...news, mode: "dialog", body: "" };
+    expect(lp.validateContentItem("news", dialog).issues).toEqual([{ field: "item.body", reason: "required" }]);
+    expect(lp.validateContentItem("news", { ...dialog, body: "# 詳細" }).item).toMatchObject({ mode: "dialog", body: "# 詳細" });
+    // dialog のとき不正な url は捨てる（エラーにしない）。link のとき body は問わない。
+    expect(lp.validateContentItem("news", { ...dialog, body: "x", url: "javascript:x" })).toMatchObject({ item: { url: "" }, issues: [] });
+    expect(lp.validateContentItem("news", { ...news, body: "" }).issues).toEqual([]);
+    expect(lp.validateContentItem("news", { ...news, mode: "popup" }).issues).toEqual([{ field: "item.mode", reason: "invalid" }]);
+    expect(lp.validateContentItem("news", { ...dialog, body: "あ".repeat(lp.LP_NEWS_BODY_MAX + 1) }).issues).toEqual([
+      { field: "item.body", reason: "too_long" },
+    ]);
+  });
+
+  it("isContentFieldShown follows showWhen", () => {
+    const body = lp.LP_CONTENT_FIELDS.news.find((f) => f.key === "body")!;
+    expect(lp.isContentFieldShown(body, { mode: "dialog" })).toBe(true);
+    expect(lp.isContentFieldShown(body, { mode: "link" })).toBe(false);
+  });
+
+  it("isLpContentUrl: http(s) or an LP-relative /path only", () => {
+    for (const u of ["https://example.com/a.png", "http://example.com", "/sponsors/logo.png", "https://a.b:8443/x?y=1#z"]) {
+      expect(lp.isLpContentUrl(u)).toBe(true);
+    }
+    for (const u of ["javascript:alert(1)", "//evil.example/x", "data:image/png;base64,AA", "https://exa mple.com", "ftp://x", ""]) {
+      expect(lp.isLpContentUrl(u)).toBe(false);
+    }
+  });
+});

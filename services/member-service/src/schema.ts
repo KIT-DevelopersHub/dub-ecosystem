@@ -348,6 +348,255 @@ ALTER TABLE member_participations ADD COLUMN position TEXT;
 `.trim(),
 };
 
+// 0019: 人事アプリの面談申し込みフォーム (定義 org ごと 1 行 + 回答 → 応募者) の新規テーブル (additive)。
+// Mirrors 0019_hr_interview_form.sql (schema-lockstep).
+export const MEMBER_HR_INTERVIEW_FORM_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0019_hr_interview_form",
+  up: `
+CREATE TABLE member_hr_forms (
+  org_id          TEXT NOT NULL,
+  form_key        TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  description     TEXT,
+  questions_json  TEXT NOT NULL,
+  accepting       INTEGER NOT NULL DEFAULT 1,
+  version         INTEGER NOT NULL,
+  updated_by      TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (org_id, form_key)
+);
+CREATE TABLE member_hr_form_responses (
+  id              TEXT PRIMARY KEY,
+  org_id          TEXT NOT NULL,
+  form_key        TEXT NOT NULL,
+  applicant_id    TEXT NOT NULL REFERENCES member_hr_applicants(id),
+  answers_json    TEXT NOT NULL,
+  questions_json  TEXT NOT NULL,
+  via             TEXT NOT NULL,
+  submitted_by    TEXT NOT NULL,
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX idx_member_hr_form_responses_org ON member_hr_form_responses(org_id, form_key, created_at);
+CREATE INDEX idx_member_hr_form_responses_applicant ON member_hr_form_responses(applicant_id);
+`.trim(),
+};
+
+// 0020: スポンサーアプリ (名刺の共有) の新規テーブル (additive)。写真本体は R2、ここは形式だけ
+// (image_content_type NULL = 写真なし)。Mirrors 0020_sponsor_cards.sql (schema-lockstep).
+export const MEMBER_SPONSOR_CARDS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0020_sponsor_cards",
+  up: `
+CREATE TABLE member_sponsor_cards (
+  id                  TEXT PRIMARY KEY,
+  org_id              TEXT NOT NULL,
+  company_name        TEXT,
+  person_name         TEXT,
+  department          TEXT,
+  title               TEXT,
+  email               TEXT,
+  phone               TEXT,
+  note                TEXT,
+  image_content_type  TEXT,
+  version             INTEGER NOT NULL,
+  created_by          TEXT NOT NULL,
+  created_by_name     TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  archived_at         TEXT
+);
+CREATE INDEX idx_member_sponsor_cards_org ON member_sponsor_cards(org_id, updated_at) WHERE archived_at IS NULL;
+`.trim(),
+};
+
+// 0021: スポンサーアプリの営業進捗 (新規テーブル・additive)。Mirrors 0021_sponsor_leads.sql (schema-lockstep).
+export const MEMBER_SPONSOR_LEADS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0021_sponsor_leads",
+  up: `
+CREATE TABLE member_sponsor_leads (
+  id                TEXT PRIMARY KEY,
+  org_id            TEXT NOT NULL,
+  company_name      TEXT NOT NULL,
+  industry          TEXT,
+  owner             TEXT,
+  contact_name      TEXT,
+  contact_role      TEXT,
+  contact_email     TEXT,
+  source            TEXT,
+  contact_type      TEXT,
+  evidence          TEXT,
+  priority          TEXT,
+  plan              TEXT,
+  status            TEXT NOT NULL,
+  first_contact_on  TEXT,
+  last_contact_on   TEXT,
+  proposed_on       TEXT,
+  agreed_on         TEXT,
+  next_action       TEXT,
+  next_action_on    TEXT,
+  expected_amount   INTEGER,
+  confidence        TEXT,
+  budget_period     TEXT,
+  decision_period   TEXT,
+  note              TEXT,
+  version           INTEGER NOT NULL,
+  created_by        TEXT NOT NULL,
+  created_by_name   TEXT,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  archived_at       TEXT
+);
+CREATE INDEX idx_member_sponsor_leads_org ON member_sponsor_leads(org_id, updated_at) WHERE archived_at IS NULL;
+`.trim(),
+};
+
+// 0022: スポンサーアプリの月間目標 (新規テーブル・additive)。Mirrors 0022_sponsor_goals.sql (schema-lockstep).
+export const MEMBER_SPONSOR_GOALS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0022_sponsor_goals",
+  up: `
+CREATE TABLE member_sponsor_goals (
+  org_id            TEXT NOT NULL,
+  month             TEXT NOT NULL,
+  contacted_target  INTEGER,
+  proposed_target   INTEGER,
+  agreed_target     INTEGER,
+  amount_target     INTEGER,
+  version           INTEGER NOT NULL,
+  updated_by        TEXT NOT NULL,
+  updated_by_name   TEXT,
+  updated_at        TEXT NOT NULL,
+  PRIMARY KEY (org_id, month)
+);
+`.trim(),
+};
+
+export const MEMBER_GOALS_MIGRATION: Migration = {
+  id: "0023_goals",
+  namespace: "member",
+  up: `
+CREATE TABLE member_goals (
+  org_id           TEXT NOT NULL,
+  team_id          TEXT NOT NULL,
+  month            TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  kpis_json        TEXT NOT NULL,
+  version          INTEGER NOT NULL,
+  updated_by       TEXT NOT NULL,
+  updated_by_name  TEXT,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (org_id, team_id, month)
+);
+CREATE INDEX idx_member_goals_org_month ON member_goals(org_id, month);
+`.trim(),
+};
+
+// 0024: スポンサーのメール連携 (メールからの自動更新の履歴。新規テーブルのみ・additive)。Mirrors 0024_sponsor_mail_sync.sql (schema-lockstep).
+export const MEMBER_SPONSOR_MAIL_SYNC_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0024_sponsor_mail_sync",
+  up: `
+CREATE TABLE member_sponsor_lead_activity (
+  id                TEXT PRIMARY KEY,
+  org_id            TEXT NOT NULL,
+  lead_id           TEXT NOT NULL,
+  source            TEXT NOT NULL,
+  direction         TEXT NOT NULL,
+  mail_at           TEXT NOT NULL,
+  counterpart       TEXT NOT NULL,
+  matched_by        TEXT NOT NULL,
+  mailbox           TEXT,
+  changes_json      TEXT NOT NULL,
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX idx_member_sponsor_lead_activity_lead ON member_sponsor_lead_activity(lead_id, created_at);
+`.trim(),
+};
+
+// 0025: 人事アプリの面談の日程調整 (面談枠・招待・設定) の新規テーブル (additive)。
+// Mirrors 0025_hr_interviews.sql (schema-lockstep).
+export const MEMBER_HR_INTERVIEWS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0025_hr_interviews",
+  up: `
+CREATE TABLE member_hr_interview_slots (
+  id                TEXT PRIMARY KEY,
+  org_id            TEXT NOT NULL,
+  start_at          TEXT NOT NULL,
+  end_at            TEXT NOT NULL,
+  interviewer_id    TEXT NOT NULL,
+  interviewer_name  TEXT NOT NULL,
+  applicant_id      TEXT REFERENCES member_hr_applicants(id),
+  booked_at         TEXT,
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX idx_member_hr_interview_slots_org ON member_hr_interview_slots(org_id, start_at);
+CREATE UNIQUE INDEX idx_member_hr_interview_slots_owner_time ON member_hr_interview_slots(org_id, interviewer_id, start_at);
+CREATE UNIQUE INDEX idx_member_hr_interview_slots_applicant ON member_hr_interview_slots(applicant_id) WHERE applicant_id IS NOT NULL;
+CREATE TABLE member_hr_interview_invites (
+  id            TEXT PRIMARY KEY,
+  org_id        TEXT NOT NULL,
+  applicant_id  TEXT NOT NULL UNIQUE REFERENCES member_hr_applicants(id),
+  token         TEXT NOT NULL UNIQUE,
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  sent_at       TEXT,
+  last_error    TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX idx_member_hr_interview_invites_org ON member_hr_interview_invites(org_id, created_at);
+CREATE TABLE member_hr_interview_settings (
+  org_id          TEXT PRIMARY KEY,
+  min_open_slots  INTEGER NOT NULL,
+  updated_by      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+`.trim(),
+};
+
+// 0026: 人事アプリの面談結果 (合否・合格のアカウント発行・メール) の新規テーブル (additive)。
+// Mirrors 0026_hr_interview_results.sql (schema-lockstep).
+export const MEMBER_HR_INTERVIEW_RESULTS_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0026_hr_interview_results",
+  up: `
+CREATE TABLE member_hr_interview_results (
+  id                       TEXT PRIMARY KEY,
+  org_id                   TEXT NOT NULL,
+  applicant_id             TEXT NOT NULL UNIQUE REFERENCES member_hr_applicants(id),
+  decision                 TEXT NOT NULL,
+  reason                   TEXT NOT NULL,
+  include_reason           INTEGER NOT NULL DEFAULT 0,
+  status                   TEXT NOT NULL,
+  issued_address           TEXT,
+  issued_identity_user_id  TEXT,
+  issued_member_id         TEXT,
+  mail_sent_at             TEXT,
+  lease_until              TEXT,
+  created_by               TEXT NOT NULL,
+  created_at               TEXT NOT NULL,
+  completed_at             TEXT
+);
+CREATE INDEX idx_member_hr_interview_results_org ON member_hr_interview_results(org_id, created_at);
+`.trim(),
+};
+
+// 0027: 予約済みなのに 面談日程調整中 の応募者を 面談確定 にそろえる (冪等なデータ更新)。
+// Mirrors 0027_hr_booked_interview_set.sql (schema-lockstep).
+export const MEMBER_HR_BOOKED_BACKFILL_MIGRATION: Migration = {
+  namespace: "member",
+  id: "0027_hr_booked_interview_set",
+  up: `
+UPDATE member_hr_applicants
+SET stage = 'interview_set', version = version + 1
+WHERE stage = 'scheduling'
+  AND archived_at IS NULL
+  AND id IN (SELECT applicant_id FROM member_hr_interview_slots WHERE applicant_id IS NOT NULL);
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -368,4 +617,13 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_STUDENT_NUMBER_MIGRATION,
   MEMBER_HR_MIGRATION,
   MEMBER_POSITION_MIGRATION,
+  MEMBER_HR_INTERVIEW_FORM_MIGRATION,
+  MEMBER_SPONSOR_CARDS_MIGRATION,
+  MEMBER_SPONSOR_LEADS_MIGRATION,
+  MEMBER_SPONSOR_GOALS_MIGRATION,
+  MEMBER_GOALS_MIGRATION,
+  MEMBER_SPONSOR_MAIL_SYNC_MIGRATION,
+  MEMBER_HR_INTERVIEWS_MIGRATION,
+  MEMBER_HR_INTERVIEW_RESULTS_MIGRATION,
+  MEMBER_HR_BOOKED_BACKFILL_MIGRATION,
 ];

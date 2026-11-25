@@ -5,12 +5,10 @@
 // Day keys are "YYYY-MM-DD" JST dates, which line up with the grid's day keys
 // (calendar-grid.ts builds cells from plain calendar dates).
 import type { common, meeting, task } from "@dub/types";
+import { meeting as meetingRules } from "@dub/types";
 import { MEETING_ITEM_PREFIX } from "./calendar-model";
 
 const JST_OFFSET_MS = 9 * 3_600_000;
-const MS_PER_DAY = 86_400_000;
-/** Safety cap on occurrences generated for one meeting in one range. */
-const MAX_OCCURRENCES = 400;
 
 export const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
@@ -31,14 +29,6 @@ function pad(n: number): string {
 function keyToDay(key: string): Date {
   const [y, m, d] = key.split("-").map(Number) as [number, number, number];
   return new Date(Date.UTC(y, m - 1, d));
-}
-
-function dayToKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function addDaysKey(key: string, days: number): string {
-  return dayToKey(new Date(keyToDay(key).getTime() + days * MS_PER_DAY));
 }
 
 /** JST date / time / weekday of a UTC ISO instant (null when invalid). */
@@ -92,18 +82,6 @@ export function recurrenceLabel(recurrence: meeting.MeetingRecurrence, date: str
   }
 }
 
-/** The date of the n-th `weekday` of a month (n>=5 = the last one). month is 0-based. */
-function nthWeekdayOfMonth(year: number, month: number, weekday: number, n: number): string {
-  if (n >= 5) {
-    const last = new Date(Date.UTC(year, month + 1, 0));
-    const back = (last.getUTCDay() - weekday + 7) % 7;
-    return dayToKey(new Date(last.getTime() - back * MS_PER_DAY));
-  }
-  const first = new Date(Date.UTC(year, month, 1));
-  const fwd = (weekday - first.getUTCDay() + 7) % 7;
-  return dayToKey(new Date(first.getTime() + (fwd + (n - 1) * 7) * MS_PER_DAY));
-}
-
 export interface MeetingOccurrence {
   meeting: meeting.Meeting;
   /** JST day key the occurrence falls on. */
@@ -117,49 +95,12 @@ export interface MeetingOccurrence {
 /**
  * Every occurrence of `m` whose JST date is within [fromKey, toKey] (inclusive),
  * honouring `until` (inclusive JST date). Occurrences never precede the first one.
+ * The recurrence rule itself is the shared one (@dub/types meeting.occurrenceStarts).
  */
 export function expandOccurrences(m: meeting.Meeting, fromKey: string, toKey: string): MeetingOccurrence[] {
   const first = jstParts(m.startsAt);
   if (!first) return [];
-  const firstMs = Date.parse(m.startsAt);
-  const recurring = m.recurrence !== "none";
-  const lastKey = recurring && m.until && m.until < toKey ? m.until : toKey;
-  const out: MeetingOccurrence[] = [];
-
-  const push = (dateKey: string) => {
-    if (dateKey < fromKey || dateKey > lastKey || dateKey < first.date) return;
-    const offsetDays = Math.round((keyToDay(dateKey).getTime() - keyToDay(first.date).getTime()) / MS_PER_DAY);
-    out.push({ meeting: m, dateKey, startsAt: new Date(firstMs + offsetDays * MS_PER_DAY).toISOString(), time: first.time });
-  };
-
-  if (m.recurrence === "weekly" || m.recurrence === "biweekly") {
-    const step = m.recurrence === "weekly" ? 7 : 14;
-    const gap = Math.round((keyToDay(fromKey).getTime() - keyToDay(first.date).getTime()) / MS_PER_DAY);
-    let k = gap > 0 ? Math.ceil(gap / step) : 0;
-    for (let i = 0; i < MAX_OCCURRENCES; i++, k++) {
-      const key = addDaysKey(first.date, k * step);
-      if (key > lastKey) break;
-      push(key);
-    }
-  } else if (m.recurrence === "monthly_weekday") {
-    const n = weekdayOrdinal(first.date);
-    const from = keyToDay(fromKey < first.date ? first.date : fromKey);
-    let y = from.getUTCFullYear();
-    let mo = from.getUTCMonth();
-    for (let i = 0; i < MAX_OCCURRENCES; i++) {
-      const key = nthWeekdayOfMonth(y, mo, first.weekday, n);
-      if (key.slice(0, 7) > lastKey.slice(0, 7)) break;
-      push(key);
-      mo += 1;
-      if (mo > 11) {
-        mo = 0;
-        y += 1;
-      }
-    }
-  } else {
-    push(first.date);
-  }
-  return out;
+  return meetingRules.occurrenceStarts(m, fromKey, toKey).map((o) => ({ meeting: m, dateKey: o.date, startsAt: o.startsAt, time: first.time }));
 }
 
 /** Occurrences of many meetings grouped by JST day key, each day sorted by start time. */

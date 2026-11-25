@@ -23,6 +23,8 @@ interface AuthContextValue {
   /** Per-app 無効/閲覧/編集 for every registered app (fail-closed 無効 while /me loads). */
   appLevel(appId: string): policy.AppAccessLevel;
   onUnauthenticated: () => void;
+  /** The shell api-client, for shared chrome (e.g. 権限を申請する) that sends as the viewer. */
+  api: ApiClient;
 }
 
 const AuthCtx = createContext<AuthContextValue | null>(null);
@@ -76,8 +78,13 @@ export function AuthProvider({
   // Primitive dep (not query.data): a refetch returning an equal expiry must NOT tear down
   // and re-create the timer, and a new expiry must.
   const sessionExpiresAt = query.data?.sessionExpiresAt ?? null;
+  // 代理表示 (admin impersonation) has a hard deadline and NO refresh — a refresh would END
+  // it server-side. So no proactive rotation while impersonating; ImpersonationBanner owns
+  // the countdown and returns the admin to their own account at the deadline.
+  const impersonating = Boolean(query.data?.impersonation);
 
   useEffect(() => {
+    if (impersonating) return undefined;
     if (sessionExpiresAt === null || !Number.isFinite(sessionExpiresAt)) return undefined;
 
     let disposed = false;
@@ -119,7 +126,7 @@ export function AuthProvider({
       clearTimeout(timer);
       doc?.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [sessionExpiresAt, queryClient]);
+  }, [sessionExpiresAt, impersonating, queryClient]);
 
   const value = useMemo<AuthContextValue>(() => {
     const perms = state.status === "authenticated" ? new Set<string>(state.me.permissions) : null;
@@ -138,9 +145,10 @@ export function AuthProvider({
       can: (p: PermissionKey) => perms?.has(p) ?? false,
       appLevel: (appId: string) => levels?.[appId] ?? policy.AppAccessLevel.None,
       onUnauthenticated: onUnauthenticated ?? (() => {}),
+      api,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.status === "authenticated" ? state.me : null, onUnauthenticated]);
+  }, [state.status, state.status === "authenticated" ? state.me : null, onUnauthenticated, api]);
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
@@ -185,6 +193,20 @@ export function useAppCapability(appId: string): policy.AppCapability {
     canEdit,
     readOnly: canView && !canEdit,
   };
+}
+
+/** May this viewer use the app's write surface for `permission`? null outside <AuthProvider>
+ *  (isolated feature tests), so a screen can default instead of throwing. */
+export function useOptionalCanEdit(appId: string, permission: PermissionKey): boolean | null {
+  const ctx = useContext(AuthCtx);
+  if (!ctx) return null;
+  return ctx.appLevel(appId) === policy.AppAccessLevel.Edit && ctx.can(permission);
+}
+
+/** The viewer's display name + the shell api-client, for chrome that files a request as them. */
+export function useViewerApi(): { api: ApiClient; displayName: string | null } {
+  const { api, state } = useAuthCtx();
+  return { api, displayName: state.status === "authenticated" ? state.me.user.displayName : null };
 }
 
 /**

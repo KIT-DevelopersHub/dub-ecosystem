@@ -70,6 +70,19 @@ describe("HttpChatClient envelope unwrapping", () => {
   });
 });
 
+describe("HttpChatClient channel visibility", () => {
+  it("PUTs { visibility, version } to /channels/:id/visibility", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      calls.push({ method: init.method ?? "GET", url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      return new Response(JSON.stringify({ id: "ch_1", visibility: "private", version: 2 }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = new HttpChatClient({ fetchImpl });
+    expect(await client.updateChannelVisibility("ch_1", { visibility: "private", version: 1 })).toMatchObject({ visibility: "private" });
+    expect(calls).toEqual([{ method: "PUT", url: "/api/v1/chat/channels/ch_1/visibility", body: { visibility: "private", version: 1 } }]);
+  });
+});
+
 describe("HttpChatClient channel delete + sections", () => {
   it("hits the contract paths and handles 204 bodies", async () => {
     const calls: { method: string; url: string; body: unknown }[] = [];

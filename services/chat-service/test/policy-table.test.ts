@@ -63,9 +63,9 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 //   get chat:create only) and 0008 (per-app tier: admin/maintainer チャット = 編集,
 //   organizer/member チャット = 閲覧).
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  // + 0020 / 0021 / 0023 / 0024: chat:delete_channel, chat:slack_import, chat:emoji_import and
-  // chat:manage_sections are admin-only by default.
-  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections"],
+  // + 0020 / 0021 / 0023 / 0024 / 0027: chat:delete_channel, chat:slack_import, chat:emoji_import,
+  // chat:manage_sections and chat:change_visibility are admin-only by default.
+  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility"],
   maintainer: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate"],
   organizer: ["app:chat:view", "chat:create"],
   member: ["app:chat:view", "chat:create"],
@@ -129,6 +129,7 @@ const WRITES = [
 const CREATE = ["POST /chat/channels"]; // + chat:create
 const MODERATE = ["PATCH /chat/settings/deletion-policy"]; // + chat:moderate
 const DELETE_CHANNEL = ["DELETE /chat/channels/:id"]; // + chat:delete_channel
+const CHANGE_VISIBILITY = ["PUT /chat/channels/:id/visibility"]; // + chat:change_visibility
 // Slack channel import: 編集 + chat:slack_import (admin only by default).
 const SLACK_IMPORT = [
   "GET /chat/slack-import/channels",
@@ -152,7 +153,7 @@ const MANAGE_SECTIONS = [
 
 const READ_ONLY = [...PUBLIC_ROUTES, ...READS].sort();
 const EDITOR = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE].sort();
-const FULL = [...EDITOR, ...DELETE_CHANNEL, ...SLACK_IMPORT, ...EMOJI_IMPORT, ...MANAGE_SECTIONS].sort();
+const FULL = [...EDITOR, ...DELETE_CHANNEL, ...CHANGE_VISIBILITY, ...SLACK_IMPORT, ...EMOJI_IMPORT, ...MANAGE_SECTIONS].sort();
 
 describe("role x endpoint matrix (frozen)", () => {
   // Changing a rule changes one of these arrays — a visible diff in review.

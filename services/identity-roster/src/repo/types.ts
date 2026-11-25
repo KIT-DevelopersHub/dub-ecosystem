@@ -80,13 +80,21 @@ export interface IdentityRepo {
   getUsersByEmails(orgId: string, emails: string[]): Promise<UserRow[]>;
   listUsers(filter: ListUsersFilter): Promise<UserPage>;
   createUser(row: UserRow): Promise<void>;
+  /** Hard delete of a still-invited row (onboarding rollback; assignments removed first).
+   *  false = nothing deleted (gone, or no longer invited). */
+  deleteInvitedUser(userId: string): Promise<boolean>;
   updateUser(userId: string, patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>, updatedAt: string): Promise<void>;
+  /** invited -> active only while the row is still invited (compare-and-set). false = it was
+   *  not invited at write time, so a concurrent disable is never overwritten. */
+  activateIfInvited(userId: string, updatedAt: string): Promise<boolean>;
   /** All users in the org with a given provenance (used by the Email Routing sync to
    *  find rows it owns and logically deactivate the ones no longer present). */
   listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]>;
 
   // roles
   getRole(roleId: string): Promise<RoleRow | null>;
+  /** Roles (with permissions) for the given ids in one read; unknown ids are absent. */
+  getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]>;
   getRoleByName(orgId: string, name: string): Promise<RoleRow | null>;
   listRoles(orgId: string, limit: number, cursor?: string): Promise<{ items: RoleRow[]; nextCursor: string | null }>;
   createRole(row: RoleRow, mailVisibleRoleIds?: string[]): Promise<void>;

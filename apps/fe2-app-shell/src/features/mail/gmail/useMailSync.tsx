@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 import type { MailApi } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
-import { dedupeLoopback, type MailMsg } from "./mailModel.ts";
+import { dedupeLoopback, hasUnloadedReplies, type MailMsg } from "./mailModel.ts";
 import { PAGE_SIZE, pageSourceOf, searchViewOf, selectVisible, serverViewOf, useMailStore } from "./useMailStore.tsx";
 
 /** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
@@ -21,8 +21,10 @@ interface FlagState {
   purged: boolean;
   noReplyAt: string | null;
 }
-/** Background re-sync interval for new inbound mail. */
-export const MAIL_POLL_MS = 60_000;
+/** Background re-sync interval for new inbound mail (only while the tab is visible + focused). */
+export const MAIL_POLL_MS = 300_000;
+/** Returning to the tab / window re-syncs only if the last sync is at least this old. */
+export const MAIL_REFOCUS_MIN_MS = 60_000;
 /** Delay after a scheduled send's due time before re-syncing (lets the drain run). */
 export const SCHEDULED_DUE_GRACE_MS = 3_000;
 /** Delay before re-fetching a page that a local action left short (see the refill effect). */
@@ -58,15 +60,26 @@ export function useMailSync(): void {
   const flagBaseline = useRef<Map<string, FlagState>>(new Map());
   const flagsReady = useRef(false);
 
+  // Set by the poll / refocus just before REQUEST_SYNC. A background sync reads the view's
+  // total from counts() (same per-view aggregate) instead of a second COUNT(*) on the list.
+  const backgroundSync = useRef(false);
+  const lastSyncAt = useRef(0);
+  const inboxTotal = useRef<number | null | undefined>(null);
+  inboxTotal.current = state.pager.inbox.total;
+
   // Load inbox + sent on mount and on every requested sync (post-send). A failure leaves
   // the current threads in place (empty on first load) rather than blowing up the pane.
   useEffect(() => {
     let alive = true;
     flagsReady.current = false; // pause flag persistence while we (re)load
+    lastSyncAt.current = Date.now();
+    // counts() has no "all" view (label filter), so that list keeps its own total.
+    const totalFromCounts = backgroundSync.current && view !== "all";
+    backgroundSync.current = false;
     void (async () => {
       try {
-        const [inbox, sent, scheduled, flags] = await Promise.all([
-          api.listInbox({ limit: PAGE_SIZE, folder: view, ...(inboxCursor ? { cursor: inboxCursor } : {}) }),
+        const [inbox, sent, scheduled, flags, drafts, bgCounts] = await Promise.all([
+          api.listInbox({ limit: PAGE_SIZE, folder: view, ...(inboxCursor ? { cursor: inboxCursor } : {}), ...(totalFromCounts ? { withTotal: false } : {}) }),
           api.listSent({ limit: PAGE_SIZE, ...(sentCursor ? { cursor: sentCursor } : {}) }),
           // Scheduled (予約送信) is best-effort: an older gateway without the endpoint yields
           // an empty list rather than blanking inbox+sent.
@@ -74,18 +87,23 @@ export function useMailSync(): void {
           // Fetched WITH the page and applied in the same tick, so a Trash / Archive page is
           // never momentarily filed under the inbox (which would blank the view).
           api.listFlags().catch(() => []),
+          api.listDrafts().catch(() => null),
+          totalFromCounts ? api.counts().catch(() => null) : Promise.resolve(null),
         ]);
         if (!alive) return;
+        // Background: total from counts (keep the previous one if counts failed).
+        const total = totalFromCounts ? (bgCounts?.[view as Exclude<typeof view, "all">]?.total ?? inboxTotal.current ?? null) : (inbox.total ?? null);
         dispatch({
           type: "HYDRATE",
           threads: combineThreads(inbox.items, sent.items, me),
           pages: {
             // A page is N conversations (the gateway pages by conversation), not N messages.
-            inbox: { next: inbox.nextCursor, count: new Set(inbox.items.map((m) => m.threadId)).size, total: inbox.total ?? null },
+            inbox: { next: inbox.nextCursor, count: new Set(inbox.items.map((m) => m.threadId)).size, total },
             sent: { next: sent.nextCursor, count: sent.items.length },
           },
         });
         dispatch({ type: "HYDRATE_SCHEDULED", scheduled: scheduled.items });
+        if (drafts) dispatch({ type: "HYDRATE_DRAFTS", drafts });
         loaded.current.clear(); // force the open thread to re-fetch its full body (+ any new reply)
         // Restore persisted flags on top of the freshly hydrated threads, then arm the
         // persist effect with the server's flag-state as the baseline (so applying them is
@@ -93,10 +111,12 @@ export function useMailSync(): void {
         dispatch({ type: "APPLY_FLAGS", flags });
         // Sidebar badges (exact, whole mailbox). Best-effort: without them the sidebar
         // falls back to the loaded threads.
-        void api
-          .counts()
-          .then((counts) => alive && dispatch({ type: "HYDRATE_COUNTS", counts }))
-          .catch(() => undefined);
+        if (bgCounts) dispatch({ type: "HYDRATE_COUNTS", counts: bgCounts });
+        else if (!totalFromCounts)
+          void api
+            .counts()
+            .then((counts) => alive && dispatch({ type: "HYDRATE_COUNTS", counts }))
+            .catch(() => undefined);
         const base = new Map<string, FlagState>();
         for (const f of flags)
           base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed, purged: f.purged, noReplyAt: f.noReplyAt ?? null });
@@ -173,20 +193,41 @@ export function useMailSync(): void {
   }, [api, dispatch, me, search.query, search.status]);
 
   // Pick up newly arrived mail without a full reload: re-sync on an interval while the tab
-  // is visible and whenever it regains visibility. HYDRATE drops selections/undo, so a
-  // background sync is skipped while either is active.
+  // is visible AND the window has focus, and when it comes back (visible / focused) if the
+  // last sync is at least MAIL_REFOCUS_MIN_MS old. Each sync reads D1 across the whole
+  // mailbox, so an idle background tab must not poll. HYDRATE drops selections/undo, so a
+  // background sync is skipped while either is active. 更新 and post-send syncs are unaffected.
   const busy = useRef(false);
   busy.current = state.checked.size > 0 || state.undo !== null;
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const sync = () => {
-      if (document.visibilityState === "visible" && !busy.current) dispatch({ type: "REQUEST_SYNC" });
+    // Focus is tracked from window blur/focus (document.hasFocus() is unreliable before the
+    // first interaction), so a window that never reported a blur counts as focused.
+    let focused = true;
+    const sync = (minAgeMs: number) => {
+      if (document.visibilityState !== "visible" || !focused || busy.current) return;
+      if (Date.now() - lastSyncAt.current < minAgeMs) return;
+      backgroundSync.current = true;
+      dispatch({ type: "REQUEST_SYNC" });
     };
-    const timer = setInterval(sync, MAIL_POLL_MS);
-    document.addEventListener("visibilitychange", sync);
+    const tick = () => sync(0);
+    const back = () => sync(MAIL_REFOCUS_MIN_MS);
+    const onFocus = () => {
+      focused = true;
+      back();
+    };
+    const onBlur = () => {
+      focused = false;
+    };
+    const timer = setInterval(tick, MAIL_POLL_MS);
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
     return () => {
       clearInterval(timer);
-      document.removeEventListener("visibilitychange", sync);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
     };
   }, [dispatch]);
 
@@ -260,6 +301,9 @@ export function useMailSync(): void {
 
   // Lazily fill the full body when a thread is opened (list APIs carry only a snippet).
   useEffect(() => {
+    // Back on the list: forget what was loaded, so reopening marks it read again (未読にする
+    // on the server must not outlive the next open).
+    if (!openThreadId) loaded.current.clear();
     if (!openThreadId || loaded.current.has(openThreadId)) return;
     const thread = threads.find((t) => t.id === openThreadId);
     if (!thread) return;
@@ -269,8 +313,11 @@ export function useMailSync(): void {
     let done = false;
     void (async () => {
       try {
-        if (thread.folder === "sent") {
-          const detail = await api.getSent(thread.id);
+        // Sent-only, wherever it is filed now: trashing or archiving one changes `folder`, but
+        // it is still a send-log row that GET /threads/:id has never heard of — unless the
+        // Sent summary says replies exist (送信済み → open the whole conversation, Gmail).
+        if (thread.messages.every((m) => m.outbound) && !hasUnloadedReplies(thread)) {
+          const detail = await api.getSent(thread.messages[0]?.id ?? thread.id);
           if (alive) {
             done = true;
             dispatch({ type: "SET_THREAD_MESSAGES", threadId: thread.id, messages: [sentDetailToMessage(detail, me)] });
@@ -282,7 +329,16 @@ export function useMailSync(): void {
           // maillog id would 404). Best-effort — a failure never blocks opening the thread.
           const known = thread.messages;
           for (const m of known) if (!m.outbound && m.mine !== false) void api.markRead(m.id).catch(() => undefined);
-          const full = await api.getThread(thread.id);
+          // A conversation reached from 送信済み may have no received message loaded (and
+          // none visible any more): a 404 then just means "our sends only".
+          const sentOnly = known.every((m) => m.outbound);
+          const full = await api.getThread(thread.id).catch((e: unknown) => {
+            if (sentOnly) return { id: thread.id, messages: [] };
+            throw e;
+          });
+          // Replies fetched here for the first time were never marked read: do it now.
+          for (const m of full.messages)
+            if (!m.read && m.mine !== false && !known.some((k) => k.id === m.id)) void api.markRead(m.id).catch(() => undefined);
           // getThread returns RECEIVED messages only. Preserve our own replies (folded Sent
           // rows, outbound=true) that it omits, so a sent reply stays visible in the thread
           // instead of vanishing on refresh. Dedup by id, order by date. Force read=true so a

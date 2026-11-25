@@ -2,7 +2,7 @@
 // `/api/v1/*` boundary (design §2-4). This unit implements against the contract
 // types only; the concrete transport (auth cookie, base URL, error reconstruction)
 // is FE2's ResourceClient.
-import type { identity, common, auditLog, auth, member } from "@dub/types";
+import type { identity, common, auditLog, auth, mail, member } from "@dub/types";
 import type { ResourceClient } from "../shell/contract";
 import type {
   CreateRoleRequest,
@@ -79,6 +79,9 @@ export interface RosterApi {
   /** Admin: アカウント発行メール — login + password to the linked member's Gmail (cc the
    *  @developershub.jp address). Reuses the current password or issues one server-side. */
   sendAccountMail(userId: common.UserId): Promise<auth.AdminSendAccountMailResponse>;
+  /** Admin: 代理表示 — start viewing the app AS this member (identity:impersonate). The
+   *  server swaps the session cookie; the caller reloads the shell into the member view. */
+  startImpersonation(userId: common.UserId): Promise<auth.StartImpersonationResponse>;
   permissionCatalog(): Promise<identity.PermissionCatalogEntry[]>;
   auditLogs(filters: AuditFilters): Promise<auditLog.AuditLogPage>;
   /** Mail-gateway rate-limit status, via the gateway boundary (proxied to /internal/status). */
@@ -86,6 +89,9 @@ export interface RosterApi {
   // ---- Email Routing (@developershub.jp address management) ----
   listEmailAddresses(): Promise<common.Paginated<EmailRoutingAddress>>;
   createEmailAddress(req: CreateEmailAddressRequest): Promise<EmailRoutingAddress>;
+  listTeamLists(): Promise<{ items: mail.MailTeamList[] }>;
+  createTeamList(req: mail.MailTeamListCreateRequest): Promise<mail.MailTeamList>;
+  deleteTeamList(id: string): Promise<unknown>;
   deleteEmailAddress(id: string): Promise<void>;
 }
 
@@ -131,6 +137,8 @@ export function createRosterApi(client: ResourceClient): RosterApi {
       client.get<auth.AdminViewPasswordResponse>(`${ADMIN}/users/${userId}/password`),
     sendAccountMail: (userId) =>
       client.post<auth.AdminSendAccountMailResponse>(`${ADMIN}/users/${userId}/account-mail`, {}),
+    startImpersonation: (userId) =>
+      client.post<auth.StartImpersonationResponse>(`${ADMIN}/users/${userId}/impersonation`, {}),
     permissionCatalog: () =>
       client.get<identity.PermissionCatalogEntry[]>(`${IDENTITY}/permissions/catalog`),
     auditLogs: (filters) =>
@@ -142,6 +150,9 @@ export function createRosterApi(client: ResourceClient): RosterApi {
     // Cloudflare feature). Issuing here also sends a confirmation mail to the new address.
     listEmailAddresses: () => client.get<common.Paginated<EmailRoutingAddress>>(`${EMAIL_ROUTING}/issued-addresses`),
     createEmailAddress: (req) => client.post<EmailRoutingAddress>(`${EMAIL_ROUTING}/issued-addresses`, req),
+    listTeamLists: () => client.get<{ items: mail.MailTeamList[] }>(`${BASE}/mail/admin/lists`),
+    createTeamList: (req) => client.post<mail.MailTeamList>(`${BASE}/mail/admin/lists`, req),
+    deleteTeamList: (id) => client.delete(`${BASE}/mail/admin/lists/${encodeURIComponent(id)}`),
     deleteEmailAddress: (id) => client.delete(`${EMAIL_ROUTING}/issued-addresses/${id}`),
   };
 }

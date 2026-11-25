@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:bundle": "node scripts/build-bundle.mjs",
+    "test": "node --test worker/*.test.ts src/lib/*.test.ts",
     "test:worker": "node --test worker/*.test.ts src/lib/*.test.ts"
   },
   "dependencies": {
@@ -17,6 +18,7 @@
     "gsap": "^3.13.0",
     "lenis": "^1.1.14",
     "next": "^14.2.15",
+    "qrcode-generator": "2.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

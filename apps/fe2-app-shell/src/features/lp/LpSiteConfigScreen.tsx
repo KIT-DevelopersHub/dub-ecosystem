@@ -33,7 +33,7 @@ import {
   useMediaQuery,
 } from "@dub/ui";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import type { LpSiteConfig } from "./lpApi.tsx";
 import { useLpApi } from "./LpProvider.tsx";
 import { useLpTickets } from "./lpTicketsHooks.ts";
@@ -46,6 +46,7 @@ import {
   RELEASE_FLAGS,
   setRelease,
   setSection,
+  setSectionContent,
   versionName,
   type ConfigDiff,
   type LpConfigEnv,
@@ -53,6 +54,9 @@ import {
 import { useDraftAutosave, useLpSiteConfig, usePublishSiteConfig, useResetDraft } from "./lpSiteConfigHooks.ts";
 import { formatSwitchedAt, LP_PUBLIC_URL, lpViewUrl } from "./lpPublish.ts";
 import { LpSectionEditor } from "./LpSectionEditor.tsx";
+import { LpContentEditor } from "./LpContentEditor.tsx";
+import type { ContentItem } from "./lpContent.ts";
+import contentStyles from "./lpContent.module.css";
 import { LP_VERSIONS, type LpVersion } from "./lpVersions.ts";
 import { LpViewer } from "./LpViewer.tsx";
 import { LpTabs } from "./LpTabs.tsx";
@@ -110,6 +114,17 @@ export function LpSiteConfigScreen(): JSX.Element {
   const stagedDiff = useMemo(() => (state && staged ? diffSiteConfig(state.published, staged) : []), [state, staged]);
   const draftDiff = useMemo(() => (state ? diffSiteConfig(state.published, state.draft) : []), [state]);
   const canChange = live ? canPublish && !publish.isPending : canEdit;
+  // 権限が足りない人が押したら権限不足ダイアログ(申請付き)。本番は lp:publish、下書きは LP の編集。
+  const gate = usePermissionGate(
+    live && canEdit
+      ? { appId: "lp", locked: !canPublish, scope: "scope", reason: "本番への反映には lp:publish 権限が必要です。" }
+      : { appId: "lp", locked: !canEdit },
+  );
+  const requestButton = gate.locked ? (
+    <Button variant="ghost" size="sm" onClick={gate.open} testId="fe2-lp-config-request-permission">
+      権限を申請する
+    </Button>
+  ) : null;
 
   const switchEnv = (next: LpConfigEnv): void => {
     if (next !== env) void navigate({ to: "/lp", search: { env: next }, replace: true });
@@ -189,6 +204,13 @@ export function LpSiteConfigScreen(): JSX.Element {
       : IS_DEMO
         ? "デモ環境です。セクションの切り替えが LP に映るのは、LP の v3.6 がデプロイされてからです。"
         : null;
+  // 中身（項目）は属性では映せないので、保存が落ち着いたら読み直す（本番タブは反映済みの中身）。
+  const contentJson = state ? JSON.stringify(lp.resolveContent((live ? state.published : state.draft).layout)) : "";
+  const [settledContent, setSettledContent] = useState<string | null>(null);
+  useEffect(() => {
+    if (!autosave.saving && contentJson) setSettledContent(contentJson);
+  }, [autosave.saving, contentJson]);
+  const contentKey = settledContent ?? contentJson;
   // 「変更あり」の印: 下書きは本番との差、本番はためた変更。
   const changedSections = useMemo(
     () => new Set((live ? stagedDiff : draftDiff).map((d) => d.key.split(".")[0] ?? d.key)),
@@ -213,8 +235,8 @@ export function LpSiteConfigScreen(): JSX.Element {
         <Button
           variant="primary"
           size="sm"
-          disabled={!canPublish || stagedDiff.length === 0 || publish.isPending}
-          onClick={() => staged && setConfirm({ from: state.published, to: staged })}
+          disabled={stagedDiff.length === 0 || publish.isPending}
+          onClick={gate.guard(() => staged && setConfirm({ from: state.published, to: staged }))}
           testId="fe2-lp-config-publish"
         >
           本番に反映…
@@ -225,8 +247,8 @@ export function LpSiteConfigScreen(): JSX.Element {
         <Button
           variant="secondary"
           size="sm"
-          disabled={!canEdit || draftDiff.length === 0 || reset.isPending}
-          onClick={() => setResetting(true)}
+          disabled={draftDiff.length === 0 || reset.isPending}
+          onClick={gate.guard(() => setResetting(true))}
           testId="fe2-lp-config-reset"
         >
           本番の内容に戻す
@@ -275,6 +297,7 @@ export function LpSiteConfigScreen(): JSX.Element {
               本番の設定です。変更は「本番に反映」を押して確認するまで公開されません。
               {!canPublish ? " 変更には lp:publish 権限が必要です。" : ""}
             </span>
+            {requestButton}
           </p>
         ) : (
           <p className={styles.previewNotice} data-testid="fe2-lp-config-draft-notice">
@@ -282,7 +305,9 @@ export function LpSiteConfigScreen(): JSX.Element {
             <span>
               ここはプレビュー（下書き）です。変えるたびに自動で保存され、プレビューにだけ映ります。本番の LP
               を変えられるのは「本番」タブの「本番に反映…」だけです。
+              {!canEdit ? " 閲覧のみの権限のため変更できません。" : ""}
             </span>
+            {requestButton}
           </p>
         )}
         {live && stagedDiff.length > 0 ? (
@@ -301,6 +326,7 @@ export function LpSiteConfigScreen(): JSX.Element {
           <LpSectionEditor
             url={mini.url}
             refreshKey={mini.refreshKey}
+            contentKey={contentKey}
             attrs={miniAttrs}
             title={live ? "本番のプレビューとセクションの設定" : "下書きのプレビューとセクションの設定"}
             notes={miniNote ? [miniNote] : []}
@@ -331,7 +357,7 @@ export function LpSiteConfigScreen(): JSX.Element {
         description="北陸ITカンファレンスのランディングページ（LP）の見た目と公開状態を、下書きで確かめてから本番に反映します。"
       />
       <LpTabs active="config" />
-      <AppReadOnlyNotice appId="lp" />
+      {gate.dialog}
       {/* 操作は全部この帯に置き、スクロールしても上に貼り付ける（下まで降りなくてよい）。 */}
       <div ref={barRef} className={styles.stickyBar} data-env={env} data-testid="fe2-lp-config-actionbar">
         <SegmentedControl<LpConfigEnv>
@@ -500,6 +526,9 @@ function SectionControls({
   const options = Object.entries(def.options ?? {});
   // 非表示のセクションのパターン・オプションは選べない（表示にしたときに選ぶ）。
   const hiddenNow = !cur.visible;
+  const contentId = lp.isLpContentSection(id) ? id : null;
+  const contentItems: ContentItem[] = contentId ? lp.resolveContent(config.layout)[contentId] : [];
+  const [editing, setEditing] = useState(false);
   return (
     <section className={styles.lpEditorSection} data-testid={`fe2-lp-config-section-${id}`}>
       <div className={styles.lpBlockHead}>
@@ -515,7 +544,38 @@ function SectionControls({
           onChange={(v) => onChange(setSection(config, id, { visible: v }))}
         />
       </div>
-      {variants.length === 1 && options.length > 0 ? null : (
+      {contentId ? (
+        <>
+          <div className={contentStyles.contentRow}>
+            <span className={contentStyles.contentCount} data-testid={`fe2-lp-config-${id}-count`}>
+              項目 {contentItems.length} 件
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              iconLeft={<Icon name={disabled ? "list" : "edit"} />}
+              onClick={() => setEditing(true)}
+              testId={`fe2-lp-config-${id}-edit`}
+            >
+              {disabled ? "項目を見る" : "項目を編集"}
+            </Button>
+          </div>
+          {contentItems.length === 0 ? (
+            <span className={styles.note} data-testid={`fe2-lp-config-${id}-empty-note`}>
+              項目が 0 件のあいだは、表示にしても LP には出ません。
+            </span>
+          ) : null}
+          <LpContentEditor
+            section={contentId}
+            items={contentItems}
+            open={editing}
+            disabled={disabled}
+            onClose={() => setEditing(false)}
+            onChange={(next) => onChange(setSectionContent(config, contentId, next))}
+          />
+        </>
+      ) : null}
+      {contentId || (variants.length === 1 && options.length > 0) ? null : (
         <div className={styles.lpBlockRow}>
           <span>バリアント</span>
           {variants.length >= 2 && variants.length <= 4 ? (

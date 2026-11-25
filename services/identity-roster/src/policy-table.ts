@@ -23,6 +23,12 @@ import { definePolicyTable, appLevel, AUTHENTICATED, INTERNAL, PUBLIC } from "@d
 /** 管理 (ロール管理 / メール名簿) at 編集 + the fine-grained admin key — every roster write. */
 const ADMIN_EDIT = appLevel("admin", "edit", "identity:admin");
 
+/**
+ * メール名簿の書き込み: ADMIN_EDIT に加えて、運営メンバーの編集範囲が「全て」であること。範囲は絞る方向に
+ * だけ効く (identity:admin の無いロールに書き込みを渡さない)。
+ */
+const MAIL_ROSTER_EDIT = appLevel("admin", "edit", "identity:admin", "app:members:edit", "members:mail_edit");
+
 /** Roster read: the shared, cross-app read key. */
 const ROSTER_READ = ["identity:read"] as const;
 
@@ -72,15 +78,15 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /identity/permissions/catalog": ROSTER_READ,
 
   // ===================== external writes (/identity/*) =====================
-  "POST /identity/users/invite": ADMIN_EDIT,
-  "POST /identity/users/sync-email-routing/preview": ADMIN_EDIT,
-  "POST /identity/users/sync-email-routing": ADMIN_EDIT,
+  "POST /identity/users/invite": MAIL_ROSTER_EDIT,
+  "POST /identity/users/sync-email-routing/preview": MAIL_ROSTER_EDIT,
+  "POST /identity/users/sync-email-routing": MAIL_ROSTER_EDIT,
   // The LAST_ADMIN invariant (the last identity:admin holder cannot be disabled / offboarded /
   // stripped) is NOT expressible as a key and stays in the service layer, which is where the
   // admin count is already loaded — the same two-layer rule gate.ts states. This line removes
   // only the key check that used to sit in middleware.
-  "PATCH /identity/users/:id": ADMIN_EDIT,
-  "POST /identity/users/:id/offboard": ADMIN_EDIT,
+  "PATCH /identity/users/:id": MAIL_ROSTER_EDIT,
+  "POST /identity/users/:id/offboard": MAIL_ROSTER_EDIT,
   "POST /identity/roles": ADMIN_EDIT,
   "PATCH /identity/roles/:id": ADMIN_EDIT,
   "DELETE /identity/roles/:id": ADMIN_EDIT,
@@ -100,9 +106,24 @@ export const POLICY_TABLE = definePolicyTable({
   // came from one of our Workers, and api-gateway strips every inbound x-dub-* so it cannot
   // be forged from outside.
   "POST /users/provision": INTERNAL,
+  // member-service: 在籍 (added) で紐付いた名簿行の招待中アカウントを有効化。INTERNAL のみ —
+  // 名簿の確定 (members/participation の編集権限) は member-service 側の表が既に検査済みで、
+  // ここは invited -> active しかできない (停止中は触らない・service が保証)。
+  "POST /internal/users/:id/activate": INTERNAL,
+  // api-gateway onboard-account: 参加届の人に招待中アカウントを作る / 後続失敗時に取り消す。
+  // 呼び出し元の鍵 (members:onboard_mail) は gateway の表が検査済み。ロールは service が
+  // 一般メンバー 1 つに固定し、取り消しは招待中・固定ロールのみに限る (既存アカウントに届かない)。
+  "POST /internal/users/onboard": INTERNAL,
+  "POST /internal/users/:id/discard-onboard": INTERNAL,
   "GET /users/:id": INTERNAL,
   "POST /internal/users/:id/profile": INTERNAL,
   "GET /internal/users": INTERNAL,
+  // drive-share-service's hourly MeetingSyncDO alarm (system actor, no user id) telling a
+  // deleted role from an empty one. Same page as GET /identity/roles; INTERNAL because the
+  // key-gated route 401s an actor-less s2s call (gate.ts: keys need someone to hold them).
+  "GET /internal/roles": INTERNAL,
+  // notification-service audience fan-out + 通知管理「誰に届くか」 (roles + active holders of one key).
+  "GET /internal/permission-holders": INTERNAL,
   "POST /internal/users/lookup": INTERNAL,
   // mail-gateway's sender icons; the caller's mail:read is checked by mail-gateway's own table.
   "POST /internal/users/avatars": INTERNAL,

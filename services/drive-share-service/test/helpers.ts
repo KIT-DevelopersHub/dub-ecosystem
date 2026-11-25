@@ -1,6 +1,7 @@
 // Shared in-memory fakes for drive-share-service unit tests. No network, no real bindings.
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { identity } from "@dub/types";
+import type { Fetcher } from "@cloudflare/workers-types";
 import type { ActiveUser, RoleMembership } from "../src/role-membership";
 import { createRoleGrantsService, type RoleGrantsService } from "../src/role-grants-service";
 import { createInMemoryRoleGrantStore, type RoleGrantStore } from "../src/role-grants-store";
@@ -10,7 +11,12 @@ import { createGoogleAccountService, type GoogleAccountService } from "../src/go
 import { createInMemoryGoogleAccountStore } from "../src/google-account-store";
 import type { Env } from "../src/env";
 import { createMeetingsService } from "../src/meetings-service";
+import type { MeetingSyncState } from "../src/meeting-sync-state";
 import { createInMemoryMeetingStore } from "../src/meetings-store";
+import { createInMemoryAttendanceStore } from "../src/attendance-store";
+import { createAttendanceService, type MeetRecordsAccess } from "../src/attendance-service";
+import { createEmptyMeetRecordsClient } from "../src/google/meet-records-client";
+import { createGoogleLinkService } from "../src/google-link";
 import { createMockCalendarClient } from "../src/calendar-mock-client";
 import { staticMemberDirectory, type MemberDirectory } from "../src/member-directory";
 import type { CalendarClient } from "../src/google/calendar-client";
@@ -44,7 +50,24 @@ export function fakeRoster(
 ): RoleMembership {
   return {
     async listActiveUsers(roleId?: string): Promise<ActiveUser[]> {
-      return users.filter((u) => !roleId || u.roleIds.includes(roleId)).map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+      const out = users.filter((u) => !roleId || u.roleIds.includes(roleId)).map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+      // Role members given only by email become users with a derived id (usr:<email>).
+      const byEmail = new Map(out.map((u) => [u.email, u]));
+      for (const [rid, emails] of Object.entries(members)) {
+        if (roleId && rid !== roleId) continue;
+        for (const raw of emails) {
+          const email = raw.trim().toLowerCase();
+          const known = byEmail.get(email);
+          if (known) {
+            if (!known.roleIds.includes(rid)) known.roleIds.push(rid);
+            continue;
+          }
+          const user = { id: `usr:${email}`, email, name: email, roleIds: [rid] };
+          byEmail.set(email, user);
+          out.push(user);
+        }
+      }
+      return out;
     },
     async listRoles() {
       return Object.entries(names).map(([id, name]) => ({ id, name }));
@@ -67,11 +90,17 @@ export function buildRoleGrants(opts: {
   drive: DriveShareClient;
   roster: RoleMembership;
   store?: RoleGrantStore;
+  directory?: MemberDirectory;
+  clock?: () => number;
+  kick?: () => Promise<void>;
 }): { service: RoleGrantsService; store: RoleGrantStore } {
   const store = opts.store ?? createInMemoryRoleGrantStore();
   const service = createRoleGrantsService({
     drive: opts.drive,
     roster: opts.roster,
+    ...(opts.directory ? { directory: opts.directory } : {}),
+    ...(opts.clock ? { clock: opts.clock } : {}),
+    ...(opts.kick ? { kick: opts.kick } : {}),
     store,
     orgId: common.DUB_DEFAULT_ORG_ID,
     now: () => `2026-08-13T00:00:${String(clock++ % 60).padStart(2, "0")}.000Z`,
@@ -93,6 +122,16 @@ export function stubGoogleAccount(): GoogleAccountService {
   });
 }
 
+/** Every member's login address is a Google account (meetings skip members without one). */
+export function googleAtLoginAddress(roster: RoleMembership): MemberDirectory {
+  return {
+    async googleEmails(userIds) {
+      const users = await roster.listActiveUsers();
+      return new Map(users.filter((u) => userIds.includes(u.id)).map((u) => [u.id, { gmail: u.email.toLowerCase(), name: u.name }]));
+    },
+  };
+}
+
 /** カレンダー > ミーティング over an in-memory store + the mock calendar (ready account). */
 export function buildMeetings(opts: {
   roster?: RoleMembership;
@@ -106,16 +145,22 @@ export function buildMeetings(opts: {
   syncTimeLimitMs?: number;
   now?: () => string;
   meetReady?: boolean;
+  attendance?: ReturnType<typeof createInMemoryAttendanceStore>;
+  background?: (work: Promise<unknown>) => void;
+  syncState?: MeetingSyncState;
 } = {}) {
   const store = opts.store ?? createInMemoryMeetingStore();
   const calendar = opts.calendar ?? createMockCalendarClient();
   let seq = 0;
   let tick = 0;
   const kicks: (number | undefined)[] = [];
+  const attendance = opts.attendance ?? createInMemoryAttendanceStore();
+  const roster = opts.roster ?? fakeRoster({}, {});
   const service = createMeetingsService({
     store,
-    roster: opts.roster ?? fakeRoster({}, {}),
-    directory: opts.directory ?? staticMemberDirectory(),
+    attendance,
+    roster,
+    directory: opts.directory ?? googleAtLoginAddress(roster),
     account: async () => ({
       accountId: opts.accountId ?? "dga_1",
       email: opts.accountEmail === undefined ? "hackit@gmail.com" : opts.accountEmail,
@@ -131,6 +176,92 @@ export function buildMeetings(opts: {
     },
     ...(opts.googleBudget ? { googleBudget: opts.googleBudget } : {}),
     ...(opts.syncTimeLimitMs ? { syncTimeLimitMs: opts.syncTimeLimitMs } : {}),
+    ...(opts.background ? { background: opts.background } : {}),
+    ...(opts.syncState ? { syncState: opts.syncState } : {}),
   });
-  return { service, store, calendar, kicks };
+  return { service, store, calendar, kicks, attendance };
+}
+
+/** 定例の出席 over in-memory meeting + attendance stores and a fake roster. */
+export function buildAttendance(opts: {
+  roster?: RoleMembership;
+  meetings?: ReturnType<typeof createInMemoryMeetingStore>;
+  store?: ReturnType<typeof createInMemoryAttendanceStore>;
+  now?: () => string;
+  meetRecords?: MeetRecordsAccess | null;
+} = {}) {
+  const meetings = opts.meetings ?? createInMemoryMeetingStore();
+  const store = opts.store ?? createInMemoryAttendanceStore();
+  const kicks: (number | undefined)[] = [];
+  const access = opts.meetRecords === undefined ? { ready: true, client: createEmptyMeetRecordsClient() } : opts.meetRecords;
+  const service = createAttendanceService({
+    meetings,
+    store,
+    roster: opts.roster ?? fakeRoster({}, {}),
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    now: opts.now ?? (() => "2026-10-20T10:00:00.000Z"),
+    meetRecords: async () => access,
+    kick: async (soonMs?: number) => {
+      kicks.push(soonMs);
+    },
+  });
+  return { service, meetings, store, kicks };
+}
+
+/** 「Googleと連携」 over in-memory stores (no OAuth client configured unless env says so). */
+export function buildGoogleLink(opts: { env?: Env; fetchImpl?: typeof fetch; attendance?: ReturnType<typeof createInMemoryAttendanceStore> } = {}) {
+  const states = createInMemoryGoogleAccountStore();
+  const attendance = opts.attendance ?? createInMemoryAttendanceStore();
+  const service = createGoogleLinkService({
+    env: opts.env ?? ({} as Env),
+    states,
+    attendance,
+    orgId: common.DUB_DEFAULT_ORG_ID,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  });
+  return { service, states, attendance };
+}
+
+/** One call the fake identity binding served. */
+export interface IdentityCall {
+  method: string;
+  path: string;
+  /** x-dub-user-id as sent, or null when the call carried no acting user (system). */
+  userId: string | null;
+  internal: boolean;
+}
+
+/**
+ * A fake SVC_IDENTITY binding that answers like identity-roster's policy gate does: every
+ * route needs the x-dub-internal marker (403 without), `/identity/roles` is key-gated and so
+ * 401s a call with no x-dub-user-id (the hourly alarm's system actor), while `/internal/roles`
+ * and `/internal/users` serve any marked caller. Single page; `people` is read live, so a
+ * test may delete a role or change memberships between syncs.
+ */
+export function fakeIdentityBinding(people: { users: ActiveUser[]; roles: Record<string, string> }): { binding: Fetcher; calls: IdentityCall[] } {
+  const calls: IdentityCall[] = [];
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const deny = (status: number, code: string, message: string) => json(status, { error: { code, message, retryable: false } });
+  const rolesPage = () => json(200, { items: Object.entries(people.roles).map(([id, name]) => ({ id, name })), nextCursor: null });
+  const fetch = async (req: Request): Promise<Response> => {
+    const url = new URL(req.url);
+    const userId = req.headers.get("x-dub-user-id");
+    const internal = req.headers.get("x-dub-internal") !== null;
+    calls.push({ method: req.method, path: url.pathname, userId, internal });
+    if (!internal) return deny(403, "FORBIDDEN", "internal-only");
+    if (url.pathname === "/identity/roles") {
+      if (!userId) return deny(401, "UNAUTHENTICATED", "no actor");
+      return rolesPage();
+    }
+    if (url.pathname === "/internal/roles") return rolesPage();
+    if (url.pathname === "/internal/users") {
+      const role = url.searchParams.get("role");
+      const items = people.users
+        .filter((u) => !role || u.roleIds.includes(role))
+        .map((u) => ({ id: u.id, email: u.email, displayName: u.name, roleIds: [...u.roleIds] }));
+      return json(200, { items, nextCursor: null });
+    }
+    return deny(404, "NOT_FOUND", url.pathname);
+  };
+  return { binding: { fetch } as unknown as Fetcher, calls };
 }

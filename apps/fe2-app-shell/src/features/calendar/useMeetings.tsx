@@ -1,7 +1,7 @@
 // カレンダー > ミーティング: permission gate + queries/mutations (optimistic, rollback on error).
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { useToast } from "@dub/ui";
-import type { meeting } from "@dub/types";
+import { meeting as meetingValues, type meeting } from "@dub/types";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { ApiError } from "../../lib/api-client.tsx";
 import { createOptimisticMutation } from "../../lib/optimistic.tsx";
@@ -33,6 +33,17 @@ export function useMeetingTargetsQuery(enabled: boolean) {
   return useQuery({ queryKey: MEETING_TARGETS_KEY, queryFn: () => api.listMeetingTargets(), enabled, staleTime: 60_000 });
 }
 
+/** Answers change in Google Calendar, not in Dub: re-read on every open, but not on every re-render. */
+export function useMeetingAttendeesQuery(meetingId: string | null, date: string | undefined) {
+  const api = useCalendarApi();
+  return useQuery({
+    queryKey: ["calendar", "meeting-attendees", meetingId, date ?? null] as const,
+    queryFn: () => api.listMeetingAttendees(meetingId!, date),
+    enabled: meetingId !== null && !meetingId.startsWith("tmp_"),
+    staleTime: 30_000,
+  });
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : "もう一度お試しください。";
 }
@@ -49,6 +60,9 @@ function mayHaveCreated(err: unknown): boolean {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const calendarTargetOfBody = (body: meeting.UpdateMeetingRequest) =>
+  meetingValues.calendarTargetOf(meetingValues.parseMeetingTargets(body) ?? []);
+
 /** The meeting `body` created, if a fresh list has one that was not there before. */
 export async function findCreatedMeeting(
   api: Pick<CalendarApi, "listMeetings">,
@@ -61,7 +75,7 @@ export async function findCreatedMeeting(
     if (wait > 0) await sleep(wait);
     const list = await api.listMeetings().catch(() => null);
     const hit = list?.items.find(
-      (m) => !known.has(m.id) && m.title === body.title && m.targetId === body.targetId && Date.parse(m.startsAt) === at,
+      (m) => !known.has(m.id) && m.title === body.title && m.targetId === calendarTargetOfBody(body) && Date.parse(m.startsAt) === at,
     );
     if (hit) return hit;
   }
@@ -76,11 +90,23 @@ export interface MeetingMutations {
   sync: Mutation<meeting.SyncMeetingsResponse, void>;
 }
 
-export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): MeetingMutations {
+export function useMeetingMutations(
+  targets: readonly meeting.MeetingTarget[],
+  people: readonly meeting.MeetingPersonOption[] = [],
+): MeetingMutations {
   const api = useCalendarApi();
   const qc = useQueryClient();
   const toast = useToast();
-  const targetName = (id: string) => targets.find((t) => t.id === id)?.name ?? "";
+  /** A body's targets with names, for the optimistic row (the server's answer replaces it). */
+  const describe = (body: meeting.UpdateMeetingRequest): Pick<meeting.Meeting, "targetId" | "targetName" | "targets"> | null => {
+    const refs = meetingValues.parseMeetingTargets(body);
+    if (!refs) return null;
+    const infos = refs.map((t) => ({
+      ...t,
+      name: (t.kind === "person" ? people.find((p) => p.id === t.id)?.name : targets.find((x) => x.id === t.id)?.name) ?? "",
+    }));
+    return { targetId: meetingValues.calendarTargetOf(refs), targetName: infos.map((t) => t.name).join("、"), targets: infos };
+  };
   const fail = (title: string) => (err: unknown) => toast.show({ kind: "error", title, description: errorText(err) });
 
   const create = useMutation(
@@ -104,8 +130,7 @@ export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): 
           id: `tmp_${Date.now().toString(36)}`,
           title: body.title,
           description: body.description ?? null,
-          targetId: body.targetId,
-          targetName: targetName(body.targetId),
+          ...(describe(body) ?? { targetId: body.targetId ?? "", targetName: "", targets: [] }),
           startsAt: body.startsAt,
           durationMinutes: body.durationMinutes,
           recurrence: body.recurrence,
@@ -113,6 +138,7 @@ export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): 
           meetUrl: null,
           htmlLink: null,
           attendeeCount: 0,
+          trackAttendance: body.trackAttendance ?? false,
           createdBy: "" as meeting.Meeting["createdBy"],
           createdAt: now,
           updatedAt: now,
@@ -130,7 +156,7 @@ export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): 
       applyOptimistic: (prev, { id, body }) => ({
         ...prev,
         items: prev.items.map((m) =>
-          m.id === id ? { ...m, ...body, ...(body.targetId ? { targetName: targetName(body.targetId) } : {}) } as meeting.Meeting : m,
+          m.id === id ? ({ ...m, ...body, ...(body.targets || body.targetId ? describe(body) ?? {} : {}) } as meeting.Meeting) : m,
         ),
       }),
       onErrorToast: fail("ミーティングを更新できませんでした"),
@@ -157,7 +183,7 @@ export function useMeetingMutations(targets: readonly meeting.MeetingTarget[]): 
         toast.show({
           kind: "warning",
           title: "Gmail 未登録のメンバーがいます",
-          description: `Gmail 未登録のため Dub アドレスで招待: ${r.withoutGoogleAccount.map((x) => x.name).join("、")}`,
+          description: `Gmail 未登録のため招待・カレンダー共有していません: ${r.withoutGoogleAccount.map((x) => x.name).join("、")}`,
           durationMs: 10_000,
         });
       }

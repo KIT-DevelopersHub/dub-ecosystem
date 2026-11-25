@@ -14,11 +14,15 @@ import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../au
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import {
   createDriveShareApi,
+  driftDetail,
+  driftGranteeLabel,
   driveRoleLabel,
+  finishRoleGrant,
   isValidEmail,
   roleGrantChipLabel,
   roleLabel,
   type DriveShareApi,
+  type FileShareDrift,
   type ListFilesResult,
   type ListPermissionsResult,
   type ListRoleGrantsResult,
@@ -79,6 +83,19 @@ const DEV_GRANT: RoleFileGrant = {
   memberCount: 5, appliedCount: 5, grantedBy: "hackit@gmail.com", grantedAt: "2026-08-12T00:00:00Z",
 };
 const ROLE_GRANTS: ListRoleGrantsResult = { items: [DEV_GRANT] };
+const NO_DRIFT: FileShareDrift = { fileId: "fil_budget", grantCount: 1, expectedCount: 5, matchedCount: 5, items: [] };
+const DRIFT: FileShareDrift = {
+  fileId: "fil_budget",
+  grantCount: 1,
+  expectedCount: 5,
+  matchedCount: 3,
+  items: [
+    { kind: "unexpected", permissionId: "p_reader", granteeType: "user", email: "sponsor@example.com", displayName: "協賛担当", domain: null, actualRole: "reader", expectedRole: null, roleNames: [] },
+    { kind: "unexpected", permissionId: "p_anyone", granteeType: "anyone", email: null, displayName: null, domain: null, actualRole: "reader", expectedRole: null, roleNames: [] },
+    { kind: "insufficient_role", permissionId: "p_dev4", granteeType: "user", email: "dev4@example.com", displayName: null, domain: null, actualRole: "reader", expectedRole: "writer", roleNames: ["開発"] },
+    { kind: "missing", permissionId: null, granteeType: "user", email: "dev5@example.com", displayName: null, domain: null, actualRole: null, expectedRole: "writer", roleNames: ["開発"] },
+  ],
+};
 
 function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
   return {
@@ -94,6 +111,7 @@ function stubApi(over: Partial<DriveShareApi> = {}): DriveShareApi {
     grantRole: (fileId, req) => Promise.resolve({ id: "rg_new", fileId, roleId: req.roleId, roleName: "会場", driveRole: req.driveRole, memberCount: 3, appliedCount: 3, grantedBy: "hackit@gmail.com", grantedAt: "2026-08-13T00:00:00Z" }),
     revokeRoleGrant: () => Promise.resolve(),
     reapplyRoleGrant: (fileId, roleId) => Promise.resolve({ ...DEV_GRANT, fileId, roleId }),
+    getShareDrift: () => Promise.resolve(NO_DRIFT),
     getGoogleAccounts: () => Promise.resolve({ accounts: [], canConnect: false }),
     startGoogleConnect: () => Promise.resolve({ authUrl: "https://accounts.google.com/" }),
     completeGoogleConnect: () => Promise.resolve({ accounts: [], canConnect: false }),
@@ -168,6 +186,12 @@ describe("createDriveShareApi", () => {
     await d.revokeRoleGrant("fil_budget", "role_dev");
     expect(calls[2]).toMatchObject({ method: "DELETE", path: "/api/v1/driveshare/files/fil_budget/role-grants/role_dev" });
   });
+
+  it("getShareDrift GETs the file's drift", async () => {
+    const { api, calls } = fakeApi(NO_DRIFT);
+    await createDriveShareApi(api).getShareDrift("fil_budget");
+    expect(calls[0]).toMatchObject({ method: "GET", path: "/api/v1/driveshare/files/fil_budget/drift" });
+  });
 });
 
 describe("helpers", () => {
@@ -189,6 +213,13 @@ describe("helpers", () => {
   it("roleGrantChipLabel formats as `<roleName>: <driveRole>`", () => {
     expect(roleGrantChipLabel({ roleName: "開発", driveRole: "writer" })).toBe("開発: 編集");
     expect(roleGrantChipLabel({ roleName: "会場", driveRole: "reader" })).toBe("会場: 閲覧");
+  });
+  it("drift labels name the grantee and say what the roles call for", () => {
+    expect(driftGranteeLabel(DRIFT.items[1]!)).toBe("リンクを知っている全員");
+    expect(driftGranteeLabel({ granteeType: "domain", email: null, displayName: null, domain: "example.com" })).toBe("example.com ドメインの全員");
+    expect(driftDetail(DRIFT.items[0]!)).toBe("閲覧者（どのロールにも含まれていません）");
+    expect(driftDetail(DRIFT.items[2]!)).toBe("閲覧者（ロール「開発」では編集者）");
+    expect(driftDetail(DRIFT.items[3]!)).toBe("ロール「開発」で編集者のはずが、共有されていません");
   });
 });
 
@@ -306,6 +337,88 @@ describe("DriveShareScreen", () => {
   });
 });
 
+describe("finishRoleGrant (a role larger than one request can handle)", () => {
+  it("follows the cursor to the end, reporting progress and accumulating skipped members", async () => {
+    const reapply = vi.fn((_f: string, _r: string, cursor?: string) =>
+      Promise.resolve(
+        cursor === "c1"
+          ? { ...DEV_GRANT, nextCursor: "c2", remaining: 1, skipped: [{ email: "b@x.jp", reason: "拒否" }] }
+          : { ...DEV_GRANT, appliedCount: 5, invited: [{ email: "c@x.jp" }] },
+      ),
+    );
+    const progress: number[] = [];
+    const first = { ...DEV_GRANT, nextCursor: "c1", remaining: 3, skipped: [{ email: "a@x.jp", reason: "拒否" }] };
+
+    const done = await finishRoleGrant({ reapplyRoleGrant: reapply }, first, (n) => progress.push(n));
+
+    expect(reapply.mock.calls.map((c) => c[2])).toEqual(["c1", "c2"]);
+    expect(progress).toEqual([3, 1, 0]);
+    expect(done.nextCursor).toBeUndefined();
+    expect(done.skipped?.map((s) => s.email)).toEqual(["a@x.jp", "b@x.jp"]);
+    expect(done.invited).toEqual([{ email: "c@x.jp" }]);
+  });
+
+  it("stops instead of spinning when the cursor does not move", async () => {
+    const reapply = vi.fn(() => Promise.resolve({ ...DEV_GRANT, nextCursor: "c1", remaining: 2 }));
+    await finishRoleGrant({ reapplyRoleGrant: reapply }, { ...DEV_GRANT, nextCursor: "c1", remaining: 2 }, () => {});
+    expect(reapply).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reapply request carries the cursor as a query parameter", async () => {
+    const { api, calls } = fakeApi(DEV_GRANT);
+    await createDriveShareApi(api).reapplyRoleGrant("fil_budget", "role_dev", "c1");
+    expect(calls[0]).toMatchObject({ method: "POST", query: { cursor: "c1" } });
+  });
+});
+
+describe("ロールとの差分", () => {
+  async function openBudget(api: DriveShareApi): Promise<HTMLElement> {
+    const user = userEvent.setup();
+    render(wrap(<DriveShareScreen />, api));
+    await waitFor(() => expect(screen.getAllByTestId("fe2-driveshare-file").length).toBe(2));
+    await user.click(screen.getByRole("button", { name: /予算管理/ }));
+    return screen.findByTestId("fe2-driveshare-drift");
+  }
+
+  it("lists shares outside the roles, wrong roles and members without access, grouped by kind", async () => {
+    const card = await openBudget(stubApi({ getShareDrift: () => Promise.resolve(DRIFT) }));
+    expect(await within(card).findByTestId("fe2-driveshare-drift-badge")).toHaveTextContent("差分 4件");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("ロール外の共有（2）");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("sponsor@example.com");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("リンクを知っている全員");
+    expect(within(card).getByTestId("fe2-driveshare-drift-insufficient_role")).toHaveTextContent("dev4@example.com");
+    expect(within(card).getByTestId("fe2-driveshare-drift-missing")).toHaveTextContent("dev5@example.com");
+    expect(within(card).queryByTestId("fe2-driveshare-drift-excess_role")).toBeNull();
+  });
+
+  it("says so when sharing matches the roles", async () => {
+    const clean = await openBudget(stubApi());
+    expect(await within(clean).findByTestId("fe2-driveshare-drift-clean")).toHaveTextContent("5人が一致");
+  });
+
+  it("lists what is left on a file with no role grant", async () => {
+    const getShareDrift = () => Promise.resolve({ ...DRIFT, grantCount: 0, expectedCount: 0, matchedCount: 0, items: DRIFT.items.slice(0, 1) });
+    const card = await openBudget(stubApi({ getShareDrift }));
+    expect(await within(card).findByTestId("fe2-driveshare-drift-noroles")).toBeInTheDocument();
+    expect(within(card).getByTestId("fe2-driveshare-drift-badge")).toHaveTextContent("差分 1件");
+    expect(within(card).getByTestId("fe2-driveshare-drift-unexpected")).toHaveTextContent("sponsor@example.com");
+  });
+
+  it("says a file with no role grant and no shares is clean", async () => {
+    const getShareDrift = () => Promise.resolve({ ...NO_DRIFT, grantCount: 0, expectedCount: 0, matchedCount: 0 });
+    const card = await openBudget(stubApi({ getShareDrift }));
+    expect(await within(card).findByTestId("fe2-driveshare-drift-clean")).toHaveTextContent("ロール権限は無く");
+  });
+
+  it("再チェック fetches the drift again", async () => {
+    const getShareDrift = vi.fn(() => Promise.resolve(NO_DRIFT));
+    const card = await openBudget(stubApi({ getShareDrift }));
+    await within(card).findByTestId("fe2-driveshare-drift-clean");
+    await userEvent.click(within(card).getByTestId("fe2-driveshare-drift-refresh"));
+    await waitFor(() => expect(getShareDrift).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe("Drive共有 > 設定 > Google アカウント", () => {
   const CONNECTED = {
     accounts: [
@@ -397,6 +510,30 @@ describe("Drive共有 > 設定 > Google アカウント", () => {
     await waitFor(() => expect(completeGoogleConnect).toHaveBeenCalledWith("c1", "s1"));
     expect(screen.getByTestId("fe2-driveshare-settings")).toBeInTheDocument();
     expect(window.location.search).toBe("");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("an account without Meet records access says 再連携が必要 and offers 再接続", async () => {
+    const noRecords = {
+      ...CONNECTED,
+      accounts: CONNECTED.accounts.map((a) => (a.id === "dga_main" ? { ...a, attendanceMissing: true } : a)),
+    };
+    const startGoogleConnect = vi.fn(() => new Promise<{ authUrl: string }>(() => {}));
+    render(wrap(<DriveShareScreen />, stubApi({ getGoogleAccounts: () => Promise.resolve(noRecords), startGoogleConnect })));
+    await userEvent.click(await screen.findByTestId("fe2-driveshare-settings-open"));
+    expect(await screen.findByTestId("fe2-driveshare-google-attendance-missing-warning")).toHaveTextContent("再連携が必要です");
+    expect(screen.getByTestId("fe2-driveshare-google-no-attendance-dga_main")).toHaveTextContent("再連携が必要");
+    await userEvent.click(screen.getByTestId("fe2-driveshare-google-reconnect-dga_main"));
+    expect(startGoogleConnect).toHaveBeenCalled();
+  });
+
+  it("a 「Googleと連携」 return (lnk_ state) is not an account connect (the shell finishes it)", async () => {
+    window.history.replaceState(null, "", "/driveshare?code=c9&state=lnk_abc");
+    const completeGoogleConnect = vi.fn(() => Promise.resolve(CONNECTED));
+    render(wrap(<DriveShareScreen />, stubApi({ completeGoogleConnect })));
+    await screen.findByTestId("fe2-driveshare");
+    expect(completeGoogleConnect).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("fe2-driveshare-settings")).toBeNull();
     window.history.replaceState(null, "", "/");
   });
 

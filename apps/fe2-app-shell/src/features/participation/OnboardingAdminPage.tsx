@@ -1,4 +1,4 @@
-// オンボーディング (運営メンバー・名簿 → オンボーディング タブ)。新しく入った人に最初に
+// オンボーディング案内 (人事 → オンボーディング案内 タブ)。新しく入った人に最初に
 // やってほしいことを並べ、ログイン不要の公開ページ (/onboarding) で共有する。項目の追加・
 // 編集・削除・ドラッグ並び替えは 参加届アプリの「編集」、閲覧だけなら一覧と共有 URL のみ。
 // 編集系は楽観的 UI (hooks.ts の useOnboardingMutation が失敗時にロールバック)。
@@ -14,7 +14,6 @@ import {
   Icon,
   IconButton,
   Modal,
-  PageHeader,
   SkeletonList,
   SortableList,
   TextField,
@@ -22,7 +21,7 @@ import {
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { usePermissionGate, type PermissionGate } from "../../auth/PermissionGate.tsx";
 import {
   isPendingOnboardingItem,
   useCreateOnboardingItem,
@@ -46,10 +45,13 @@ import {
 } from "./contracts.ts";
 import { PUBLIC_ONBOARDING_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
+import { HrFrame } from "../hr/HrApplicantsScreen.tsx";
 import styles from "./participation.module.css";
 
 export function OnboardingAdminPage(): JSX.Element {
   const { canEdit } = useAppCapability("participation");
+  // 閲覧のみでも追加/編集/削除は押せる。押したら権限不足ダイアログ(申請付き)を出す。
+  const gate = usePermissionGate({ appId: "participation", locked: !canEdit });
   const list = useOnboardingItems();
   const createMut = useCreateOnboardingItem();
   const updateMut = useUpdateOnboardingItem();
@@ -124,24 +126,22 @@ export function OnboardingAdminPage(): JSX.Element {
                 </a>
               ) : null}
             </div>
-            {canEdit ? (
-              <div className={styles.onboardingActions}>
-                <IconButton
-                  name="edit"
-                  aria-label={`「${item.title}」を編集`}
-                  disabled={isPendingOnboardingItem(item)}
-                  onClick={() => setEditing(item)}
-                  testId={`onboarding-admin-edit-${item.id}`}
-                />
-                <IconButton
-                  name="trash"
-                  aria-label={`「${item.title}」を削除`}
-                  disabled={isPendingOnboardingItem(item)}
-                  onClick={() => setDeleteTarget(item)}
-                  testId={`onboarding-admin-delete-${item.id}`}
-                />
-              </div>
-            ) : null}
+            <div className={styles.onboardingActions}>
+              <IconButton
+                name="edit"
+                aria-label={`「${item.title}」を編集`}
+                disabled={isPendingOnboardingItem(item)}
+                onClick={gate.guard(() => setEditing(item))}
+                testId={`onboarding-admin-edit-${item.id}`}
+              />
+              <IconButton
+                name="trash"
+                aria-label={`「${item.title}」を削除`}
+                disabled={isPendingOnboardingItem(item)}
+                onClick={gate.guard(() => setDeleteTarget(item))}
+                testId={`onboarding-admin-delete-${item.id}`}
+              />
+            </div>
           </div>
         )}
       />
@@ -149,60 +149,57 @@ export function OnboardingAdminPage(): JSX.Element {
   }
 
   return (
-    <div className={styles.onboardingPage} data-testid="onboarding-admin-page">
-      <AppReadOnlyNotice appId="participation" testId="onboarding-readonly-notice" />
-      <PageHeader
-        title="オンボーディング"
-        description="新しく入った人に最初にやってほしいことをまとめ、ログイン不要の案内ページで共有します。"
-      />
+    <HrFrame active="guide">
+      <div className={styles.onboardingPage} data-testid="onboarding-admin-page">
+        {gate.dialog}
+        <p className={styles.sectionHint}>新しく入った人に最初にやってほしいことをまとめ、ログイン不要の案内ページで共有します。</p>
 
-      <PublicUrlCard
-        title="案内ページの URL"
-        hint="このページはアプリのアカウントが無くても開けます。新しく入った人に送ってください。"
-        path={PUBLIC_ONBOARDING_PATH}
-        testId="onboarding-share"
-      />
+        <PublicUrlCard
+          title="案内ページの URL"
+          hint="このページはアプリのアカウントが無くても開けます。新しく入った人に送ってください。"
+          path={PUBLIC_ONBOARDING_PATH}
+          testId="onboarding-share"
+        />
 
-      <Card
-        header={
-          <div className={styles.sectionHeader}>
-            <span>案内する項目</span>
-            {canEdit ? (
-              <Button size="sm" iconLeft={<Icon name="plus" />} onClick={() => setEditing("new")} testId="onboarding-admin-add">
+        <Card
+          header={
+            <div className={styles.sectionHeader}>
+              <span>案内する項目</span>
+              <Button size="sm" iconLeft={<Icon name="plus" />} onClick={gate.guard(() => setEditing("new"))} testId="onboarding-admin-add">
                 項目を追加
               </Button>
-            ) : null}
-          </div>
-        }
-        testId="onboarding-admin-items"
-      >
-        {canEdit && items.length > 1 ? (
-          <p className={styles.sectionHint}>左端のつまみをドラッグすると、案内ページでの順番を入れ替えられます。</p>
+            </div>
+          }
+          testId="onboarding-admin-items"
+        >
+          {canEdit && items.length > 1 ? (
+            <p className={styles.sectionHint}>左端のつまみをドラッグすると、案内ページでの順番を入れ替えられます。</p>
+          ) : null}
+          {body}
+        </Card>
+
+        {list.data ? <MeetingsCard guide={list.data} guard={gate.guard} /> : null}
+
+        {editing !== null ? (
+          <ItemDialog item={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSave={onSave} />
         ) : null}
-        {body}
-      </Card>
 
-      {list.data ? <MeetingsCard guide={list.data} canEdit={canEdit} /> : null}
-
-      {editing !== null ? (
-        <ItemDialog item={editing === "new" ? null : editing} onCancel={() => setEditing(null)} onSave={onSave} />
-      ) : null}
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="項目を削除する"
-        message={deleteTarget ? `「${deleteTarget.title}」を案内ページから削除します。元に戻せません。よろしいですか？` : ""}
-        confirmLabel="削除する"
-        cancelLabel="キャンセル"
-        danger
-        onConfirm={() => {
-          if (deleteTarget) deleteMut.mutate(deleteTarget.id);
-          setDeleteTarget(null);
-        }}
-        onCancel={() => setDeleteTarget(null)}
-        testId="onboarding-admin-delete-confirm"
-      />
-    </div>
+        <ConfirmDialog
+          open={deleteTarget !== null}
+          title="項目を削除する"
+          message={deleteTarget ? `「${deleteTarget.title}」を案内ページから削除します。元に戻せません。よろしいですか？` : ""}
+          confirmLabel="削除する"
+          cancelLabel="キャンセル"
+          danger
+          onConfirm={() => {
+            if (deleteTarget) deleteMut.mutate(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+          testId="onboarding-admin-delete-confirm"
+        />
+      </div>
+    </HrFrame>
   );
 }
 
@@ -214,7 +211,7 @@ interface MeetingTarget {
 }
 
 /** 全体 / チームのミーティング案内。カレンダー招待は送らず、日時とリンクを案内ページに出す。 */
-function MeetingsCard({ guide, canEdit }: { guide: OnboardingGuide; canEdit: boolean }): JSX.Element {
+function MeetingsCard({ guide, guard }: { guide: OnboardingGuide; guard: PermissionGate["guard"] }): JSX.Element {
   const saveMut = useSaveOnboardingMeeting();
   const [editing, setEditing] = useState<MeetingTarget | null>(null);
   const targets: MeetingTarget[] = [
@@ -253,13 +250,11 @@ function MeetingsCard({ guide, canEdit }: { guide: OnboardingGuide; canEdit: boo
                   <span className={styles.meetingUnset}>未設定（案内ページには「追って連絡します」と表示）</span>
                 )}
               </div>
-              {canEdit ? (
-                <div className={styles.onboardingActions}>
-                  <Button size="sm" variant="secondary" onClick={() => setEditing(t)} testId={`onboarding-meeting-edit-${key}`}>
-                    {m ? "編集" : "設定"}
-                  </Button>
-                </div>
-              ) : null}
+              <div className={styles.onboardingActions}>
+                <Button size="sm" variant="secondary" onClick={guard(() => setEditing(t))} testId={`onboarding-meeting-edit-${key}`}>
+                  {m ? "編集" : "設定"}
+                </Button>
+              </div>
             </li>
           );
         })}

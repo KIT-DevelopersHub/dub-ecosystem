@@ -54,7 +54,7 @@ function optionText(def: lp.LpOptionDef, v: lp.LpOptionValue): string {
   return def.values?.[String(v)] ?? String(v);
 }
 
-/** before → after の差分（版・3 つのフラグ・各セクションのバリアント/表示/オプション）。登録簿の並び順。 */
+/** before → after の差分（版・3 つのフラグ・各セクションのバリアント/表示/オプション/項目）。登録簿の並び順。 */
 export function diffSiteConfig(before: LpSiteConfig, after: LpSiteConfig): ConfigDiff[] {
   const out: ConfigDiff[] = [];
   if (before.release.versionId !== after.release.versionId) {
@@ -80,8 +80,29 @@ export function diffSiteConfig(before: LpSiteConfig, after: LpSiteConfig): Confi
         out.push({ key: `${id}.options.${k}`, label: `${def.label}: ${od.label}`, from: optionText(od, a.options[k]!), to: optionText(od, b.options[k]!) });
       }
     }
+    if (lp.isLpContentSection(id)) {
+      const ca = lp.resolveContent(before.layout)[id];
+      const cb = lp.resolveContent(after.layout)[id];
+      if (JSON.stringify(ca) !== JSON.stringify(cb)) {
+        out.push({
+          key: `${id}.content`,
+          label: `${def.label}の項目`,
+          from: `${ca.length} 件`,
+          to: ca.length === cb.length ? `${cb.length} 件（内容を変更）` : `${cb.length} 件`,
+        });
+      }
+    }
   }
   return out;
+}
+
+/** 中身のセクションの項目一覧を差し替える（項目の形は呼び出し側が LP_CONTENT_FIELDS で検証済み）。 */
+export function setSectionContent(
+  config: LpSiteConfig,
+  id: lp.LpContentSectionId,
+  items: readonly lp.LpContentItem<lp.LpContentSectionId>[],
+): LpSiteConfig {
+  return { ...config, layout: lp.setContent(config.layout, id, items as lp.LpContent[typeof id]) };
 }
 
 /** チケット販売を「公開」にする変更か（今と同じ ack を必須にする）。 */

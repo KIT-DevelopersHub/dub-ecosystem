@@ -18,6 +18,8 @@ import type {
 export interface MembersApi {
   /** Everything the three views need in one call (identity:read). */
   getOverview(): Promise<MembersOverview>;
+  /** 組織図までのロール向け: overview と同じ形で個人情報の項目が空。 */
+  getOrgOverview(): Promise<MembersOverview>;
   /** Canonical team list — the source other apps read (identity:read). */
   listTeams(): Promise<member.ListTeamsResponse>;
   createTeam(input: CreateTeamRequest): Promise<MemberTeam>;
@@ -25,6 +27,8 @@ export interface MembersApi {
   deleteTeam(id: string): Promise<void>;
   createMember(input: CreateMemberRequest): Promise<OrgMember>;
   updateMember(id: string, patch: UpdateMemberRequest): Promise<OrgMember>;
+  /** 組織図までの編集: 運営での項目だけ更新する。 */
+  updateMemberOrg(id: string, patch: member.UpdateMemberOrgRequest): Promise<OrgMember>;
   deleteMember(id: string): Promise<void>;
   /** Link (or unlink with identityUserId=null via updateMember) a member to a login
    *  account. Human-confirmed; the candidate list comes from listIdentityUsers. */
@@ -33,6 +37,8 @@ export interface MembersApi {
   listIdentityUsers(): Promise<common.Paginated<identity.IdentityUser>>;
   /** アカウント発行メール: login + password to the linked member's Gmail (identity:admin). */
   sendAccountMail(identityUserId: string): Promise<auth.AdminSendAccountMailResponse>;
+  /** 情報が足りない本人へ入力を催促する (app:members:edit)。 */
+  sendProfileReminder(id: string): Promise<member.SendProfileReminderResponse>;
 }
 
 const BASE = "/api/v1/members";
@@ -40,6 +46,7 @@ const BASE = "/api/v1/members";
 export function createMembersApi(api: ApiClient): MembersApi {
   return {
     getOverview: () => api.request<MembersOverview>({ method: "GET", path: `${BASE}/overview` }),
+    getOrgOverview: () => api.request<MembersOverview>({ method: "GET", path: `${BASE}/org-overview` }),
     listTeams: () => api.request<member.ListTeamsResponse>({ method: "GET", path: `${BASE}/teams` }),
     createTeam: (input) =>
       api.request<MemberTeam, CreateTeamRequest>({ method: "POST", path: `${BASE}/teams`, body: input }),
@@ -52,6 +59,8 @@ export function createMembersApi(api: ApiClient): MembersApi {
       api.request<OrgMember, CreateMemberRequest>({ method: "POST", path: `${BASE}/people`, body: input }),
     updateMember: (id, patch) =>
       api.request<OrgMember, UpdateMemberRequest>({ method: "PATCH", path: `${BASE}/people/${encodeURIComponent(id)}`, body: patch }),
+    updateMemberOrg: (id, patch) =>
+      api.request<OrgMember, member.UpdateMemberOrgRequest>({ method: "PATCH", path: `${BASE}/people/${encodeURIComponent(id)}/org`, body: patch }),
     deleteMember: async (id) => {
       await api.request<{ ok: true }>({ method: "DELETE", path: `${BASE}/people/${encodeURIComponent(id)}` });
     },
@@ -63,6 +72,12 @@ export function createMembersApi(api: ApiClient): MembersApi {
       api.request<auth.AdminSendAccountMailResponse>({
         method: "POST",
         path: `/api/v1/admin/users/${encodeURIComponent(identityUserId)}/account-mail`,
+        body: {},
+      }),
+    sendProfileReminder: (id) =>
+      api.request<member.SendProfileReminderResponse>({
+        method: "POST",
+        path: `${BASE}/people/${encodeURIComponent(id)}/profile-reminder`,
         body: {},
       }),
   };

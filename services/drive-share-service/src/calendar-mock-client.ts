@@ -85,8 +85,14 @@ export function createMockCalendarClient(state: MockCalendarState = createMockCa
     },
     async getEvent(calendarId, eventId) {
       if (state.deleted.has(key(calendarId, eventId))) return null;
-      // An event this isolate never saw is not "deleted in Google": materialise it.
       const c = calendarOf(calendarId);
+      // One occurrence of a series ("<id>_<UTC start>") reads as the series, like an unedited instance.
+      const series = /^(.+)_\d{8}T\d{6}Z$/.exec(eventId)?.[1];
+      if (series && !c.events.has(eventId)) {
+        const base = c.events.get(series);
+        return base && !state.deleted.has(key(calendarId, series)) ? { ...toEvent(calendarId, base), id: eventId } : null;
+      }
+      // An event this isolate never saw is not "deleted in Google": materialise it.
       const ev = c.events.get(eventId) ?? blank(eventId);
       c.events.set(eventId, ev);
       return toEvent(calendarId, ev);

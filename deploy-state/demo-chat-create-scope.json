@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "chat-create-scope",
+  "worker": "dub-demo-chat-create-scope",
+  "url": "https://dub-demo-chat-create-scope.developershub-site.workers.dev",
+  "deployedSha": "b9dc5fc0",
+  "branch": "commander/task-ctask_01M6RYPFRA60SAWT8N65P7BG3Z",
+  "actor": "ko-tarou",
+  "markers": ["chat-create-scope","chat:create_private"],
+  "live": true,
+  "verifiedAt": "2026-11-06T18:02:32Z",
+  "updatedAt": "2026-11-06T18:02:32Z",
+  "note": "PR #796 チャンネル作成権限の 3 択"
+}

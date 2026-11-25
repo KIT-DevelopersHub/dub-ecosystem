@@ -26,6 +26,11 @@ test("usage dashboard renders real %-values (not 取得不可) with no console e
   await expect(page.getByTestId("fe2-usage-dashboard")).toBeVisible();
   await expect(page.getByTestId("fe2-usage-groups")).toBeVisible();
 
+  // Google Calendar / Meet sit in their own section with real percentages.
+  await expect(page.getByTestId("fe2-usage-group-gcp")).toBeVisible();
+  await expect(page.getByTestId("fe2-usage-card-gcp_calendar_requests_peak_minute-pct")).toHaveText(/%/);
+  await expect(page.getByTestId("fe2-usage-card-gcp_meet_requests_peak_minute-pct")).toHaveText(/%/);
+
   // (b) at least one free-tier card shows a real percentage, NOT the unknown "取得不可" state.
   const pct = page.getByTestId("fe2-usage-card-workers_requests_day-pct");
   await expect(pct).toBeVisible();

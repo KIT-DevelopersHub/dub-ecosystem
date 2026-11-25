@@ -32,7 +32,7 @@ export function buildReleaseInput(input: ReleaseInput, requestId: string, actorI
   if (input.publishedAt) meta.publishedAt = input.publishedAt;
   return {
     type: RELEASE_NOTIFY_TYPE,
-    recipients: { all: true },
+    recipients: { audiences: ["all"] },
     title: input.title,
     body: input.body,
     priority: "normal",

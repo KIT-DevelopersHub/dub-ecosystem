@@ -90,10 +90,16 @@ export const APP_MANIFEST = [
   // pair (meetings on the shared Google account, drive-share-service /meetings).
   { id: "calendar", label: "カレンダー", navPath: "/calendar", domain: "task", permissions: ["task:read"], access: { view: "app:calendar:view", edit: "app:calendar:edit" },
     detailPermissions: ["calendar:schedule_edit", "calendar:meetings_view", "calendar:meetings_edit"] },
-  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
-    detailPermissions: ["notif:inbox:self", "notif:prefs:self", "notif:send", "notif:admin", "notif:broadcast_publish"] },
-  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["chat:create"], access: { view: "app:chat:view", edit: "app:chat:edit" },
-    detailPermissions: ["chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections"] },
+  // 通知's 詳細 dialog lists only knobs that change something: WHO RECEIVES which audience
+  // (notif:receive_*) and the two admin surfaces. The self-service inbox/preference keys ride
+  // the 3 段階 instead (in `permissions`, so turning 通知 on bundles them — see
+  // withRequiredAppDomainKeys) and notif:send gates nothing; both are policy.HIDDEN_PERMISSION_KEYS.
+  { id: "notifications", label: "通知", navPath: "/notifications", domain: "notif", permissions: ["notif:inbox:self", "notif:prefs:self"], access: { view: "app:notifications:view", edit: "app:notifications:edit" },
+    detailPermissions: ["notif:receive_all", "notif:receive_admin", "notif:broadcast_publish", "notif:admin"] },
+  // チャットのサービスに読み取り用のドメインキーは無く、3 段階の鍵だけで開ける。chat:create をここに
+  // 置くと保存のたびに付け直され (withRequiredAppDomainKeys)、「作成できない」を選べなくなる。
+  { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["app:chat:view"], access: { view: "app:chat:view", edit: "app:chat:edit" },
+    detailPermissions: ["chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility"] },
   { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" },
     detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:admin"] },
   { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true,
@@ -102,7 +108,7 @@ export const APP_MANIFEST = [
   // 名簿・ロール story belongs inside the roster app, so identity:admin lives in this app's
   // 詳細設定 rather than ロール管理's.
   { id: "members", label: "運営メンバー", navPath: "/members", domain: "identity", permissions: ["identity:read"], access: { view: "app:members:view", edit: "app:members:edit" },
-    detailPermissions: ["identity:read", "identity:admin"] },
+    detailPermissions: ["identity:read", "identity:admin", "members:onboard_mail"] },
   // 参加届 rides 運営メンバー's identity:* keys (see gantt above) → no own fine-grained key.
   { id: "participation", label: "参加届", navPath: "/participation", domain: "identity", permissions: ["identity:read"], access: { view: "app:participation:view", edit: "app:participation:edit" }, openToAllAuthenticated: true,
     detailPermissions: [] },
@@ -132,6 +138,15 @@ export const APP_MANIFEST = [
   // 未公開アプリ (releaseGate PUBLISHED_APPS 外) なので admin 以外はグレー表示 (identity/0025 で admin のみ付与)。
   { id: "hr", label: "人事", navPath: "/hr", domain: "hr", permissions: ["hr:read"], access: { view: "app:hr:view", edit: "app:hr:edit" },
     detailPermissions: ["hr:read", "hr:write", "hr:admin"] },
+  // スポンサー: スポンサーチーム向け。フェーズ1 = 名刺をカメラで撮って共有 (member-service
+  // /members/sponsor/*・写真は R2)。未公開アプリなので identity/0027 で admin のみ付与し、
+  // スポンサーチームのロールにはロール管理からオンにする。
+  { id: "sponsor", label: "スポンサー", navPath: "/sponsor", domain: "sponsor", permissions: ["sponsor:read"], access: { view: "app:sponsor:view", edit: "app:sponsor:edit" },
+    detailPermissions: ["sponsor:read", "sponsor:write", "sponsor:admin"] },
+  // 目標管理: チームの月間目標と KPI (member-service /members/goals)。実績は各アプリのデータから自動で数える。
+  // 無効/閲覧/編集 がそのまま全部の設定。未公開アプリなので identity/0031 で admin のみ付与。
+  { id: "goals", label: "目標管理", navPath: "/goals", domain: "goals", permissions: ["goals:read"], access: { view: "app:goals:view", edit: "app:goals:edit" },
+    detailPermissions: ["goals:read"] },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

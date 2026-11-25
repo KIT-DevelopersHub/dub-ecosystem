@@ -118,7 +118,7 @@ describe("Resend webhook -> admin alert", () => {
     const call = s.notif.calls[0] as { path: string; internal: string; body: Record<string, unknown> };
     expect(call.path).toBe("/notify");
     expect(call.internal).toBe("1");
-    expect(call.body).toMatchObject({ type: "mail.delivery_alert", recipientRoles: ["role_sys_admin", "role_sys_maintainer"], channels: ["in_app"], dedupKey: "mail-delivery:msg_int" });
+    expect(call.body).toMatchObject({ type: "mail.delivery_alert", recipientAudiences: ["admin"], channels: ["in_app"], dedupKey: "mail-delivery:msg_int" });
     const text = String(call.body.body);
     expect(String(call.body.title)).toContain("admin@developershub.jp");
     expect(text).toContain("宛先が存在しない");

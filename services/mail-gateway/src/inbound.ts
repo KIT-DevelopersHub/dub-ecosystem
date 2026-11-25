@@ -5,13 +5,14 @@
 // mail.message.received (mail-automation). Loop-prevention headers are passed through
 // untouched — the decision is mail-automation's, not ours.
 import { createEvent, publishEvent } from "@dub/events";
-import { ulid } from "@dub/db";
+import { nowIso, ulid } from "@dub/db";
 import { consoleSink } from "@dub/observability";
 import type { mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import {
   decodeHeaderWord,
   extractAttachmentsDetailed,
+  extractHtml,
   extractBody,
   extractSnippet,
   parseAddress,
@@ -22,9 +23,11 @@ import { persistAttachments, persistDroppedAttachments, type DroppedReason } fro
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMENT_BYTES } from "./config";
 import { resolveInboundOwner } from "./owner";
 import { archiveRawEml } from "./raw-eml";
+import { deliverToTeam, findActiveTeamList } from "./team-list";
 import { loadMatcher } from "./blocks";
 import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
+import { isAutoReply, notifySponsorContact } from "./sponsor-sync";
 
 function stripAngle(id: string): string {
   return id.trim().replace(/^<|>$/g, "").trim();
@@ -138,13 +141,13 @@ export function parseInbound(raw: RawInbound, policy: OwnerAddressPolicy = {}): 
 
   // Body is persisted for the inbox detail view (frozen MailMessage still carries only
   // the snippet). Email Routing hands us the raw RFC822 as text; we keep the plain-text
-  // body. HTML-part extraction is out of this slice's scope → htmlBody stays null.
+  // body for search / quoting and the HTML part (unsanitized; the client sanitizes) for display.
   return {
     message,
     loop,
     mailbox: localPart(raw.to),
     bodyText: extractBody(raw.rawText),
-    htmlBody: null,
+    htmlBody: extractHtml(raw.rawText),
     cc,
     headerMeta: headerMetaFor(raw),
     references,
@@ -201,6 +204,15 @@ function ownerCandidatesFor(
  * `processed` = this call stored the body row (the first copy).
  */
 export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise<{ processed: boolean; message: mail.MailMessage }> {
+  const list = await findActiveTeamList(deps.db, parseAddress(raw.to).email);
+  const result = await ingestCopy(deps, raw, list !== null);
+  // Last, and on both the first-copy and already-stored paths: a mail To one member and Cc
+  // the list usually reaches the list second. Throws on failure, like a failed publish.
+  if (list) await deliverToTeam(deps, list, result.message);
+  return result;
+}
+
+async function ingestCopy(deps: InboundDeps, raw: RawInbound, isListCopy: boolean): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw, {
     archiveAddress: deps.archiveAddress ?? null,
     sharedAddress: deps.sharedAddress ?? null,
@@ -217,7 +229,11 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   // Per-account Inbox scope: resolve the owning roster user of THIS copy from its delivery
   // address(es), envelope recipient first (see parseInbound). null when no roster user
   // matches, or for the archive@ copy (fail-closed: visible to mail:read_all only).
-  const ownerUserId = await resolveInboundOwner(deps.identity, deps.ctx, ownerCandidates);
+  // A list copy has no single owner: its deliveries are the team's (see deliverToTeam), and
+  // falling back to the To: header would hand it to whoever else the mail was addressed to.
+  const ownerUserId = isListCopy ? null : await resolveInboundOwner(deps.identity, deps.ctx, ownerCandidates);
+  // The body row is shared: a list address here would read as every member's own address.
+  if (isListCopy) delete headerMeta.deliveredTo;
   const envelopeTo = parseAddress(raw.to).email.trim().toLowerCase();
 
   const changes = await insertInbound(deps.db, message, {
@@ -301,6 +317,12 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
       });
       return { processed: true, message };
     }
+  }
+
+  // スポンサーのメール連携: 初めて保存したメールだけ (別の宛先のコピー・再配送は上で戻っている)。
+  // 自動応答は「返信あり」にしない。日時は Dub が受け取った時刻 (差出人の Date ヘッダは使わない)。
+  if (!isAutoReply(loop["auto-submitted"], loop["x-dub-mail-loop"])) {
+    await notifySponsorContact(deps.sponsor, deps.ctx, { direction: "received", at: nowIso(), counterparts: [message.from.email], mailbox: envelopeTo || null });
   }
 
   const event = createEvent(

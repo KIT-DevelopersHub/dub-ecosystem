@@ -13,6 +13,12 @@ export interface GatewayRoute {
   auth: RouteAuth;
   /** post-strip internal paths that must 404 externally. Entries ending in "/" are prefix matches. */
   internalOnlyPaths?: string[];
+  /**
+   * Sub-trees of this segment owned by another Worker: `path` itself and everything under
+   * `path + "/"` go to `binding` (never a bare prefix: "/lp/tickets" does not match "/lp/ticketsfoo").
+   * auth, internalOnlyPaths and the body cap still come from this route.
+   */
+  subRoutes?: { path: string; binding: string }[];
   /** override request body cap for this route (bytes) */
   maxBodyBytes?: number;
   /**
@@ -122,13 +128,26 @@ export const ROUTES: readonly GatewayRoute[] = [
   // LP管理 (lp-analytics): 流入URL の発行と訪問ログの集計。lp-analytics re-checks the LP管理
   // policy (app:lp:view / app:lp:edit). /lp/internal/* (the beacon landing) is s2s only —
   // the public path reaches it via the gateway-owned POST /public/lp-visits.
-  { segment: "lp", binding: "SVC_LP_ANALYTICS", auth: "required", internalOnlyPaths: ["/lp/internal/"] },
+  // /lp/tickets* (チケット販売) lives in lp-tickets with its own D1; lp-tickets re-checks the same policy.
+  {
+    segment: "lp",
+    binding: "SVC_LP_ANALYTICS",
+    auth: "required",
+    internalOnlyPaths: ["/lp/internal/"],
+    subRoutes: [{ path: "/lp/tickets", binding: "SVC_LP_TICKETS" }],
+  },
 ] as const;
 
 const ROUTE_BY_SEGMENT = new Map<string, GatewayRoute>(ROUTES.map((r) => [r.segment, r]));
 
 export function routeForSegment(segment: string): GatewayRoute | undefined {
   return ROUTE_BY_SEGMENT.get(segment);
+}
+
+/** The binding that serves a post-strip path: the matching sub-route, else the route's own. */
+export function bindingForPath(route: GatewayRoute, internalPath: string): string {
+  const sub = route.subRoutes?.find((r) => internalPath === r.path || internalPath.startsWith(r.path + "/"));
+  return sub?.binding ?? route.binding;
 }
 
 /** Remove API_PREFIX only. "/api/v1/tasks/x" -> "/tasks/x". Returns null if not under prefix. */

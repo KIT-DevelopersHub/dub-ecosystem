@@ -30,6 +30,16 @@ describe("createApiClient", () => {
     expect(fetchImpl.mock.calls[0]![0]).toBe("https://api.test/api/v1/me");
   });
 
+  it("sends a Blob body as raw bytes with its content-type (not JSON)", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes({ ok: true }));
+    const api = createApiClient({ baseUrl: BASE, fetchImpl });
+    const blob = new Blob(["jpeg"], { type: "image/jpeg" });
+    await api.request({ method: "PUT", path: "/api/v1/x/image", body: blob });
+    const init = fetchImpl.mock.calls[0]![1] as RequestInit;
+    expect(init.body).toBe(blob);
+    expect((init.headers as Record<string, string>)["content-type"]).toBe("image/jpeg");
+  });
+
   it("normalizes an ErrorResponse into ApiError and extracts requestId", async () => {
     const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(errBody("FORBIDDEN", "nope", "req-123"), 403));
     const api = createApiClient({ baseUrl: BASE, fetchImpl });

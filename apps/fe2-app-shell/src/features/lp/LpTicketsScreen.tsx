@@ -31,6 +31,7 @@ import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import type { LpTicketOrder, LpTicketsState } from "./lpApi.tsx";
 import {
   useApproveTicketOrder,
+  useExportTicketOrders,
   useLpTicketCoupons,
   useLpTicketOrders,
   useLpTickets,
@@ -178,6 +179,7 @@ function SalesStatusCard({ state }: { state: LpTicketsState }): JSX.Element {
 function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
   const orders = useLpTicketOrders(true);
   const approve = useApproveTicketOrder();
+  const exportCsv = useExportTicketOrders();
   const [confirming, setConfirming] = useState<LpTicketOrder | null>(null);
   const rows = useMemo(() => orders.data?.pages.flatMap((p) => p.items) ?? [], [orders.data]);
   // クーポン注文にコードを併記する（lp:publish のときだけ。クーポンカードとキャッシュを共有するので取得は 1 回）。
@@ -230,7 +232,21 @@ function OrdersCard({ canApprove }: { canApprove: boolean }): JSX.Element {
 
   return (
     <Card testId="fe2-lp-ticket-orders" header={<span className={styles.sectionTitle}>購入者</span>}>
-      {content}
+      <Stack gap={5}>
+        {canApprove ? (
+          <div>
+            <Button
+              variant="secondary"
+              onClick={() => exportCsv.mutate()}
+              disabled={exportCsv.isPending || rows.length === 0}
+              testId="fe2-lp-ticket-orders-export"
+            >
+              {exportCsv.isPending ? "書き出し中…" : "CSV を書き出す"}
+            </Button>
+          </div>
+        ) : null}
+        {content}
+      </Stack>
       {confirming ? (
         <Modal
           open

@@ -278,7 +278,7 @@ export function AppLauncher({
           </div>
           {visible.length === 0 ? (
             <div className={cx(styles.empty)} role="status">
-              「{query.trim()}」に一致するアプリはありません
+              {query.trim() ? `「${query.trim()}」に一致するアプリはありません` : "利用できるアプリはありません"}
             </div>
           ) : (
             <div

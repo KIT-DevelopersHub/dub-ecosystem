@@ -186,3 +186,63 @@ describe("issued-addresses — toggle & revoke", () => {
     expect(sends.audit[0]!.payload).toMatchObject({ action: "mail.email_routing.address.revoke", result: "success", resourceId: "r1" });
   });
 });
+
+// api-gateway の参加届 onboard-account が呼ぶ s2s の双子 (INTERNAL)。
+describe("issued-addresses — internal twins (onboard-account)", () => {
+  const internalHeaders = { "content-type": "application/json", "x-dub-request-id": "req_int", "x-dub-internal": "1", "x-dub-user-id": "usr_hr" };
+
+  it("issues over the internal route with the same rules as the external one", async () => {
+    stubCf({ list: [], onCreate: (body) => ok({ id: "r_new", ...(body as object), priority: 0 }) });
+    const { env } = wiredEnv();
+    const res = await app.fetch(
+      new Request("https://svc/internal/email-routing/issued-addresses", { method: "POST", headers: internalHeaders, body: JSON.stringify({ localPart: "taro.yamada" }) }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ id: "r_new", address: "taro.yamada@developershub.jp" });
+  });
+
+  it("refuses an already-issued address with 409", async () => {
+    stubCf({ list: [workerRule("r1", "sales@developershub.jp")] });
+    const { env } = wiredEnv();
+    const res = await app.fetch(
+      new Request("https://svc/internal/email-routing/issued-addresses", { method: "POST", headers: internalHeaders, body: JSON.stringify({ localPart: "sales" }) }),
+      env,
+    );
+    expect(res.status).toBe(409);
+  });
+
+  it("revokes (rollback) by address: only an issued Worker rule, and a missing one is a no-op", async () => {
+    const calls = stubCf({ list: [workerRule("r_new", "taro.yamada@developershub.jp")], mutate: { id: "r_new" } });
+    const { env } = wiredEnv();
+    const revoke = (address: string) =>
+      app.fetch(new Request("https://svc/internal/email-routing/issued-addresses/revoke", { method: "POST", headers: internalHeaders, body: JSON.stringify({ address }) }), env);
+    const res = await revoke("taro.yamada@developershub.jp");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ revoked: true, id: "r_new" });
+    expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/rules/r_new"))).toBe(true);
+    const none = await revoke("someone.else@developershub.jp");
+    expect(await none.json()).toEqual({ revoked: false });
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("lookup reports any literal rule for the address as taken (forwarding rules included)", async () => {
+    stubCf({ list: [workerRule("r1", "sales@developershub.jp"), { id: "fw", enabled: true, matchers: [{ type: "literal", field: "to", value: "info@developershub.jp" }], actions: [{ type: "forward", value: ["ops@example.com"] }] }] });
+    const { env } = wiredEnv();
+    const lookup = async (address: string) =>
+      (await (await app.fetch(new Request("https://svc/internal/email-routing/issued-addresses/lookup", { method: "POST", headers: internalHeaders, body: JSON.stringify({ address }) }), env)).json()) as { taken: boolean };
+    expect(await lookup("sales@developershub.jp")).toEqual({ taken: true });
+    expect(await lookup("info@developershub.jp")).toEqual({ taken: true });
+    expect(await lookup("new.person@developershub.jp")).toEqual({ taken: false });
+  });
+
+  it("is unreachable without the internal marker", async () => {
+    stubCf({ list: [] });
+    const { env } = wiredEnv();
+    const res = await app.fetch(
+      new Request("https://svc/internal/email-routing/issued-addresses", { method: "POST", headers: adminHeaders(), body: JSON.stringify({ localPart: "x" }) }),
+      env,
+    );
+    expect(res.status).toBe(403);
+  });
+});

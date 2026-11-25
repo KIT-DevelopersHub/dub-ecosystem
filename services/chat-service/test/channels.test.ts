@@ -40,6 +40,56 @@ describe("channel create", () => {
     expect(res.json.error.details.missing).toEqual(["chat:create"]);
   });
 
+  describe("作成できるチャンネルの 3 択", () => {
+    const keys = (...extra: identity.PermissionKey[]) => fakeAuthz(new Set<identity.PermissionKey>(["app:chat:view", "app:chat:edit", ...extra]));
+    const privateTopic = { ...topic, visibility: "private" };
+    const dm = { type: "dm", visibility: "private", name: "DM", memberIds: ["user_b"] };
+
+    it("パブリックのみ: public と DM は作れて private は 403", async () => {
+      const app = createApp(makeDeps({ authz: keys("chat:create") }));
+      expect((await call(app, "POST", "/chat/channels", { body: topic })).status).toBe(201);
+      expect((await call(app, "POST", "/chat/channels", { body: dm })).status).toBe(201);
+      const denied = await call(app, "POST", "/chat/channels", { body: privateTopic });
+      expect(denied.status).toBe(403);
+      expect(denied.json.error.details.missing).toEqual(["chat:create_private"]);
+    });
+
+    it("type を event にしても private の鍵は迂回できない", async () => {
+      const app = createApp(makeDeps({ authz: keys("chat:create") }));
+      const res = await call(app, "POST", "/chat/channels", {
+        body: { type: "event", visibility: "private", name: "E", eventId: "event_1" },
+      });
+      expect(res.status).toBe(403);
+      expect(res.json.error.details.missing).toEqual(["chat:create_private"]);
+    });
+
+    it("拒否された private は何も作らない", async () => {
+      const deps = makeDeps({ authz: keys("chat:create") });
+      await call(createApp(deps), "POST", "/chat/channels", { body: privateTopic });
+      expect(deps.publisher.payloadsFor("chat.channel.created")).toEqual([]);
+    });
+
+    it("パブリックとプライベート: どちらも作れる", async () => {
+      const app = createApp(makeDeps({ authz: keys("chat:create", "chat:create_private") }));
+      expect((await call(app, "POST", "/chat/channels", { body: topic })).status).toBe(201);
+      expect((await call(app, "POST", "/chat/channels", { body: privateTopic })).status).toBe(201);
+    });
+
+    it("作成できない: public も private も DM も 403", async () => {
+      const app = createApp(makeDeps({ authz: keys() }));
+      for (const body of [topic, privateTopic, dm]) {
+        const res = await call(app, "POST", "/chat/channels", { body });
+        expect(res.status).toBe(403);
+        expect(res.json.error.details.missing).toEqual(["chat:create"]);
+      }
+    });
+
+    it("chat:create_private だけでは作れない (連言)", async () => {
+      const app = createApp(makeDeps({ authz: keys("chat:create_private") }));
+      expect((await call(app, "POST", "/chat/channels", { body: privateTopic })).status).toBe(403);
+    });
+  });
+
   it("initial memberIds are added and emit member.added + realtime", async () => {
     const deps = makeDeps();
     const app = createApp(deps);

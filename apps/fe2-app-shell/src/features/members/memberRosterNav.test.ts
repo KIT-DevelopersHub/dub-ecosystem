@@ -8,8 +8,6 @@ describe("activeSectionId", () => {
     expect(activeSectionId("/members/org-chart")).toBe("org-chart");
     expect(activeSectionId("/members/roster")).toBe("member-roster");
     expect(activeSectionId("/admin/users")).toBe("roster");
-    expect(activeSectionId("/participation")).toBe("onboarding");
-    expect(activeSectionId("/participation/list")).toBe("participation-list");
   });
 
   it("keeps the parent tab highlighted on deeper sub-routes", () => {
@@ -17,14 +15,17 @@ describe("activeSectionId", () => {
     // /members は運営メンバー、/members/roster は運営名簿（最長一致で運営名簿が勝つ）
     expect(activeSectionId("/members/roster")).toBe("member-roster");
     expect(activeSectionId("/members")).toBe("members");
-    // /participation/list は独立タブ（最長一致で オンボーディングより回答一覧が勝つ）
-    expect(activeSectionId("/participation/list")).toBe("participation-list");
   });
 
   it("does not surface ロール管理 / 変更履歴 in the roster subnav (own tile / removed)", () => {
     // ロールは独立ランチャータイル、変更履歴の UI は撤去。共有サブナビには載らない。
     expect(activeSectionId("/admin/roles")).toBeNull();
     expect(activeSectionId("/admin/history")).toBeNull();
+  });
+
+  it("does not surface 参加届の回答 / オンボーディング案内 (moved to 人事)", () => {
+    expect(activeSectionId("/participation")).toBeNull();
+    expect(activeSectionId("/participation/list")).toBeNull();
   });
 
   it("returns null outside the merged app", () => {

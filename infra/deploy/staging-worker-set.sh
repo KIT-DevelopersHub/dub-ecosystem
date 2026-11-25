@@ -30,6 +30,8 @@ STAGING_WORKER_DIRS=(
   "services/audit-log"
   "services/usage-meter"
   "services/commander-relay"
+  # lp-tickets before lp-analytics and api-gateway — both bind it (SVC_LP_TICKETS).
+  "services/lp-tickets"
   # lp-analytics before api-gateway — the gateway binds it (SVC_LP_ANALYTICS).
   "services/lp-analytics"
   # 4. api-gateway (binds all upstreams)

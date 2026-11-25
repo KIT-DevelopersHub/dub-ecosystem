@@ -13,6 +13,7 @@
 // これに置き換えて削除した。チャットのメッセージ削除ポリシーもこの画面からは撤去済み。
 import { useState } from "react";
 import type { identity } from "@dub/types";
+import { appRegistry } from "@dub/types";
 import { AppAccessTable } from "./AppAccessTable";
 import { AppDetailDialog } from "./AppDetailDialog";
 import { OtherPermissionsSection } from "./OtherPermissionsSection";
@@ -27,7 +28,7 @@ export interface MailVisibilityProps {
 export function RolePolicyEditor({
   selected,
   disabled,
-  onChange,
+  onChange: onChangeRaw,
   lockedKeys = [],
   idPrefix = "fe7",
   mailVisibility,
@@ -43,6 +44,8 @@ export function RolePolicyEditor({
   initialDetailAppId?: string | null;
 }) {
   const [detailAppId, setDetailAppId] = useState<string | null>(initialDetailAppId);
+  // 保存時に同梱される必須キーを編集中から見せる（画面と保存結果を一致させる）。
+  const onChange = (next: identity.PermissionKey[]) => onChangeRaw(appRegistry.withRequiredAppDomainKeys(next));
 
   return (
     <div data-testid={`${idPrefix}-role-policy-editor`}>

@@ -66,7 +66,7 @@ describe("release notes — buildReleaseInput", () => {
   it("targets all users, in_app only, type=release, with a derived dedup key", () => {
     const input = buildReleaseInput({ title: "New thing", body: "Details", app: "メール" }, "req_1", "usr_admin");
     expect(input.type).toBe("release");
-    expect(input.recipients).toEqual({ all: true });
+    expect(input.recipients).toEqual({ audiences: ["all"] });
     expect(input.channels).toEqual(["in_app"]);
     expect(input.resourceType).toBe("release");
     expect(input.actorId).toBe("usr_admin");

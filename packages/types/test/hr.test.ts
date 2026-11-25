@@ -20,4 +20,11 @@ describe("hr statuses", () => {
     }
     expect(hr.canTransition("hired", "hired", true)).toBe(false);
   });
+
+  it("blocks removal only for roster-stage people, not those moved off (e.g. 辞退)", () => {
+    for (const s of hr.APPLICANT_STAGES) {
+      expect(hr.blocksRemoval(s, false)).toBe(false);
+      expect(hr.blocksRemoval(s, true)).toBe(hr.ROSTER_STAGES.includes(s));
+    }
+  });
 });

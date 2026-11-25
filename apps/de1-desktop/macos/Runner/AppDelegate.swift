@@ -1,13 +1,20 @@
 import Cocoa
-import FlutterMacOS
 import FirebaseMessaging
+import FlutterMacOS
 
 @main
 class AppDelegate: FlutterAppDelegate {
   // Native<->Dart push channel (see lib/push/native_push.dart). macOS registers
-  // for APNs and hands the raw device token back to Dart, which POSTs it to
-  // mo3-mobile-bff (platform "macos"); the server's APNs adapter uses the macOS
-  // apns-topic (APNS_MACOS_BUNDLE_ID) to deliver.
+  // for APNs and hands the raw device token back to Dart. The FCM token that
+  // mo3 actually sends to is minted by firebase_messaging (lib/push/fcm_push.dart).
+  //
+  // Do NOT call `super` from the overrides below: FlutterAppDelegate (macOS)
+  // implements none of them, so `super` throws "unrecognized selector". In
+  // `applicationDidFinishLaunching` that exception aborts the launch
+  // notification before firebase_messaging's observer runs, which skips its
+  // app-delegate swizzling — the plugin then never receives the APNs token and
+  // `getToken()` never returns. The APNs token is handed to FCM explicitly in
+  // `didRegisterForRemoteNotificationsWithDeviceToken` (as on iOS).
   private var pushChannel: FlutterMethodChannel?
   private var pendingResult: FlutterResult?
 
@@ -20,36 +27,33 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
-    if let controller = NSApp.mainWindow?.contentViewController as? FlutterViewController {
-      let channel = FlutterMethodChannel(
-        name: "jp.developershub.dub/native_push",
-        binaryMessenger: controller.engine.binaryMessenger)
-      channel.setMethodCallHandler { [weak self] call, result in
-        switch call.method {
-        case "registerForPush":
-          self?.pendingResult = result
-          DispatchQueue.main.async { NSApplication.shared.registerForRemoteNotifications() }
-        default:
-          result(FlutterMethodNotImplemented)
-        }
+    // `NSApp.mainWindow` is still nil here (the window is not key yet); use
+    // the nib outlet so the channel is actually wired.
+    guard let controller = mainFlutterWindow?.contentViewController as? FlutterViewController
+    else { return }
+    let channel = FlutterMethodChannel(
+      name: "jp.developershub.dub/native_push",
+      binaryMessenger: controller.engine.binaryMessenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      switch call.method {
+      case "registerForPush":
+        self?.pendingResult = result
+        DispatchQueue.main.async { NSApplication.shared.registerForRemoteNotifications() }
+      default:
+        result(FlutterMethodNotImplemented)
       }
-      pushChannel = channel
     }
-    super.applicationDidFinishLaunching(notification)
+    pushChannel = channel
   }
 
   override func application(
     _ application: NSApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-    // Bridge the raw APNs token to FirebaseMessaging explicitly: this
-    // AppDelegate owns `didRegisterForRemoteNotificationsWithDeviceToken`
-    // itself (does not call `super`), which would otherwise starve
-    // `firebase_messaging`'s `getToken()` on macOS of the APNs token it needs
-    // before it can mint an FCM registration token (see lib/push/fcm_push.dart,
-    // now enabled on macOS for push-notification testing).
+    // Same as iOS: hand the APNs token to FCM explicitly. Without this the FCM
+    // token is not bound to this Mac's APNs token and sends are accepted (200)
+    // but never delivered.
     Messaging.messaging().apnsToken = deviceToken
-
     let token = deviceToken.map { String(format: "%02x", $0) }.joined()
     pendingResult?(token)
     pendingResult = nil

@@ -123,3 +123,113 @@ CREATE TABLE driveshare_meeting_calendar_acl (
 );
 `.trim(),
 };
+
+// Physical twin: infra/d1/migrations/driveshare/0004_meeting_attendance.sql (lockstep test).
+// 定例の出席: 定例 flags, manual / Dub-join records, ingested Meet participants, the ingest ledger,
+// Google account id -> member links, and the attendance threshold. No FK to the meeting.
+export const DRIVESHARE_ATTENDANCE_MIGRATION: Migration = {
+  namespace: "driveshare",
+  id: "0004_meeting_attendance",
+  up: `
+CREATE TABLE driveshare_meeting_regulars (
+  meeting_id TEXT PRIMARY KEY,
+  org_id     TEXT NOT NULL,
+  enabled_by TEXT NOT NULL,
+  enabled_at TEXT NOT NULL
+);
+CREATE TABLE driveshare_meeting_attendance (
+  meeting_id      TEXT NOT NULL,
+  occurrence_date TEXT NOT NULL,
+  user_id         TEXT NOT NULL,
+  org_id          TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK (status IN ('present','excused','absent')),
+  source          TEXT NOT NULL CHECK (source IN ('join','manual')),
+  joined_at       TEXT,
+  recorded_by     TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (meeting_id, occurrence_date, user_id, source)
+);
+CREATE INDEX idx_driveshare_attendance_org_date ON driveshare_meeting_attendance(org_id, occurrence_date);
+CREATE TABLE driveshare_meet_participants (
+  meeting_id       TEXT NOT NULL,
+  occurrence_date  TEXT NOT NULL,
+  participant_key  TEXT NOT NULL,
+  org_id           TEXT NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('signed_in','anonymous','phone')),
+  google_user_id   TEXT,
+  display_name     TEXT NOT NULL,
+  first_join       TEXT NOT NULL,
+  last_leave       TEXT,
+  duration_seconds INTEGER NOT NULL,
+  approx           INTEGER NOT NULL,
+  ingested_at      TEXT NOT NULL,
+  PRIMARY KEY (meeting_id, occurrence_date, participant_key)
+);
+CREATE INDEX idx_driveshare_meet_participants_org_date ON driveshare_meet_participants(org_id, occurrence_date);
+CREATE TABLE driveshare_meet_ingests (
+  meeting_id      TEXT NOT NULL,
+  occurrence_date TEXT NOT NULL,
+  org_id          TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK (status IN ('done','no_conference','error')),
+  conferences     INTEGER NOT NULL,
+  participants    INTEGER NOT NULL,
+  attempts        INTEGER NOT NULL,
+  last_error      TEXT,
+  ingested_at     TEXT NOT NULL,
+  PRIMARY KEY (meeting_id, occurrence_date)
+);
+CREATE TABLE driveshare_google_identity_links (
+  org_id         TEXT NOT NULL,
+  google_user_id TEXT NOT NULL,
+  user_id        TEXT NOT NULL,
+  source         TEXT NOT NULL CHECK (source IN ('self','confirmed')),
+  linked_by      TEXT NOT NULL,
+  linked_at      TEXT NOT NULL,
+  PRIMARY KEY (org_id, google_user_id)
+);
+CREATE INDEX idx_driveshare_google_links_user ON driveshare_google_identity_links(org_id, user_id);
+CREATE TABLE driveshare_attendance_settings (
+  org_id      TEXT PRIMARY KEY,
+  min_percent INTEGER NOT NULL CHECK (min_percent BETWEEN 1 AND 100),
+  updated_by  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+`.trim(),
+};
+
+// Physical twin: infra/d1/migrations/driveshare/0005_google_api_usage.sql (lockstep test).
+// Calendar / Meet calls per UTC minute, read by usage-meter for the 無料枠 dashboard.
+export const DRIVESHARE_GOOGLE_API_USAGE_MIGRATION: Migration = {
+  namespace: "driveshare",
+  id: "0005_google_api_usage",
+  up: `
+CREATE TABLE driveshare_google_api_usage (
+  api    TEXT NOT NULL CHECK (api IN ('calendar','meet')),
+  minute TEXT NOT NULL,
+  calls  INTEGER NOT NULL,
+  PRIMARY KEY (api, minute)
+);
+`.trim(),
+};
+
+// Physical twin: infra/d1/migrations/driveshare/0006_meeting_targets.sql (lockstep test).
+// 複数の対象: a meeting invites the union of its targets (全体 / roles / members). Additive: the
+// meeting's target_id stays (its calendar), and the backfill copies it as the first target.
+export const DRIVESHARE_MEETING_TARGETS_MIGRATION: Migration = {
+  namespace: "driveshare",
+  id: "0006_meeting_targets",
+  up: `
+CREATE TABLE driveshare_meeting_targets (
+  org_id     TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('all','role','person')),
+  target_id  TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  PRIMARY KEY (meeting_id, kind, target_id)
+);
+CREATE INDEX idx_driveshare_meeting_targets_org ON driveshare_meeting_targets(org_id, meeting_id);
+INSERT OR IGNORE INTO driveshare_meeting_targets (org_id, meeting_id, kind, target_id, position)
+SELECT org_id, id, CASE WHEN target_id = 'all' THEN 'all' ELSE 'role' END, target_id, 0
+  FROM driveshare_meetings;
+`.trim(),
+};

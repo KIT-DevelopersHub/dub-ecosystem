@@ -176,6 +176,9 @@ export interface TaskRepo {
     expectedVersion: number,
     now: string,
   ): Promise<{ ok: boolean; added: common.TaskId[]; removed: common.TaskId[] }>;
+  /** 目標管理の実績: 期限が日本時間の `month` (YYYY-MM) に入るチームのタスク件数。中止・アーカイブと、
+   *  子を持つ親タスク (集計用の行) は数えない。 */
+  teamMonthCounts(month: string): Promise<TeamMonthCount[]>;
   /** Find + mark tasks whose due_at is within [now, now+window] and not yet notified. */
   scanDueSoon(nowMs: number, windowMs: number, now: string): Promise<DueSoonRow[]>;
   /** Append an attachment (file/url) to a task. */
@@ -184,6 +187,12 @@ export interface TaskRepo {
   listAttachments(taskId: string): Promise<task.TaskAttachment[]>;
   /** Soft-delete one attachment; false if not found / already archived. */
   archiveAttachment(taskId: string, attachmentId: string, now: string): Promise<boolean>;
+}
+
+export interface TeamMonthCount {
+  teamId: common.TeamId;
+  dueTotal: number;
+  dueDone: number;
 }
 
 export function encodeCursor(id: string): string {
@@ -409,6 +418,19 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       }
       await db.batch(stmts);
       return { ok: true, added, removed };
+    },
+
+    async teamMonthCounts(month: string): Promise<TeamMonthCount[]> {
+      const rows = await db.all<{ team_id: string; due_total: number; due_done: number }>(
+        `SELECT t.team_id, COUNT(*) AS due_total, SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS due_done
+         FROM task_tasks t
+         WHERE t.archived_at IS NULL AND t.team_id IS NOT NULL AND t.status <> 'cancelled'
+           AND substr(datetime(t.due_at, '+9 hours'), 1, 7) = ?
+           AND NOT EXISTS (SELECT 1 FROM task_tasks c WHERE c.parent_id = t.id AND c.archived_at IS NULL)
+         GROUP BY t.team_id`,
+        month,
+      );
+      return rows.map((r) => ({ teamId: r.team_id, dueTotal: r.due_total, dueDone: r.due_done }));
     },
 
     async scanDueSoon(nowMs: number, windowMs: number, now: string): Promise<DueSoonRow[]> {

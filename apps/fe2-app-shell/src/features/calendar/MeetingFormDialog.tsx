@@ -1,9 +1,12 @@
 // 定例ミーティングを設定 / 編集 dialog. Renders inside the @dub/ui Modal portal, so only
 // global @dub/tokens variables are used for colors (feature CSS variables do not reach it).
-import { useEffect, useState } from "react";
-import { Button, DatePicker, FormField, Modal, Select, TextField, Textarea } from "@dub/ui";
-import type { meeting } from "@dub/types";
+import { useEffect, useMemo, useState } from "react";
+import { Button, Checkbox, DatePicker, FormField, Icon, Modal, Select, TextField, Textarea } from "@dub/ui";
+import { ChipSelect, type ChipSelectOption } from "@dub/app-ui";
+import { meeting as meetingValues, type meeting } from "@dub/types";
 import {
+  targetFromValue,
+  targetValue,
   DURATION_OPTIONS,
   TIME_OPTIONS,
   emptyMeetingForm,
@@ -31,11 +34,37 @@ function durationLabel(min: number): string {
   return min % 60 === 0 ? `${min / 60}時間` : `${Math.floor(min / 60)}時間${min % 60}分`;
 }
 
+/** Chip / option for each target: 全体 and roles as groups (brand chip, people icon), members
+ *  as single people (neutral chip, person icon). */
+function targetOptions(targets: readonly meeting.MeetingTarget[], people: readonly meeting.MeetingPersonOption[]): ChipSelectOption[] {
+  return [
+    ...targets.map((t) => ({
+      value: targetValue(t.id === "all" ? { kind: "all", id: t.id } : { kind: "role", id: t.id }),
+      label: t.name,
+      description: t.id === "all" ? `アクティブなメンバー全員・${t.memberCount}人` : `ロール・${t.memberCount}人`,
+      icon: <Icon name="users" size="sm" />,
+      tone: "brand" as const,
+      kind: t.id === "all" ? "全体" : "ロール",
+    })),
+    ...people.map((p) => ({
+      value: targetValue({ kind: "person", id: p.id }),
+      label: p.name,
+      description: "メンバー",
+      icon: <Icon name="user" size="sm" />,
+      tone: "neutral" as const,
+      kind: "メンバー",
+    })),
+  ];
+}
+
 export function MeetingFormDialog({
   open,
   editing,
   targets,
+  people = [],
+  targetsLoading = false,
   accountEmail,
+  initial = null,
   onClose,
   onSubmit,
 }: {
@@ -43,18 +72,35 @@ export function MeetingFormDialog({
   /** null = create. */
   editing: meeting.Meeting | null;
   targets: readonly meeting.MeetingTarget[];
+  /** Members that can be added one by one. */
+  people?: readonly meeting.MeetingPersonOption[];
+  /** The targets / people are still loading (the field shows skeleton rows). */
+  targetsLoading?: boolean;
   accountEmail: string | null;
+  /** Prefill for a create (a repeating 予定 handed over from the 作成 dialog). */
+  initial?: MeetingFormValues | null;
   onClose: () => void;
   onSubmit: (body: meeting.CreateMeetingRequest) => void;
 }): JSX.Element | null {
-  const [form, setForm] = useState<MeetingFormValues>(() => (editing ? meetingToForm(editing) : emptyMeetingForm()));
+  const [form, setForm] = useState<MeetingFormValues>(() => (editing ? meetingToForm(editing) : initial ?? emptyMeetingForm()));
   const [errors, setErrors] = useState<MeetingFormErrors>({});
 
   useEffect(() => {
     if (!open) return;
-    setForm(editing ? meetingToForm(editing) : emptyMeetingForm());
+    setForm(editing ? meetingToForm(editing) : initial ?? emptyMeetingForm());
     setErrors({});
-  }, [open, editing]);
+  }, [open, editing, initial]);
+
+  const options = useMemo(() => targetOptions(targets, people), [targets, people]);
+  // A target the list no longer has (deleted role / gone member) keeps its name from the meeting.
+  const fallbackOption = useMemo(() => {
+    const known = new Map((editing ? meetingValues.targetsOfMeeting(editing) : []).map((t) => [targetValue(t), t]));
+    return (v: string): ChipSelectOption => {
+      const t = known.get(v);
+      const person = v.startsWith("person:");
+      return { value: v, label: t?.name ?? (person ? "（無効なメンバー）" : "（削除されたロール）"), tone: person ? "neutral" : "brand", icon: <Icon name={person ? "user" : "users"} size="sm" /> };
+    };
+  }, [editing]);
 
   if (!open) return null;
 
@@ -74,7 +120,6 @@ export function MeetingFormDialog({
   const recurrenceOptions: { value: meeting.MeetingRecurrence; label: string }[] = (
     ["none", "weekly", "biweekly", "monthly_weekday"] as const
   ).map((r) => ({ value: r, label: recurrenceLabel(r, anchor) }));
-  const targetOptions = targets.map((t) => ({ value: t.id, label: `${t.name}（${t.memberCount}人）` }));
   const tid = "calendar-meeting-form";
 
   return (
@@ -104,8 +149,25 @@ export function MeetingFormDialog({
           <TextField id={`${tid}-title`} value={form.title} onChange={(v) => set("title", v)} placeholder="例: 全体定例" testId={`${tid}-title`} />
         </FormField>
 
-        <FormField label="対象" htmlFor={`${tid}-target`} required error={errors.targetId} help="対象のメンバー全員を招待します">
-          <Select id={`${tid}-target`} value={form.targetId || null} onChange={(v) => set("targetId", v)} options={targetOptions} placeholder="選択してください" testId={`${tid}-target`} />
+        <FormField
+          label="対象"
+          htmlFor={`${tid}-target`}
+          required
+          error={errors.targets}
+          help="全体・ロール・メンバーを入力して追加できます（複数可）。どれかに含まれる人を全員招待します"
+        >
+          <ChipSelect
+            id={`${tid}-target`}
+            testId={`${tid}-target`}
+            aria-label="対象を追加"
+            value={form.targets.map(targetValue)}
+            onChange={(vs) => set("targets", vs.map(targetFromValue).filter((t): t is meeting.MeetingTargetRef => t !== null))}
+            options={options}
+            fallbackOption={fallbackOption}
+            loading={targetsLoading}
+            invalid={!!errors.targets}
+            placeholder="ロールやメンバーの名前を入力"
+          />
         </FormField>
 
         <div className={styles.meetingFormRow}>
@@ -149,6 +211,20 @@ export function MeetingFormDialog({
 
         <FormField label="メモ" htmlFor={`${tid}-description`} help="Google カレンダーの予定の説明欄に入ります">
           <Textarea id={`${tid}-description`} value={form.description} onChange={(v) => set("description", v)} rows={3} testId={`${tid}-description`} />
+        </FormField>
+
+        <FormField
+          label="出席"
+          htmlFor={`${tid}-track`}
+          help="オンにすると、Dub（ダッシュボードの「定例に参加」）から Meet に入った人を出席として記録します。出席は 人事 → 出席 で確認できます。"
+        >
+          <Checkbox
+            id={`${tid}-track`}
+            testId={`${tid}-track`}
+            checked={form.trackAttendance}
+            label={form.targets.some((t) => t.kind === "all") ? "全体定例として出席を取る" : "チーム定例として出席を取る"}
+            onChange={(v) => set("trackAttendance", v)}
+          />
         </FormField>
       </div>
     </Modal>

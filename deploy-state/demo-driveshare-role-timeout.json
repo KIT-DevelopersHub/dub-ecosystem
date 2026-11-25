@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "driveshare-role-timeout",
+  "worker": "dub-demo-driveshare-role-timeout",
+  "url": "https://dub-demo-driveshare-role-timeout.developershub-site.workers.dev",
+  "deployedSha": "a6d1e9eb",
+  "branch": "fix/driveshare-role-share-timeout",
+  "actor": "ko-tarou",
+  "markers": ["fe2-driveshare-role-progress","再適用が途中で止まりました"],
+  "live": true,
+  "verifiedAt": "2026-11-05T19:48:13Z",
+  "updatedAt": "2026-11-05T19:48:13Z",
+  "note": "Drive共有 大人数ロールの共有を分割"
+}

@@ -14,7 +14,10 @@ const MEMBERS_VIEW = { keys: [], appLevel: { app: "members", level: "view" } } a
 const ROSTER = { keys: ["identity:read"] } as const;
 const MAIL_ADMIN = { keys: ["mail:admin"] } as const;
 const MEMBERS_EDIT = { keys: [], appLevel: { app: "members", level: "edit" } } as const;
+const ROSTER_VIEW = { keys: ["members:roster_view"], appLevel: { app: "members", level: "view" } } as const;
+const ROSTER_EDIT = { keys: ["members:roster_edit"], appLevel: { app: "members", level: "edit" } } as const;
 const ADMIN_EDIT = { keys: ["identity:admin"], appLevel: { app: "admin", level: "edit" } } as const;
+const MAIL_ROSTER_EDIT = { keys: ["identity:admin", "app:members:edit", "members:mail_edit"], appLevel: { app: "admin", level: "edit" } } as const;
 
 // 名簿 (member_people) の中身: 氏名・連絡先・プロフィール各項目。プロフィール項目は
 // 共通契約 (@dub/types) を正典にし、項目追加がここへ自動で届くようにする。
@@ -45,7 +48,7 @@ export const MEMBER: AreaSpec = {
       area: "member",
       path: "/members/overview",
       service: M,
-      requires: MEMBERS_VIEW,
+      requires: ROSTER_VIEW,
       description: "メンバー名簿（チームと所属メンバー）を取得する",
       hint: "{ teams[], members[] }。members[].id・name・status・teamIds・identityUserId・roleTitle・schoolEmail・gmail・phone・grade・department・rosterNumber・studentNumber・version（gmail 等の空欄は未登録）。identityUserId = ログインアカウントの id（tasks の assigneeId・users の id と同じ。null はアカウント未紐付けで担当を照合できない）",
     }),
@@ -63,7 +66,7 @@ export const MEMBER: AreaSpec = {
       area: "member",
       path: "/members/people/by-identity/:identityUserId",
       service: M,
-      requires: MEMBERS_VIEW,
+      requires: ROSTER_VIEW,
       description: "ログインアカウントに紐づく名簿のメンバーを取得する",
       hint: "{ member | null }。紐付けが無ければ null",
     }),
@@ -225,7 +228,7 @@ export const MEMBER: AreaSpec = {
       method: "PATCH",
       path: "/members/people/:id",
       service: M,
-      requires: MEMBERS_EDIT,
+      requires: ROSTER_EDIT,
       kind: "write",
       reversible: true,
       risk: "mid",
@@ -242,7 +245,7 @@ export const MEMBER: AreaSpec = {
       method: "POST",
       path: "/members/people/:id/identity-link",
       service: M,
-      requires: MEMBERS_EDIT,
+      requires: ROSTER_EDIT,
       kind: "write",
       reversible: true,
       risk: "mid",
@@ -259,7 +262,7 @@ export const MEMBER: AreaSpec = {
       method: "POST",
       path: "/identity/users/invite",
       service: I,
-      requires: ADMIN_EDIT,
+      requires: MAIL_ROSTER_EDIT,
       kind: "write",
       reversible: false,
       risk: "mid",
@@ -276,7 +279,7 @@ export const MEMBER: AreaSpec = {
       method: "PATCH",
       path: "/identity/users/:id",
       service: I,
-      requires: ADMIN_EDIT,
+      requires: MAIL_ROSTER_EDIT,
       kind: "write",
       reversible: true,
       risk: "mid",
@@ -290,8 +293,11 @@ export const MEMBER: AreaSpec = {
     },
   ],
   excluded: [
+    { service: M, route: "GET /members/org-overview", reason: "組織図までのロールの画面用。members.overview から個人情報を落としただけで、ボットには overview で足りる" },
+    { service: M, route: "PATCH /members/people/:id/org", reason: "組織図までのロールの画面用。同じ更新は members.people.update でできる" },
     { service: M, route: "POST /members/teams", reason: "依頼範囲外。チームの削除を開放しないため、作ったチームを取り消せない" },
     { service: M, route: "DELETE /members/teams/:id", reason: "チームを物理削除し、所属の紐付けも消える（不可逆）" },
+    { service: M, route: "POST /members/people/:id/profile-reminder", reason: "本人の受信箱とプッシュに直接届き、送った通知は取り消せない（運営名簿で管理者が対象を確認して送る操作）" },
     { service: M, route: "DELETE /members/people/:id", reason: "アーカイブ後は API から見えず戻せない。チーム所属も物理削除される（不可逆）" },
     { service: M, route: "POST /members/participation/:id/resolve", reason: "参加届の紐付け。取り消す API が無い（不可逆）" },
     { service: M, route: "POST /members/participation", reason: "参加届を出す側の操作で、ボットが出す用途が無い" },
@@ -317,8 +323,45 @@ export const MEMBER: AreaSpec = {
     { service: "member-service", route: "POST /members/hr/applicants/:id/notes" },
     { service: "member-service", route: "POST /members/hr/applicants/:id/join" },
     { service: "member-service", route: "DELETE /members/hr/applicants/:id" },
+    // 面談申し込みフォーム (定義の編集・回答一覧・代理入力)。公開受付 /members/internal/hr/interview-form は INTERNAL で対象外。
+    { service: "member-service", route: "GET /members/hr/interview-form" },
+    { service: "member-service", route: "PUT /members/hr/interview-form" },
+    { service: "member-service", route: "GET /members/hr/interview-form/responses" },
+    { service: "member-service", route: "POST /members/hr/interview-form/responses" },
+    // 面談の日程調整 (面談枠・案内メール)。公開の日程選択 /members/internal/hr/interview-booking/* は INTERNAL で対象外。
+    { service: "member-service", route: "GET /members/hr/interviews" },
+    { service: "member-service", route: "PUT /members/hr/interviews/settings" },
+    { service: "member-service", route: "POST /members/hr/interviews/slots" },
+    { service: "member-service", route: "POST /members/hr/interviews/slots/delete" },
+    { service: "member-service", route: "DELETE /members/hr/interviews/slots/:id" },
+    { service: "member-service", route: "POST /members/hr/interviews/slots/:id/release" },
+    { service: "member-service", route: "POST /members/hr/interviews/invites/:id/send" },
     { service: "member-service", route: "GET /members/hr/onboarding" },
     { service: "member-service", route: "PUT /members/hr/onboarding/:memberId/items/:itemId" },
+    // スポンサー (名刺の共有 /members/sponsor/*) も新設したばかり。写真のバイト列を扱うので Commander からは触らせない方向。
+    // 目標管理 (/members/goals) も新設したばかり。Commander から操作させるかは使われ方を見て決める。
+    { service: "member-service", route: "GET /members/goals" },
+    { service: "member-service", route: "PUT /members/goals/:teamId/:month" },
+    { service: "member-service", route: "DELETE /members/goals/:teamId/:month" },
+    { service: "member-service", route: "GET /members/sponsor/cards" },
+    { service: "member-service", route: "GET /members/sponsor/cards/:id" },
+    { service: "member-service", route: "POST /members/sponsor/cards" },
+    { service: "member-service", route: "PATCH /members/sponsor/cards/:id" },
+    { service: "member-service", route: "DELETE /members/sponsor/cards/:id" },
+    { service: "member-service", route: "PUT /members/sponsor/cards/:id/image" },
+    { service: "member-service", route: "GET /members/sponsor/cards/:id/image" },
+    // 営業進捗と月間目標 (/members/sponsor/leads・goals) も新設したばかり。協賛額や担当者の連絡先を含む。
+    { service: "member-service", route: "GET /members/sponsor/leads" },
+    { service: "member-service", route: "GET /members/sponsor/leads/:id" },
+    { service: "member-service", route: "POST /members/sponsor/leads" },
+    { service: "member-service", route: "POST /members/sponsor/leads/import" },
+    { service: "member-service", route: "PATCH /members/sponsor/leads/:id" },
+    { service: "member-service", route: "DELETE /members/sponsor/leads/:id" },
+    { service: "member-service", route: "GET /members/sponsor/goals" },
+    // メール連携 (担当者メールへの登録・自動更新の履歴・既存メールからの一括補完) も新設したばかり。一括補完は全社の日付を書き換えうる。
+    { service: "member-service", route: "POST /members/sponsor/leads/:id/contact-emails" },
+    { service: "member-service", route: "GET /members/sponsor/leads/:id/activity" },
+    { service: "member-service", route: "POST /members/sponsor/leads/mail-backfill" },
   ],
   ownerOpenedIrreversible: {
     "mail.issued.create": "確認メールの送信は取り消せないが、受信は mail.issued.setEnabled で停止できる",

@@ -1,0 +1,282 @@
+// 「面談結果を登録」ダイアログ (面談確定・面談済みの応募者)。
+//  1. 入力: 合否・理由 (必須・社内の記録)・理由をメールに含めるか (既定 OFF)・合格なら発行するアドレス。
+//     下にメールのプレビュー (送る文面と同じ @dub/types hrResult.renderResultMail)。
+//     合格なら名簿に入れる時の所属チーム (既定 = 希望チーム・複数可) と上長 (任意) も選ぶ (運営メンバーの編集と同じ形)。
+//  2. 確認: 送り先と、合格ならアカウント発行・所属チーム・上長を明示してから送る。
+// 送信は非楽観 (アカウント発行とメールを伴う)。サーバーが応募者ごとに 1 件に絞るので、二度押ししても 1 回だけ。
+import { useMemo, useRef, useState } from "react";
+import { Button, Checkbox, FormField, Modal, SegmentedControl, Select, SkeletonLoader, TextField, Textarea, useToast } from "@dub/ui";
+import type { SelectOption } from "@dub/ui";
+import { hrForm, hrResult, member, type hr } from "@dub/types";
+import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { kanaToRomaji } from "../../lib/romaji.ts";
+import { orgChartOrder, tierOf } from "../members/orgChartOrder.ts";
+import { useHrOrgMembers, useHrTeams, useRegisterInterviewResult } from "./hrHooks.ts";
+import styles from "./hr.module.css";
+
+export const MAIL_DOMAIN = "developershub.jp";
+
+/** 参加届からの発行と同じ命名 (名.姓 のローマ字)。フリガナが無ければ空 (人事が入れる)。 */
+export function suggestLocalPart(nameKana: string | null): string {
+  const parts = (nameKana ?? "").trim().split(/[\s　]+/).filter(Boolean);
+  const clean = (v: string): string => kanaToRomaji(v).toLowerCase().replace(/[^a-z]/g, "");
+  const [last, first] = parts.length >= 2 ? [clean(parts[0]!), clean(parts.slice(1).join(""))] : [clean(parts[0] ?? ""), ""];
+  if (first && last) return `${first}.${last}`;
+  return first || last;
+}
+
+/** 結果を登録できる人 (面談確定・面談済み)。 */
+export function canRegisterResult(a: hr.Applicant): boolean {
+  return hrResult.RESULT_STAGES.includes(a.stage);
+}
+
+const NO_LEADER = "";
+
+/** 上長の候補: 辞退者を除き、運営メンバーの編集と同じく組織図順・役割を添えて並べる。 */
+export function leaderOptionsOf(members: readonly member.Member[]): SelectOption<string>[] {
+  return [
+    { value: NO_LEADER, label: "なし（直属リーダーなし）" },
+    ...orgChartOrder(members.filter((m) => m.status !== "declined")).map((m) => ({
+      value: m.id,
+      label: `${m.name}（${m.roleTitle ?? member.POSITION_LABEL[m.position ?? tierOf(m)]}）`,
+    })),
+  ];
+}
+
+function errorMessage(err: unknown): string {
+  return ApiError.isApiError(err) ? toDisplayableError(err).message : "登録できませんでした";
+}
+
+export function InterviewResultDialog({ applicant, onClose }: { applicant: hr.Applicant | null; onClose: () => void }): JSX.Element | null {
+  if (!applicant) return null;
+  return <ResultForm key={applicant.id} applicant={applicant} onClose={onClose} />;
+}
+
+function ResultForm({ applicant: a, onClose }: { applicant: hr.Applicant; onClose: () => void }): JSX.Element {
+  const register = useRegisterInterviewResult();
+  const toast = useToast();
+  const [decision, setDecision] = useState<hrResult.InterviewDecision | null>(null);
+  const [reason, setReason] = useState("");
+  const [includeReason, setIncludeReason] = useState(false);
+  const [localPart, setLocalPart] = useState(() => suggestLocalPart(a.nameKana));
+  const [step, setStep] = useState<"input" | "confirm">("input");
+  // 合格の所属: チームは希望チームを最初から選んでおく (チーム一覧の読み込みを待たずに既定が決まる)。
+  const [teamIds, setTeamIds] = useState<string[]>(() => (a.desiredTeamId ? [a.desiredTeamId] : []));
+  const [leaderId, setLeaderId] = useState<string>(NO_LEADER);
+  const teams = useHrTeams();
+  const orgMembers = useHrOrgMembers(decision === "pass");
+  const teamList = teams.data?.teams ?? [];
+  const leaderOptions = useMemo(() => leaderOptionsOf(orgMembers.data?.members ?? []), [orgMembers.data]);
+  const toggleTeam = (id: string, checked: boolean): void =>
+    setTeamIds((prev) => (checked ? [...new Set([...prev, id])] : prev.filter((t) => t !== id)));
+  // 一覧に無いチーム (削除された希望チームなど) は送らない (サーバーで 400 になるため)。
+  const chosenTeams = teamList.filter((t) => teamIds.includes(t.id));
+  const chosenTeamNames = chosenTeams.map((t) => t.name);
+  const leaderLabel = leaderId ? leaderOptions.find((o) => o.value === leaderId)?.label ?? null : null;
+  // isPending は次の描画まで立たないので、同じ描画内の二度押しはここで止める (サーバーも 1 件に絞る)。
+  const sending = useRef(false);
+
+  const address = `${localPart.trim().toLowerCase()}@${MAIL_DOMAIN}`;
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const preview = useMemo(() => {
+    if (!decision) return null;
+    return hrResult.renderResultMail({
+      decision,
+      name: a.name,
+      reason: includeReason ? reason : null,
+      address,
+      teamNames: chosenTeamNames,
+      appUrl: `${origin}/`,
+      participationUrl: `${origin}${hrForm.PUBLIC_PARTICIPATION_PATH}#prefill=…`,
+      onboardingUrl: `${origin}${hrResult.PUBLIC_ONBOARDING_PATH}`,
+    });
+  }, [decision, a.name, includeReason, reason, address, origin, chosenTeamNames.join("\n")]);
+
+  // 合格はチーム一覧が読めてから進める (選んだチームを確認の画面に出すため)。読めなければ再読み込みを促す。
+  const ready =
+    decision !== null &&
+    reason.trim() !== "" &&
+    (decision === "fail" || (localPart.trim() !== "" && teams.isSuccess)) &&
+    !!a.email;
+
+  const submit = (): void => {
+    if (!decision || sending.current) return;
+    sending.current = true;
+    register.mutate(
+      {
+        applicantId: a.id,
+        body: {
+          decision,
+          reason: reason.trim(),
+          includeReasonInMail: includeReason,
+          ...(decision === "pass"
+            ? { localPart: localPart.trim().toLowerCase(), teamIds: chosenTeams.map((t) => t.id), leaderId: leaderId || null }
+            : {}),
+        },
+      },
+      {
+        onSuccess: (res) => {
+          const title = res.alreadyRegistered
+            ? "この応募者の結果は登録済みです（何も送っていません）"
+            : decision === "pass"
+              ? `合格を登録し、${a.email} にメールを送りました`
+              : `不合格を登録し、${a.email} にメールを送りました`;
+          toast.show({
+            kind: res.alreadyRegistered ? "info" : "success",
+            title,
+            ...(decision === "pass" && !res.alreadyRegistered
+              ? { description: res.accountMailSent ? "ログイン情報のメールも送りました" : "ログイン情報のメールは送れませんでした。ユーザー名簿から送り直してください" }
+              : {}),
+          });
+          onClose();
+        },
+        onError: () => setStep("input"),
+        onSettled: () => {
+          sending.current = false;
+        },
+      },
+    );
+  };
+
+  const footer =
+    step === "input" ? (
+      <>
+        <Button variant="ghost" onClick={onClose} testId="fe2-hr-result-cancel">
+          キャンセル
+        </Button>
+        <Button variant="primary" disabled={!ready} onClick={() => setStep("confirm")} testId="fe2-hr-result-next">
+          確認へ
+        </Button>
+      </>
+    ) : (
+      <>
+        <Button variant="ghost" onClick={() => setStep("input")} disabled={register.isPending} testId="fe2-hr-result-back">
+          戻る
+        </Button>
+        <Button
+          variant={decision === "fail" ? "danger" : "primary"}
+          onClick={submit}
+          loading={register.isPending}
+          disabled={register.isPending}
+          testId="fe2-hr-result-submit"
+        >
+          {decision === "pass" ? "アカウントを発行して送信" : "送信する"}
+        </Button>
+      </>
+    );
+
+  return (
+    <Modal open onClose={register.isPending ? () => undefined : onClose} title={`面談結果を登録: ${a.name}`} size="lg" footer={footer} testId="fe2-hr-result-dialog">
+      {step === "input" ? (
+        <div className={styles.detail}>
+          <SegmentedControl<hrResult.InterviewDecision>
+            caption="合否"
+            aria-label="合否"
+            value={decision}
+            onChange={(d) => setDecision(d)}
+            options={hrResult.INTERVIEW_DECISIONS.map((d) => ({ value: d, label: hrResult.DECISION_LABELS[d], testId: `fe2-hr-result-decision-${d}` }))}
+            testId="fe2-hr-result-decision"
+          />
+          <FormField label="理由" htmlFor="hr-result-reason" required help="社内の記録として履歴に残ります。">
+            <Textarea id="hr-result-reason" testId="fe2-hr-result-reason" rows={3} value={reason} onChange={setReason} />
+          </FormField>
+          <Checkbox
+            id="hr-result-include-reason"
+            testId="fe2-hr-result-include-reason"
+            checked={includeReason}
+            onChange={setIncludeReason}
+            label="理由をメールに含める（応募者に届きます）"
+          />
+          {decision === "pass" ? (
+            <FormField label="発行するメールアドレス" htmlFor="hr-result-localpart" help="フリガナのローマ字から作った案です。必要なら書き換えてください。">
+              <div className={styles.mailRow}>
+                <TextField id="hr-result-localpart" testId="fe2-hr-result-localpart" value={localPart} onChange={setLocalPart} placeholder="taro.yamada" />
+                <span className={styles.mailSuffix}>@{MAIL_DOMAIN}</span>
+              </div>
+            </FormField>
+          ) : null}
+          {decision === "pass" ? (
+            <FormField label="所属チーム" htmlFor="hr-result-teams" help="名簿に入れる時のチームです。希望チームを選んであります（複数選択できます）。">
+              {teams.isLoading ? (
+                <SkeletonLoader lines={3} testId="fe2-hr-result-teams-loading" />
+              ) : teams.isError ? (
+                <p className={styles.resultAlert} role="alert" data-testid="fe2-hr-result-teams-error">
+                  チームの一覧を読み込めませんでした。閉じてからもう一度開いてください。
+                </p>
+              ) : teamList.length === 0 ? (
+                <p className={styles.placementEmpty}>チームがまだありません（チームなしで名簿に入ります）</p>
+              ) : (
+                <div className={styles.teamCheckList} id="hr-result-teams" data-testid="fe2-hr-result-teams">
+                  {teamList.map((t) => (
+                    <Checkbox
+                      key={t.id}
+                      id={`hr-result-team-${t.id}`}
+                      testId={`fe2-hr-result-team-${t.id}`}
+                      checked={teamIds.includes(t.id)}
+                      onChange={(c) => toggleTeam(t.id, c)}
+                      label={t.id === a.desiredTeamId ? `${t.name}（希望）` : t.name}
+                    />
+                  ))}
+                </div>
+              )}
+            </FormField>
+          ) : null}
+          {decision === "pass" && !orgMembers.isError ? (
+            <FormField label="リーダー（上長）" htmlFor="hr-result-leader" help="この人が配下につくリーダーです（任意）。組織図と名簿の並びに使われます。">
+              {orgMembers.isLoading ? (
+                <SkeletonLoader lines={1} testId="fe2-hr-result-leader-loading" />
+              ) : (
+                <Select<string> id="hr-result-leader" value={leaderId} onChange={setLeaderId} options={leaderOptions} testId="fe2-hr-result-leader" />
+              )}
+            </FormField>
+          ) : null}
+          {!a.email ? (
+            <p className={styles.resultAlert} role="alert" data-testid="fe2-hr-result-no-email">
+              応募者のメールアドレスが無いため、結果を送れません。
+            </p>
+          ) : null}
+          {register.isError ? (
+            <p className={styles.resultAlert} role="alert" data-testid="fe2-hr-result-error">
+              {errorMessage(register.error)}
+            </p>
+          ) : null}
+          {preview ? (
+            <div data-testid="fe2-hr-result-preview">
+              <div className={styles.sectionTitle}>メールのプレビュー（宛先: {a.email ?? "—"}）</div>
+              <div className={styles.mailPreview}>
+                <div className={styles.mailSubject}>{preview.subject}</div>
+                <pre className={styles.mailBody}>{preview.textBody}</pre>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className={styles.detail} data-testid="fe2-hr-result-confirm">
+          <p>
+            {a.name} さんを<strong>「{decision ? hrResult.DECISION_LABELS[decision] : ""}」</strong>として登録し、{a.email} に結果のメールを送ります。送ったメールは取り消せません。
+          </p>
+          {decision === "pass" ? (
+            <ul className={styles.resultList}>
+              <li>
+                <strong>{address}</strong> のメールアドレスと Dub のアカウント（一般メンバー）を発行します
+              </li>
+              <li>運営メンバー・名簿に在籍として追加し、ステータスを「採用」にします</li>
+              <li data-testid="fe2-hr-result-confirm-teams">
+                所属チーム: <strong>{chosenTeamNames.length > 0 ? chosenTeamNames.join("、") : "なし"}</strong>
+              </li>
+              <li data-testid="fe2-hr-result-confirm-leader">
+                リーダー（上長）: <strong>{leaderLabel ?? "なし"}</strong>
+              </li>
+              <li>初期パスワードは既存の「アカウント発行のお知らせ」メールで別に届きます</li>
+            </ul>
+          ) : (
+            <ul className={styles.resultList}>
+              <li>ステータスを「不合格」にします</li>
+              <li>理由はメールに{includeReason ? "含めます" : "含めません（社内の記録だけに残ります）"}</li>
+            </ul>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}

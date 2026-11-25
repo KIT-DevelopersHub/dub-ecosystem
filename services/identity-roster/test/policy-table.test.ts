@@ -36,10 +36,10 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
     expect(() => assertRouteCoverage(h.app, POLICY_TABLE)).not.toThrow();
   });
 
-  it("lists all 36 endpoints of this service", async () => {
+  it("lists all 41 endpoints of this service", async () => {
     const h = await makeHarness();
-    expect(protectableRouteKeys(h.app)).toHaveLength(36);
-    expect(Object.keys(POLICY_TABLE)).toHaveLength(36);
+    expect(protectableRouteKeys(h.app)).toHaveLength(41);
+    expect(Object.keys(POLICY_TABLE)).toHaveLength(41);
   });
 
   it("catches a new endpoint added without a table entry, and denies it at runtime", async () => {
@@ -66,7 +66,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 // app:admin:* key at all. The last three rows are not roles but the shapes this table had to
 // get right (and that roles.test.ts exercises at runtime).
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  admin: ["identity:read", "identity:admin", "app:admin:view", "app:admin:edit"],
+  admin: ["identity:read", "identity:admin", "app:admin:view", "app:admin:edit", "app:members:view", "app:members:edit", "members:mail_edit"],
   maintainer: ["identity:read"],
   organizer: ["identity:read"],
   member: ["identity:read"],
@@ -121,7 +121,9 @@ const WRITES = [
 ];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = [
+  "GET /internal/roles",
   "GET /internal/users",
+  "GET /internal/permission-holders",
   "GET /internal/users/:id/permissions",
   "GET /internal/users/:id/mail-visible-users",
   "GET /users/:id",
@@ -130,6 +132,9 @@ const INTERNAL_ROUTES = [
   "POST /internal/users/lookup",
   "POST /internal/users/avatars",
   "POST /users/provision",
+  "POST /internal/users/:id/activate",
+  "POST /internal/users/onboard",
+  "POST /internal/users/:id/discard-onboard",
   "POST /internal/webauthn/challenges",
   "POST /internal/webauthn/challenges/take",
   "GET /internal/webauthn/users/:id/credentials",
@@ -173,6 +178,17 @@ describe("role x endpoint matrix (frozen)", () => {
   it("no role, however privileged, reaches an INTERNAL route from outside", () => {
     const everyKey = [...new Set(Object.values(ROLE_KEYS).flat())];
     for (const route of INTERNAL_ROUTES) expect(allowedRoutes(everyKey)).not.toContain(route);
+  });
+
+  it("メール名簿の書き込みは編集範囲「全て」が要り、ロール管理の書き込みには影響しない", () => {
+    const narrowed = ROLE_KEYS.admin!.filter((k) => k !== "members:mail_edit");
+    const routes = allowedRoutes(narrowed);
+    expect(routes).not.toContain("PATCH /identity/users/:id");
+    expect(routes).not.toContain("POST /identity/users/invite");
+    expect(routes).toContain("PATCH /identity/roles/:id");
+    expect(routes).toContain("POST /identity/users/:id/roles");
+    // 範囲だけでは足りない: identity:admin の無いロールには書き込みを渡さない。
+    expect(allowedRoutes(["app:members:view", "app:members:edit", "members:mail_edit"])).not.toContain("PATCH /identity/users/:id");
   });
 
   // The single most dangerous line in the table: assigning a role is how every permission in
@@ -239,9 +255,12 @@ describe("INTERNAL routes at runtime", () => {
     // The whole internal surface, with the most privileged possible external caller.
     const routes: [string, string][] = [
       ["POST", "/users/provision"],
+      ["POST", `/internal/users/${h.memberId}/activate`],
       ["GET", `/users/${h.memberId}`],
       ["POST", `/internal/users/${h.memberId}/profile`],
       ["GET", "/internal/users"],
+      ["GET", "/internal/roles"],
+      ["GET", "/internal/permission-holders?key=notif:receive_admin"],
       ["POST", "/internal/users/lookup"],
       ["GET", `/internal/users/${h.memberId}/permissions`],
       ["GET", `/internal/users/${h.memberId}/mail-visible-users`],

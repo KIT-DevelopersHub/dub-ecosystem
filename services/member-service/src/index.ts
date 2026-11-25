@@ -9,14 +9,25 @@ import { consoleSink } from "@dub/observability";
 import { createApp } from "./app";
 import { createD1MemberRepo } from "./d1-repo";
 import { createD1HrRepo } from "./hr-repo";
+import { createD1HrFormRepo } from "./hr-form-repo";
+import { createD1HrInterviewRepo } from "./hr-interview-repo";
+import { createD1HrResultRepo } from "./hr-result-repo";
+import { interviewerNotifierVia, sendHrMailVia } from "./hr-interview-mail";
+import { createD1GoalRepo, createGoalSources } from "./goal-repo";
+import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
+import { createD1SponsorLeadRepo } from "./sponsor-lead-repo";
+import { createD1SponsorMailRepo } from "./sponsor-mail-repo";
+import { mailContactsVia } from "./sponsor-mail-client";
 import { notifyAdminsOfParticipation } from "./participationNotify";
+import { sendProfileReminderVia } from "./profileReminder";
 import { createIdentityRoleSync } from "./roleSync";
+import { createIdentityActivation } from "./identityActivation";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
 export type { Env } from "./env";
 
-export function buildDeps(env: Env, requestId?: string): AppDeps {
+export function buildDeps(env: Env, requestId?: string, exec?: ExecutionContext): AppDeps {
   const db = createDbClient(env.DB, {
     namespace: "member",
     ...(requestId ? { requestId } : {}),
@@ -41,19 +52,39 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newParticipationId: () => newId("part"),
     newOnboardingItemId: () => newId("onb"),
     hrRepo: createD1HrRepo(db),
+    hrFormRepo: createD1HrFormRepo(db),
+    hrInterviewRepo: createD1HrInterviewRepo(db),
+    hrResultRepo: createD1HrResultRepo(db),
+    ...(env.SVC_MAIL ? { sendHrMail: sendHrMailVia(env.SVC_MAIL) } : {}),
+    ...(env.SVC_NOTIFICATION ? { notifyInterviewer: interviewerNotifierVia(env.SVC_NOTIFICATION) } : {}),
+    ...(env.APP_BASE_URL ? { appBaseUrl: env.APP_BASE_URL } : {}),
+    ...(exec ? { defer: (work: Promise<void>) => exec.waitUntil(work) } : {}),
     // 名簿のチーム・役職 -> identity の自動ロール (best-effort・PUT /internal/*managed-roles)。
     roleSync: createIdentityRoleSync(env.SVC_IDENTITY),
+    // 在籍で紐付いた人の招待中アカウントを有効化 (best-effort・POST /internal/users/:id/activate)。
+    identityActivation: createIdentityActivation(env.SVC_IDENTITY),
     newHrId: (prefix) => newId(prefix),
+    sponsorRepo: createD1SponsorRepo(db),
+    ...(env.SPONSOR_FILES ? { sponsorImages: r2ImageStore(env.SPONSOR_FILES) } : {}),
+    newSponsorCardId: () => newId("card"),
+    sponsorLeadRepo: createD1SponsorLeadRepo(db),
+    newSponsorLeadId: () => newId("lead"),
+    sponsorMailRepo: createD1SponsorMailRepo(db),
+    newSponsorMailId: (prefix) => newId(prefix),
+    ...(env.SVC_MAIL ? { mailContacts: mailContactsVia(env.SVC_MAIL) } : {}),
+    goalRepo: createD1GoalRepo(db),
+    goalSources: createGoalSources(env),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),
+    ...(env.SVC_NOTIFICATION ? { sendProfileReminder: sendProfileReminderVia(env.SVC_NOTIFICATION) } : {}),
   };
 }
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, exec: ExecutionContext): Promise<Response> {
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
-    const app = createApp(buildDeps(env, requestId));
+    const app = createApp(buildDeps(env, requestId, exec));
     return app.fetch(request as unknown as Request) as unknown as Response;
   },
 };

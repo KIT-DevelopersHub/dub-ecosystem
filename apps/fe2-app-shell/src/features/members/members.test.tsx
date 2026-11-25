@@ -46,6 +46,7 @@ const OVERVIEW: MembersOverview = {
 function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
   return {
     getOverview: () => Promise.resolve(OVERVIEW),
+    getOrgOverview: () => Promise.resolve(OVERVIEW),
     listTeams: () => Promise.resolve({ teams: OVERVIEW.teams }),
     createTeam: vi.fn(),
     updateTeam: vi.fn(),
@@ -55,13 +56,14 @@ function makeApi(overrides: Partial<MembersApi> = {}): MembersApi {
     deleteMember: vi.fn(() => Promise.resolve()),
     linkIdentity: vi.fn(() => Promise.resolve(OVERVIEW.members[0]!)),
     listIdentityUsers: vi.fn(() => Promise.resolve({ items: [], nextCursor: null })),
+    sendProfileReminder: vi.fn(() => Promise.resolve({ deduplicated: false, missing: [] })),
     ...overrides,
   } as MembersApi;
 }
 
 // Default subject: 運営メンバー app at 編集 (+ identity:admin) — what member-service now
 // demands for a write. Pass `permissions` to render as a 閲覧 subject instead.
-function wrap(ui: ReactNode, api: MembersApi, permissions = editorPermissions("members", ["identity:read", "identity:admin"])): JSX.Element {
+function wrap(ui: ReactNode, api: MembersApi, permissions = editorPermissions("members", ["identity:read", "identity:admin", "members:roster_view", "members:roster_edit"])): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={client}>
@@ -97,17 +99,56 @@ describe("createMembersApi", () => {
   });
 });
 
+describe("MembersPage — 運営メンバーの範囲", () => {
+  it("組織図まで: 個人情報なしの overview を読み、編集は運営での項目だけ /org へ送る", async () => {
+    const getOverview = vi.fn(() => Promise.resolve(OVERVIEW));
+    const getOrgOverview = vi.fn(() => Promise.resolve(OVERVIEW));
+    const updateMemberOrg = vi.fn<MembersApi["updateMemberOrg"]>(() => Promise.resolve(OVERVIEW.members[0]!));
+    const updateMember = vi.fn();
+    const api = makeApi({ getOverview, getOrgOverview, updateMemberOrg, updateMember });
+    render(wrap(<MembersPage />, api, editorPermissions("members", ["identity:read"])));
+
+    expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
+    expect(getOrgOverview).toHaveBeenCalled();
+    expect(getOverview).not.toHaveBeenCalled();
+
+    const first = OVERVIEW.members[0]!;
+    await userEvent.click(screen.getByRole("button", { name: `${first.name} を編集` }));
+    expect(screen.queryByTestId("members-form-profile-section")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("連絡先")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("members-form-submit"));
+    await waitFor(() => expect(updateMemberOrg).toHaveBeenCalledTimes(1));
+    expect(updateMember).not.toHaveBeenCalled();
+    const patch = updateMemberOrg.mock.calls[0]![1];
+    expect(Object.keys(patch).sort()).toEqual(["leaderId", "position", "roleTitle", "status", "teamIds", "version"]);
+  });
+
+  it("運営名簿: 閲覧だけの範囲で追加を押すと、編集範囲の権限不足ダイアログが出る", async () => {
+    render(wrap(<MemberRosterPage />, makeApi(), editorPermissions("members", ["identity:read", "members:roster_view"])));
+    await userEvent.click(await screen.findByTestId("member-roster-add-member"));
+    const dialog = await screen.findByRole("dialog", { name: "権限が不足しています" });
+    expect(within(dialog).getByText("運営名簿は編集範囲の外のため、編集できません。")).toBeInTheDocument();
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
+  });
+});
+
 describe("MembersPage — 3 段階 (policy) の 閲覧 tier", () => {
   // ロール管理で 運営メンバー を「閲覧」にした運営: member-service は書き込みを 403 にするので
-  // (requireMembersEdit)、UI も同じ判定で全書き込み操作を無効化し、理由を一行示す。
-  it("閲覧のみのとき、追加/編集/削除がすべて押せず理由が表示される", async () => {
+  // (requireMembersEdit)、UI は書き込み操作の代わりに権限不足ダイアログ(申請付き)を出す。
+  it.each([
+    ["members-add-member", null],
+    ["members-add-team", null],
+    [null, "山田太郎 を編集"],
+    [null, "山田太郎 を削除"],
+  ])("閲覧のみのとき %s%s を押すと操作せず権限不足ダイアログが出る", async (testId, name) => {
     render(wrap(<MembersPage />, makeApi(), viewerPermissions("members", ["identity:read"])));
     expect(await screen.findByTestId("members-teamcard-t1")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("members-readonly-notice")).toBeInTheDocument());
-    expect((screen.getByTestId("members-add-member") as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId("members-add-team") as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "山田太郎 を編集" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "山田太郎 を削除" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await userEvent.click(testId ? screen.getByTestId(testId) : screen.getByRole("button", { name: name! }));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
+    expect(screen.getByTestId("perm-dialog-members-request")).toHaveTextContent("権限を申請する");
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 
   it("編集のときは操作可能で、閲覧バナーも出ない", async () => {
@@ -262,6 +303,41 @@ describe("MembersPage", () => {
     expect(within(note).getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
   });
 
+  it("組織図 hides the 法人 team; a member also in another team stays in that team's column", async () => {
+    const person = { ...P0, orgId: "o", roleTitle: null, status: "added" as const, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
+    const overview: MembersOverview = {
+      teams: [
+        { id: "t1", key: "dev", name: "開発", color: "#0d9488", description: null },
+        { id: "corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: null },
+      ],
+      members: [
+        { ...person, id: "p_corp", name: "法人のみ", teamIds: ["corp"], sortOrder: 1 },
+        { ...person, id: "p_both", name: "兼任", teamIds: ["t1", "corp"], sortOrder: 2 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+    expect(screen.queryByTestId("members-orgcol-corp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("members-orgchip-p_corp")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orgcol-t1")).getByTestId("members-orgchip-p_both")).toBeInTheDocument();
+  });
+
+  it("組織図 puts 打診中 / 休み中 below active members", async () => {
+    const person = { ...P0, orgId: "o", roleTitle: null, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t", teamIds: ["t1"] };
+    const overview: MembersOverview = {
+      teams: [{ id: "t1", key: "dev", name: "開発", color: "#0d9488", description: null }],
+      members: [
+        { ...person, id: "leave", name: "休み", status: "on_leave", sortOrder: 1 },
+        { ...person, id: "pending", name: "打診", status: "invited", sortOrder: 2 },
+        { ...person, id: "active", name: "活動", status: "added", sortOrder: 3 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    const col = await screen.findByTestId("members-orgcol-t1");
+    const ids = [...col.querySelectorAll("[data-testid^=members-orgchip-]")].map((e) => e.getAttribute("data-testid"));
+    expect(ids).toEqual(["members-orgchip-active", "members-orgchip-pending", "members-orgchip-leave"]);
+  });
+
   // FBの主眼: 同じチームに複数リーダーが居ても、各メンバーが「自分の leaderId が指す
   // リーダーの配下」としてネスト描画されること。DOM上、配下チップはそのリーダーの
   // nodeItem(li) の中に入り、別リーダーの li には入らない = 上下関係が構造で伝わる。
@@ -342,6 +418,27 @@ describe("ListView (運営名簿の表)", () => {
 });
 
 describe("MemberRosterPage (運営名簿から編集)", () => {
+  it("未入力があり紐付いた人だけへ催促し、未紐付けの人数を知らせる", async () => {
+    const person = { ...P0, orgId: "o", roleTitle: null, status: "added" as const, teamIds: [], contact: null, version: 1, createdAt: "t", updatedAt: "t" };
+    const overview: MembersOverview = {
+      teams: [],
+      members: [
+        { ...person, id: "linked", name: "紐付き", identityUserId: "u1", sortOrder: 1 },
+        { ...person, id: "unlinked", name: "未紐付け", identityUserId: null, sortOrder: 2 },
+      ],
+    };
+    const sendProfileReminder = vi.fn(() => Promise.resolve({ deduplicated: false, missing: [] }));
+    render(wrap(<MemberRosterPage />, makeApi({ getOverview: () => Promise.resolve(overview), sendProfileReminder })));
+    const button = await screen.findByTestId("member-roster-remind");
+    expect(button).toHaveTextContent("（1人）");
+    expect(screen.getByTestId("member-roster-unlinked-hint")).toHaveTextContent("1人");
+    await userEvent.click(button);
+    const dialog = await screen.findByTestId("member-roster-confirm-remind");
+    await userEvent.click(within(dialog).getByRole("button", { name: "催促を送る" }));
+    await waitFor(() => expect(sendProfileReminder).toHaveBeenCalledTimes(1));
+    expect(sendProfileReminder).toHaveBeenCalledWith("linked");
+  });
+
   it("行クリックで編集ダイアログが開き、保存で updateMember を呼ぶ", async () => {
     const api = makeApi();
     render(wrap(<MemberRosterPage />, api));
@@ -359,12 +456,13 @@ describe("MemberRosterPage (運営名簿から編集)", () => {
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 
-  it("閲覧のみ: 行クリックで編集を開かず、書き込み操作は無効", async () => {
-    render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read"])));
+  it("閲覧のみ: 行クリックでは何も開かず、編集ボタンは権限不足ダイアログを出す", async () => {
+    render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read", "members:roster_view"])));
     await userEvent.click(await screen.findByText("山田太郎"));
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
-    expect(screen.getByTestId("member-roster-readonly-notice")).toBeInTheDocument();
-    expect(screen.getByTestId("member-roster-add-member")).toBeDisabled();
-    expect(screen.getByTestId("members-edit-m1")).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("members-edit-m1"));
+    expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
+    expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 });

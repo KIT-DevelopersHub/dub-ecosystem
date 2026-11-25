@@ -23,7 +23,7 @@ import {
 } from "./contracts.ts";
 import { WRITE_STATUS_OPTIONS, toWriteStatus } from "./memberStatus.ts";
 import { orgChartOrder, tierOf } from "./orgChartOrder.ts";
-import { useCreateMember, useUpdateMember } from "./hooks.ts";
+import { useCreateMember, useUpdateMember, useUpdateMemberOrg } from "./hooks.ts";
 import styles from "./members.module.css";
 
 const STATUS_OPTIONS: SelectOption<MemberStatus>[] = WRITE_STATUS_OPTIONS;
@@ -51,6 +51,7 @@ export function MemberFormDialog({
   editing,
   members = [],
   onUpdated,
+  orgOnly = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -60,9 +61,13 @@ export function MemberFormDialog({
   members?: OrgMember[];
   /** 編集の保存がサーバで確定し、ダイアログを閉じた後 (アカウント発行メール)。 */
   onUpdated?: (saved: OrgMember, before: OrgMember) => void;
+  /** 編集範囲が 組織図まで: 既存メンバーの編集では本人の情報を出さず、運営での項目だけ保存する。 */
+  orgOnly?: boolean;
 }): JSX.Element {
   const create = useCreateMember();
   const update = useUpdateMember();
+  const updateOrg = useUpdateMemberOrg();
+  const orgFieldsOnly = orgOnly && editing !== null;
   const [profile, setProfile] = useState(() => profileDraftOf(null));
   // 編集時は開いた時点の値と比べ、変えた項目だけを送る (推測で分けた姓/名や、旧ルールで
   // 入っていた値を触っていないのに上書き・検証しないため)。
@@ -89,7 +94,7 @@ export function MemberFormDialog({
     setContact(editing?.contact ?? "");
   }, [open, editing]);
 
-  const pending = create.isPending || update.isPending;
+  const pending = create.isPending || update.isPending || updateOrg.isPending;
 
   // リーダー候補: 自分自身と辞退者を除外し、組織図順で並べる。役割段(tier)をラベルに添える。
   const leaderOptions: SelectOption<string>[] = useMemo(() => {
@@ -110,6 +115,18 @@ export function MemberFormDialog({
     setTeamIds((prev) => (checked ? [...new Set([...prev, id])] : prev.filter((t) => t !== id)));
 
   const submit = () => {
+    if (orgFieldsOnly) {
+      const patch = {
+        roleTitle: roleTitle.trim() || null,
+        position: position || null,
+        status,
+        leaderId: leaderId || null,
+        teamIds,
+        version: editing.version,
+      };
+      updateOrg.mutate({ id: editing.id, patch }, { onSuccess: () => onClose() });
+      return;
+    }
     const { profile: parsed, errors: allErrors } = parseProfileDraft(profile, REQUIRED);
     const changed = (k: PersonProfileKey) => !editing || profile[k] !== initialProfile[k];
     const errors = Object.fromEntries(
@@ -169,16 +186,20 @@ export function MemberFormDialog({
     >
       <Form onSubmit={submit}>
         <div className={styles.formStack}>
-          <div className={styles.formSectionTitle} data-testid="members-form-profile-section">
-            本人の情報（参加届と同じ項目）
-          </div>
-          <PersonProfileFields
-            draft={profile}
-            onChange={setProfile}
-            errors={profileErrors}
-            required={REQUIRED}
-            idPrefix="members-form"
-          />
+          {orgFieldsOnly ? null : (
+            <>
+              <div className={styles.formSectionTitle} data-testid="members-form-profile-section">
+                本人の情報（参加届と同じ項目）
+              </div>
+              <PersonProfileFields
+                draft={profile}
+                onChange={setProfile}
+                errors={profileErrors}
+                required={REQUIRED}
+                idPrefix="members-form"
+              />
+            </>
+          )}
           <div className={styles.formSectionTitle}>運営での情報</div>
           <FormField
             label="役職"
@@ -233,9 +254,11 @@ export function MemberFormDialog({
               </div>
             )}
           </FormField>
-          <FormField label="連絡先" htmlFor="member-contact" help="メール / Slack など">
-            <TextField id="member-contact" value={contact} onChange={setContact} />
-          </FormField>
+          {orgFieldsOnly ? null : (
+            <FormField label="連絡先" htmlFor="member-contact" help="メール / Slack など">
+              <TextField id="member-contact" value={contact} onChange={setContact} />
+            </FormField>
+          )}
         </div>
       </Form>
     </Modal>

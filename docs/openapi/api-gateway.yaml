@@ -61,6 +61,44 @@ paths:
       security:
         - sessionCookie: []
         - gatewayIdentity: []
+  /api/v1/admin/users/{userId}/impersonation:
+    post:
+      operationId: startImpersonation
+      summary: Start viewing the app as another member (admin impersonation / 代理表示)
+      tags:
+        - gateway
+      description: |-
+        Requires identity:impersonate. The gateway forwards the admin's own session to
+        auth-service, which refuses self / non-active / privileged (identity:impersonate or
+        role_sys_admin) targets and nested starts, parks the admin session, and mints a
+        60-minute impersonation session (no refresh). The new session cookie is set on the
+        response; the body never carries the token. Stop via POST /api/v1/auth/impersonation/stop.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Impersonation started (Set-Cookie dub_session=<impersonation token>).
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - impersonation
+                properties:
+                  impersonation:
+                    $ref: '#/components/schemas/ImpersonationInfo'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security:
+        - sessionCookie: []
   /api/v1/bff/home:
     get:
       operationId: getBffHome
@@ -315,6 +353,41 @@ components:
         sessionExpiresAt:
           type: integer
           description: epoch-ms
+        impersonation:
+          description: Present only while an admin views the app as this user. user/permissions are then the subject's.
+          type:
+            - object
+            - 'null'
+          required:
+            - actor
+            - startedAt
+            - expiresAt
+          properties:
+            actor:
+              $ref: '#/components/schemas/UserSummary'
+            startedAt:
+              type: integer
+            expiresAt:
+              type: integer
+    ImpersonationInfo:
+      type: object
+      description: Admin impersonation (代理表示). userId of the session is the subject; actorId is the real admin.
+      required:
+        - actorId
+        - subjectId
+        - startedAt
+        - expiresAt
+      properties:
+        actorId:
+          type: string
+        subjectId:
+          type: string
+        startedAt:
+          type: integer
+          description: epoch-ms
+        expiresAt:
+          type: integer
+          description: epoch-ms (hard deadline, never extended)
     UpstreamPartialError:
       type: object
       required:

@@ -154,6 +154,7 @@ gateway で `auth="public"`(エッジでセッション不要)。`app.use` は�
 | GET /users/:id | ×(internal) | `requireInternal` | `INTERNAL` | gateway `/me` 合成用 |
 | POST /internal/users/:id/profile | ×(internal) | `requireInternal` | `INTERNAL` | gateway が自分の userId に限定して転送 |
 | GET /internal/users | ×(internal) | `requireInternal` | `INTERNAL` | 通知ファンアウトのロール展開 |
+| GET /internal/roles | ×(internal) | (新規) | `INTERNAL` | drive-share の時間毎同期(system actor)がロール削除を判定 |
 | POST /internal/users/lookup | ×(internal) | `requireInternal` | `INTERNAL` | ログイン許可リスト照会 |
 | POST /authz/check | ×(internal) | `requireInternal` | `INTERNAL` | **全サービスの認可判定の起点** |
 | GET /internal/users/:id/permissions | ×(internal) | `requireInternal` | `INTERNAL` | 実効権限の取得 |
@@ -330,7 +331,7 @@ gateway が `x-dub-*` を剥離するため外部からは詐称不能。
 | POST /internal/system-messages | ×(internal) | inline `x-dub-internal` | `INTERNAL` | notification からのシステム投稿 |
 | GET /chat/unfurl | ○ | `requireAuth` | `appLevel("chat","view")` | OGP 取得プロキシ |
 | GET /chat/channels | ○ | `requireAuth`(自分の所属のみ) | `appLevel("chat","view")` | 参加チャンネル閲覧 |
-| POST /chat/channels | ○ | `requireAuth` + `chat:create` | `appLevel("chat","edit","chat:create")` | チャンネル作成 |
+| POST /chat/channels | ○ | `requireAuth` + `chat:create` | `appLevel("chat","edit","chat:create")` | チャンネル作成。プライベートは handler で `chat:create_private` も要求 |
 | GET /chat/channels/:id | ○ | `requireAuth` + `loadReadable` | `appLevel("chat","view")` | 可視性で判定 |
 | PATCH /chat/channels/:id | ○ | `requireAuth` + `isChannelAdmin` | `appLevel("chat","edit")` | 設定変更は管理者層 |
 | GET /chat/channels/:id/members | ○ | `requireAuth` + `loadReadable` | `appLevel("chat","view")` | メンバー一覧 |
@@ -645,6 +646,19 @@ staging にもデプロイされていない**。根拠は 4 点とも不在で�
 反転する**ため、ポリシー表の整備は deploy より先に済ませる。
 
 ---
+
+### 2.23 lp-tickets (**採用済み**)
+
+LP チケット販売。lp-analytics から分離したときに `policy-table.ts` を持った（lp-analytics 本体は未移行）。
+`/lp/tickets*` は gateway の `lp` セグメントの `subRoutes` で届く。`/lp/internal/*` はエッジで 404。
+`workers_dev = false`・routes なしで、binding 以外から届かない。
+
+| 対象 | ルール |
+|---|---|
+| `GET /lp/tickets` | `appLevel("lp","view")` |
+| 券種・入力項目・購入者一覧・プレビュートークン | `appLevel("lp","edit")` |
+| 販売 on/off・CTA・クーポン・要確認の確定 | `appLevel("lp","edit","lp:publish")` |
+| `/lp/internal/tickets*`・`/internal/health` | `INTERNAL`（webhook は加えて Stripe 署名を検証） |
 
 ## 3. 要注意リスト
 

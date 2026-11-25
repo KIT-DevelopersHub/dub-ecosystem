@@ -5,23 +5,22 @@
 // 突合候補を提示し、同一人物なら結合(link=在籍へ昇格・重複なし)、候補が無ければ新規
 // (create) を確認ダイアログで確定する。反映は組織図(体制図)にも重複なく反映される。
 // 追加済の行は「紐付けを解除」で未処理に戻せる (名簿メンバー自体はそのまま残る)。
-// 追加の直後に「メールアドレスも発行しますか？」を出し、発行・アカウント作成(ロール付与)・
-// 紐付けまで続けて行える (IssueMailDialog)。
+// 追加の直後に「メールアドレスも発行しますか？」を出し、発行・アカウント作成(一般メンバー固定)・
+// 紐付け・案内メールまで 1 回で行える (IssueMailDialog / members:onboard_mail)。
 // Route gate = identity:read; 反映確定(resolve)はサーバで identity:admin (fail-close)。
 import { useMemo, useState } from "react";
-import { PageHeader, DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextField, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
+import { DataTable, Drawer, Badge, Button, Modal, ConfirmDialog, Spinner, TextField, EmptyState, SkeletonLoader, ErrorState } from "@dub/ui";
 import type { ColumnDef, BadgeTone } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
 import { POSITION_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import { PUBLIC_PARTICIPATION_PATH } from "./module.tsx";
 import { PublicUrlCard } from "./PublicUrlCard.tsx";
+import { HrFrame } from "../hr/HrApplicantsScreen.tsx";
 import { IssueMailDialog } from "./IssueMailDialog.tsx";
-import { useParticipationApi } from "./ParticipationProvider.tsx";
-import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import styles from "./participation.module.css";
 
 /** リンク先メンバーの最小情報（自動候補・名簿手動選択の共通形）。 */
@@ -76,15 +75,14 @@ function emailCandidate(p: Participation): string | null {
 
 export function ParticipationListPage(): JSX.Element {
   // 反映確定(resolve)は member-service 側で 参加届 app の「編集」を要求する
-  // (requireParticipationEdit)。同じ判定を UI にも効かせ、閲覧のみの運営には押せる形で
-  // 見せない — 押しても 403 になるボタンを出さないため。
+  // (requireParticipationEdit)。閲覧のみの運営が押したら、403 の代わりに権限不足ダイアログ
+  // (申請ボタン付き)を出す。
   const { canEdit } = useAppCapability("participation");
-  // メール発行はアドレス発行(mail:admin)・アカウント作成(管理アプリの編集 + identity:admin)・
-  // 名簿との紐付け(運営メンバーの編集)を全部持つ人だけ。持たない人には聞かない (403 になるため)。
+  const gate = usePermissionGate({ appId: "participation", locked: !canEdit });
+  // メール発行は gateway の onboard-account 1 本で、鍵も members:onboard_mail 1 つ (人事向け)。
+  // ロール管理の編集や identity:admin は要らない。持たない人には聞かない (403 になるため)。
   const { can } = usePermissions();
-  const adminCap = useAppCapability("admin");
-  const membersCap = useAppCapability("members");
-  const canIssueMail = adminCap.canEdit && membersCap.canEdit && can("identity:admin") && can("mail:admin");
+  const canIssueMail = can("members:onboard_mail");
   const list = useParticipationList();
   const teamsQuery = useParticipationTeams();
   const resolveMut = useResolveParticipation();
@@ -94,9 +92,6 @@ export function ParticipationListPage(): JSX.Element {
   const [skipTarget, setSkipTarget] = useState<Participation | null>(null);
   const [unlinkTarget, setUnlinkTarget] = useState<Participation | null>(null);
   const [issueTarget, setIssueTarget] = useState<{ participation: Participation; member: RosterMember } | null>(null);
-  // 発行→紐付けまで済んだら、続けてアカウント発行メールを送るか聞く (Gmail がある時だけ)。
-  const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
-  const participationApi = useParticipationApi();
   // 解除確認に「誰との紐付けか」を出すため、確認を開いた時だけ名簿を引く。
   const rosterQuery = useParticipationRosterMembers(unlinkTarget !== null);
   const unlinkMemberName = unlinkTarget?.memberId
@@ -138,16 +133,16 @@ export function ParticipationListPage(): JSX.Element {
           {reviewLabel(p)}
         </Badge>
         {p.reviewState === "added" ? (
-          <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setUnlinkTarget(p)} testId={`participation-unlink-${p.id}`}>
+          <Button size="sm" variant="secondary" onClick={gate.guard(() => setUnlinkTarget(p))} testId={`participation-unlink-${p.id}`}>
             紐付けを解除
           </Button>
         ) : (
           <>
-            <Button size="sm" variant="primary" disabled={!canEdit} onClick={() => setAddTarget(p)} testId={`participation-add-${p.id}`}>
+            <Button size="sm" variant="primary" onClick={gate.guard(() => setAddTarget(p))} testId={`participation-add-${p.id}`}>
               追加する
             </Button>
             {p.reviewState === "pending" ? (
-              <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => setSkipTarget(p)} testId={`participation-skip-${p.id}`}>
+              <Button size="sm" variant="secondary" onClick={gate.guard(() => setSkipTarget(p))} testId={`participation-skip-${p.id}`}>
                 しない
               </Button>
             ) : null}
@@ -169,112 +164,112 @@ export function ParticipationListPage(): JSX.Element {
     { key: "submittedAt", header: "提出日時", noWrap: true, minWidth: "11rem", cell: (p) => fmtDateTime(p.submittedAt) },
   ];
 
-  if (list.isLoading) return <SkeletonLoader testId="participation-list-loading" />;
+  if (list.isLoading) {
+    return (
+      <HrFrame active="participation">
+        <SkeletonLoader testId="participation-list-loading" />
+      </HrFrame>
+    );
+  }
   if (list.isError) {
     const display = ApiError.isApiError(list.error)
       ? toDisplayableError(list.error)
       : { code: "UNKNOWN", message: "読み込みに失敗しました", retryable: true };
-    return <ErrorState error={display} onRetry={() => void list.refetch()} />;
+    return (
+      <HrFrame active="participation">
+        <ErrorState error={display} onRetry={() => void list.refetch()} />
+      </HrFrame>
+    );
   }
 
   const rows = list.data?.participations ?? [];
 
   return (
-    <div data-testid="participation-list-page">
-      <AppReadOnlyNotice appId="participation" testId="participation-readonly-notice" />
-      <PageHeader
-        title="参加届の回答一覧"
-        description="送信された参加届を確認できます（運営のみ）。左端で運営メンバーに追加するか選べます。行をクリックすると詳細が開きます。"
-      />
-      <div className={styles.listShare}>
-        <PublicUrlCard
-          title="参加届フォームの URL"
-          hint="ログイン不要の公開フォームです。参加してほしい人に送ると、回答がこの一覧に届きます。"
-          path={PUBLIC_PARTICIPATION_PATH}
-          testId="participation-public-link"
+    <HrFrame active="participation">
+      <div data-testid="participation-list-page">
+        {gate.dialog}
+        <p className={styles.sectionHint}>送信された参加届を確認できます（運営のみ）。左端で運営メンバーに追加するか選べます。行をクリックすると詳細が開きます。</p>
+        <div className={styles.listShare}>
+          <PublicUrlCard
+            title="参加届フォームの URL"
+            hint="ログイン不要の公開フォームです。参加してほしい人に送ると、回答がこの一覧に届きます。"
+            path={PUBLIC_PARTICIPATION_PATH}
+            testId="participation-public-link"
+          />
+        </div>
+        <DataTable<Participation>
+          columns={columns}
+          rows={rows}
+          rowKey={(p) => p.id}
+          onRowClick={(p) => setSelected(p)}
+          testId="participation-list-table"
+          emptyState={<EmptyState title="まだ参加届はありません" description="公開フォームから送信された参加届がここに表示されます" icon="check-square" />}
+        />
+
+        <Drawer
+          open={selected !== null}
+          onClose={() => setSelected(null)}
+          title="参加届の詳細"
+          testId="participation-detail"
+        >
+          {selected ? <DetailBody p={selected} teamName={teamName} /> : null}
+        </Drawer>
+
+        {addTarget ? (
+          <ResolveDialog
+            participation={addTarget}
+            pending={resolveMut.isPending}
+            onCancel={() => setAddTarget(null)}
+            onLink={(t) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version })}
+            onCreate={() => doResolve(addTarget.id, { action: "create" })}
+            onSkip={() => doResolve(addTarget.id, { action: "skip" })}
+          />
+        ) : null}
+
+        {issueTarget ? (
+          <IssueMailDialog
+            participation={issueTarget.participation}
+            member={issueTarget.member}
+            defaultLocalPart={emailCandidate(issueTarget.participation) ?? ""}
+            onClose={() => setIssueTarget(null)}
+          />
+        ) : null}
+
+        <ConfirmDialog
+          open={skipTarget !== null}
+          title="運営メンバーに追加しない"
+          message={
+            skipTarget
+              ? `「${skipTarget.name}」を運営メンバーに追加せず、対象外にします。よろしいですか？（あとから追加もできます）`
+              : ""
+          }
+          confirmLabel="対象外にする"
+          cancelLabel="キャンセル"
+          onConfirm={() => {
+            if (skipTarget) doResolve(skipTarget.id, { action: "skip" });
+          }}
+          onCancel={() => setSkipTarget(null)}
+          testId="participation-skip-confirm"
+        />
+
+        <ConfirmDialog
+          open={unlinkTarget !== null}
+          title="紐付けを解除する"
+          message={
+            unlinkTarget
+              ? `「${unlinkTarget.name}」の参加届と${unlinkMemberName ? `運営メンバー「${unlinkMemberName}」` : "運営メンバー"}の紐付けを解除し、未処理に戻します。名簿のメンバーは削除されず、在籍などの状態もそのまま残ります（必要なら運営メンバー画面で直してください）。解除後は改めて正しい相手に追加できます。`
+              : ""
+          }
+          confirmLabel="解除して未処理に戻す"
+          cancelLabel="キャンセル"
+          onConfirm={() => {
+            if (unlinkTarget) doResolve(unlinkTarget.id, { action: "unlink" });
+          }}
+          onCancel={() => setUnlinkTarget(null)}
+          testId="participation-unlink-confirm"
         />
       </div>
-      <DataTable<Participation>
-        columns={columns}
-        rows={rows}
-        rowKey={(p) => p.id}
-        onRowClick={(p) => setSelected(p)}
-        testId="participation-list-table"
-        emptyState={<EmptyState title="まだ参加届はありません" description="公開フォームから送信された参加届がここに表示されます" icon="check-square" />}
-      />
-
-      <Drawer
-        open={selected !== null}
-        onClose={() => setSelected(null)}
-        title="参加届の詳細"
-        testId="participation-detail"
-      >
-        {selected ? <DetailBody p={selected} teamName={teamName} /> : null}
-      </Drawer>
-
-      {addTarget ? (
-        <ResolveDialog
-          participation={addTarget}
-          pending={resolveMut.isPending}
-          onCancel={() => setAddTarget(null)}
-          onLink={(t) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version })}
-          onCreate={() => doResolve(addTarget.id, { action: "create" })}
-          onSkip={() => doResolve(addTarget.id, { action: "skip" })}
-        />
-      ) : null}
-
-      {issueTarget ? (
-        <IssueMailDialog
-          participation={issueTarget.participation}
-          member={issueTarget.member}
-          defaultLocalPart={emailCandidate(issueTarget.participation) ?? ""}
-          onClose={() => setIssueTarget(null)}
-          onIssued={(progress) => {
-            const { participation, member } = issueTarget;
-            setIssueTarget(null);
-            setMailTarget(
-              accountMailTarget(progress.identityUserId, member.name, member.gmail || participation.gmail, progress.address),
-            );
-          }}
-        />
-      ) : null}
-
-      <AccountMailPrompt target={mailTarget} send={participationApi.sendAccountMail} onClose={() => setMailTarget(null)} />
-
-      <ConfirmDialog
-        open={skipTarget !== null}
-        title="運営メンバーに追加しない"
-        message={
-          skipTarget
-            ? `「${skipTarget.name}」を運営メンバーに追加せず、対象外にします。よろしいですか？（あとから追加もできます）`
-            : ""
-        }
-        confirmLabel="対象外にする"
-        cancelLabel="キャンセル"
-        onConfirm={() => {
-          if (skipTarget) doResolve(skipTarget.id, { action: "skip" });
-        }}
-        onCancel={() => setSkipTarget(null)}
-        testId="participation-skip-confirm"
-      />
-
-      <ConfirmDialog
-        open={unlinkTarget !== null}
-        title="紐付けを解除する"
-        message={
-          unlinkTarget
-            ? `「${unlinkTarget.name}」の参加届と${unlinkMemberName ? `運営メンバー「${unlinkMemberName}」` : "運営メンバー"}の紐付けを解除し、未処理に戻します。名簿のメンバーは削除されず、在籍などの状態もそのまま残ります（必要なら運営メンバー画面で直してください）。解除後は改めて正しい相手に追加できます。`
-            : ""
-        }
-        confirmLabel="解除して未処理に戻す"
-        cancelLabel="キャンセル"
-        onConfirm={() => {
-          if (unlinkTarget) doResolve(unlinkTarget.id, { action: "unlink" });
-        }}
-        onCancel={() => setUnlinkTarget(null)}
-        testId="participation-unlink-confirm"
-      />
-    </div>
+    </HrFrame>
   );
 }
 

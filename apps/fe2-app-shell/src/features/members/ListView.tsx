@@ -11,13 +11,15 @@
 // 選択は localStorage にユーザー単位で保存される。
 //
 // 編集: 行クリックで編集ダイアログを開く（操作列は右端で横スクロールしないと見えないため）。
-// 行内のボタンは stopPropagation で行クリックと分ける。readOnly(閲覧のみ)では書き込み操作を無効化する。
+// 行内のボタンは stopPropagation で行クリックと分ける。readOnly(閲覧のみ)では行クリックで編集を開かない
+// (行内ボタンは押せる。権限不足ダイアログを出すのは呼び出し側の guard)。
 import type { MouseEvent, ReactNode } from "react";
 import { DataTable, Tag, Button, IconButton, EmptyState } from "@dub/ui";
 import type { ColumnDef } from "@dub/ui";
 import { POSITION_LABEL, type MemberTeam, type OrgMember } from "./contracts.ts";
 import { MemberStatusBadge } from "./MemberStatusBadge.tsx";
-import { hasStatusBadge } from "./memberStatus.ts";
+import { canRemind, hasStatusBadge } from "./memberStatus.ts";
+import { member } from "@dub/types";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 
 /** 1 行に収めつつ長い値は省略（…）+ ホバーで全文（title）。max はセルの上限幅. */
@@ -64,6 +66,7 @@ export function ListView({
   onUnlink,
   onSendAccountMail,
   canSendAccountMail,
+  onRemind,
 }: {
   members: OrgMember[];
   teamsById: Map<string, MemberTeam>;
@@ -71,7 +74,7 @@ export function ListView({
   accountLabels: Map<string, string>;
   /** member id -> 氏名: リーダー列で leaderId を氏名表示する。省略時は列を出さない。 */
   leaderNames?: Map<string, string>;
-  /** 閲覧のみの権限 — 編集/削除/紐付けは押せず、行クリックでも編集を開かない. */
+  /** 閲覧のみの権限 — 行クリックで編集を開かない (行内ボタンの権限案内は呼び出し側が guard する). */
   readOnly?: boolean;
   onEdit: (m: OrgMember) => void;
   onDelete: (m: OrgMember) => void;
@@ -81,6 +84,8 @@ export function ListView({
   onSendAccountMail?: (m: OrgMember) => void;
   /** Gmail・ログイン・@developershub.jp の3つが揃った行か。 */
   canSendAccountMail?: (m: OrgMember) => boolean;
+  /** 情報の入力を催促する (アカウントが紐付き、未入力がある行だけ表示)。 */
+  onRemind?: (m: OrgMember) => void;
 }): JSX.Element {
   const columns: ColumnDef<OrgMember>[] = [
     { key: "name", header: "氏名", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.name} max="12rem" /> },
@@ -122,12 +127,12 @@ export function ListView({
               <Truncate text={accountLabels.get(m.identityUserId) ?? m.identityUserId} max="9rem" />
             </Tag>
             <StopRowClick>
-              <IconButton name="x" aria-label={`${m.name} のアカウント紐付けを解除`} disabled={readOnly} onClick={() => onUnlink(m)} testId={`members-unlink-${m.id}`} />
+              <IconButton name="x" aria-label={`${m.name} のアカウント紐付けを解除`} onClick={() => onUnlink(m)} testId={`members-unlink-${m.id}`} />
             </StopRowClick>
           </span>
         ) : (
           <StopRowClick>
-            <Button variant="ghost" size="sm" disabled={readOnly} onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
+            <Button variant="ghost" size="sm" onClick={() => onLink(m)} testId={`members-link-${m.id}`}>
               未設定・紐付け
             </Button>
           </StopRowClick>
@@ -152,10 +157,26 @@ export function ListView({
     },
     { key: "contact", header: "連絡先", minWidth: "9rem", noWrap: true, cell: (m) => <Truncate text={m.contact ?? "—"} max="12rem" /> },
     {
+      key: "missing",
+      header: "未入力",
+      minWidth: "6rem",
+      noWrap: true,
+      cell: (m) => {
+        const missing = member.missingProfileKeys(m);
+        if (missing.length === 0) return <span data-testid={`members-missing-${m.id}`}>—</span>;
+        const labels = missing.map((k) => member.PERSON_PROFILE_LABEL[k]).join("、");
+        return (
+          <span title={labels} data-testid={`members-missing-${m.id}`}>
+            <Tag tone="warning">{missing.length}項目</Tag>
+          </span>
+        );
+      },
+    },
+    {
       key: "actions",
       header: "操作",
       align: "right",
-      minWidth: "8rem",
+      minWidth: "10rem",
       noWrap: true,
       hideable: false,
       cell: (m) => (
@@ -164,17 +185,23 @@ export function ListView({
             <IconButton
               name="send"
               aria-label={`${m.name} にアカウント発行メールを送る`}
-              disabled={readOnly}
               onClick={() => onSendAccountMail(m)}
               testId={`members-account-mail-${m.id}`}
             />
           ) : null}
-          <IconButton name="edit" aria-label={`${m.name} を編集`} disabled={readOnly} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />
+          {onRemind && canRemind(m) ? (
+            <IconButton
+              name="bell"
+              aria-label={`${m.name} に情報の入力を催促する`}
+              onClick={() => onRemind(m)}
+              testId={`members-remind-${m.id}`}
+            />
+          ) : null}
+          <IconButton name="edit" aria-label={`${m.name} を編集`} onClick={() => onEdit(m)} testId={`members-edit-${m.id}`} />
           <IconButton
             name="trash"
             aria-label={`${m.name} を削除`}
             variant="danger"
-            disabled={readOnly}
             onClick={() => onDelete(m)}
             testId={`members-delete-${m.id}`}
           />

@@ -4,14 +4,20 @@ import { parseRosterView, serializeRosterView } from "../src/lib/urlFilters";
 describe("urlFilters", () => {
   it("parses defaults from an empty query", () => {
     const v = parseRosterView("");
-    expect(v.filters).toEqual({ search: "", status: "all" });
+    expect(v.filters).toEqual({ search: "", status: "all", roleKey: null });
     expect(v.sort).toBeUndefined();
   });
 
   it("parses search + status + sort", () => {
     const v = parseRosterView("?q=alice&status=active&sort=name&dir=desc");
-    expect(v.filters).toEqual({ search: "alice", status: "active" });
+    expect(v.filters).toEqual({ search: "alice", status: "active", roleKey: null });
     expect(v.sort).toEqual({ key: "name", direction: "desc" });
+  });
+
+  it("round-trips the role filter", () => {
+    expect(parseRosterView("?role=role_lead").filters.roleKey).toBe("role_lead");
+    expect(serializeRosterView({ filters: { search: "", status: "all", roleKey: "role_lead" }, sort: undefined })).toBe("role=role_lead");
+    expect(serializeRosterView({ filters: { search: "", status: "all", roleKey: null }, sort: undefined }, "role=role_lead")).toBe("");
   });
 
   it("drops an unknown status / unknown sort key", () => {
@@ -26,18 +32,18 @@ describe("urlFilters", () => {
   });
 
   it("serializes only non-default values", () => {
-    expect(serializeRosterView({ filters: { search: "", status: "all" }, sort: undefined })).toBe("");
-    expect(serializeRosterView({ filters: { search: "bob", status: "disabled" }, sort: { key: "status", direction: "asc" } }))
+    expect(serializeRosterView({ filters: { search: "", status: "all", roleKey: null }, sort: undefined })).toBe("");
+    expect(serializeRosterView({ filters: { search: "bob", status: "disabled", roleKey: null }, sort: { key: "status", direction: "asc" } }))
       .toBe("q=bob&status=disabled&sort=status&dir=asc");
   });
 
   it("round-trips through serialize -> parse", () => {
-    const state = { filters: { search: "x y", status: "invited" as const }, sort: { key: "email", direction: "desc" as const } };
+    const state = { filters: { search: "x y", status: "invited" as const, roleKey: "r1" }, sort: { key: "email", direction: "desc" as const } };
     expect(parseRosterView(`?${serializeRosterView(state)}`)).toEqual(state);
   });
 
   it("preserves unrelated params already in the URL", () => {
-    const out = serializeRosterView({ filters: { search: "a", status: "all" }, sort: undefined }, "keep=1");
+    const out = serializeRosterView({ filters: { search: "a", status: "all", roleKey: null }, sort: undefined }, "keep=1");
     expect(out).toContain("keep=1");
     expect(out).toContain("q=a");
   });

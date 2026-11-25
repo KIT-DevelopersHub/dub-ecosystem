@@ -6,6 +6,7 @@ export { RosterProvider } from "./providers/RosterProvider";
 export { NavigationProvider, useNavigation } from "./providers/NavigationContext";
 export type { FeatureModule, FeatureRoute, NavEntry, ResourceClient } from "./shell/contract";
 export { usePermissions } from "./hooks/usePermissions";
+export { forwardToasts } from "./hooks/useToast";
 export { createRosterApi } from "./api/rosterApi";
 export { createMockClient } from "./api/mockClient";
 export { createHttpClient, type HttpClientOptions } from "./api/httpClient";

@@ -157,9 +157,9 @@ export function createD1ChatRepo(db: DbClient): ChatRepo {
     },
     async updateChannel(next: ChannelRow, expectedVersion: number): Promise<boolean> {
       const res = await db.run(
-        `UPDATE chat_channels SET name = ?, topic = ?, archived_at = ?, version = ?, updated_at = ?
+        `UPDATE chat_channels SET name = ?, topic = ?, visibility = ?, archived_at = ?, version = ?, updated_at = ?
          WHERE id = ? AND version = ?`,
-        next.name, next.topic, next.archivedAt, next.version, next.updatedAt, next.id, expectedVersion,
+        next.name, next.topic, next.visibility, next.archivedAt, next.version, next.updatedAt, next.id, expectedVersion,
       );
       return res.meta.changes > 0;
     },

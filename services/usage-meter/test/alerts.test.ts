@@ -72,10 +72,11 @@ describe("runAlerts", () => {
     expect(mail.calls[0]!.url).toContain("/send");
     expect(notif.calls).toHaveLength(1);
     expect(notif.calls[0]!.url).toContain("/notify");
-    const notifyBody = notif.calls[0]!.body as { recipientIds: string[]; recipientRoles: string[] };
+    const notifyBody = notif.calls[0]!.body as { recipientIds: string[]; recipientRoles?: string[]; recipientAudiences?: string[] };
     expect(notifyBody.recipientIds).toEqual(["usr_1", "usr_2"]);
     // role fan-out defaults to admin/maintainer (unioned with the explicit user ids)
-    expect(notifyBody.recipientRoles).toEqual(["role_sys_admin", "role_sys_maintainer"]);
+    expect(notifyBody.recipientAudiences).toEqual(["admin"]);
+    expect(notifyBody.recipientRoles).toBeUndefined();
 
     // second run same day -> deduped, no new sends
     const r2 = await runAlerts(env, summary, NOW, dedup);
@@ -95,9 +96,9 @@ describe("runAlerts", () => {
     expect(r.inAppAttempted).toBe(true);
     expect(mail.calls).toHaveLength(1);
     expect(notif.calls).toHaveLength(1);
-    const body = notif.calls[0]!.body as { recipientIds: string[]; recipientRoles: string[] };
+    const body = notif.calls[0]!.body as { recipientIds: string[]; recipientRoles?: string[]; recipientAudiences?: string[] };
     expect(body.recipientIds).toEqual([]); // no explicit user ids
-    expect(body.recipientRoles).toEqual(["role_sys_admin", "role_sys_maintainer"]);
+    expect(body.recipientAudiences).toEqual(["admin"]);
   });
 
   it("honors USAGE_ALERT_ADMIN_ROLE_IDS override for the in-app fan-out roles", async () => {
@@ -175,9 +176,9 @@ describe("runCollectionFailureAlert", () => {
     expect(email.textBody).toContain("D1_ERROR: daily write limit exceeded");
     expect(email.textBody).toContain("2026-08-10T20:48:00.000Z");
 
-    const notify = notif.calls[0]!.body as { type: string; recipientRoles: string[] };
+    const notify = notif.calls[0]!.body as { type: string; recipientAudiences: string[] };
     expect(notify.type).toBe("usage.collection_failed");
-    expect(notify.recipientRoles).toEqual(["role_sys_admin", "role_sys_maintainer"]);
+    expect(notify.recipientAudiences).toEqual(["admin"]);
   });
 
   it("alerts at most once per UTC day while the failure continues", async () => {

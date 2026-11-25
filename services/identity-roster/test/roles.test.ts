@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { common, identity } from "@dub/types";
-import { makeHarness, asUser, jsonBody } from "./harness";
+import { makeHarness, asUser, internal, jsonBody } from "./harness";
 
 describe("roles CRUD", () => {
   it("creates a custom role with catalog permissions", async () => {
@@ -75,6 +75,37 @@ describe("roles CRUD", () => {
     expect(res.status).toBe(204);
   });
 
+  describe("last-admin guard", () => {
+    async function customAdminRole(h: Awaited<ReturnType<typeof makeHarness>>) {
+      const res = await h.app.request("/identity/roles", jsonBody(asUser(h.adminId), "POST", { name: "co-admin", permissions: ["identity:admin", "app:admin:view", "app:admin:edit"] }));
+      return (await res.json()) as identity.Role;
+    }
+    const grant = (h: Awaited<ReturnType<typeof makeHarness>>, userId: string, roleId: string) =>
+      h.app.request(`/identity/users/${userId}/roles`, jsonBody(asUser(h.adminId), "POST", { roleId }));
+
+    it("refuses to delete the role that is the org's only remaining identity:admin grant", async () => {
+      const h = await makeHarness();
+      const role = await customAdminRole(h);
+      await grant(h, h.adminId, role.id);
+      const grants = (await (await h.app.request(`/identity/users/${h.adminId}/roles`, asUser(h.adminId))).json()) as { id: string; roleId: string }[];
+      const systemGrant = grants.find((a) => a.roleId === h.adminRoleId)!;
+      expect((await h.app.request(`/identity/users/${h.adminId}/roles/${systemGrant.id}`, { ...asUser(h.adminId), method: "DELETE" })).status).toBe(204);
+
+      const res = await h.app.request(`/identity/roles/${role.id}`, { ...asUser(h.adminId), method: "DELETE" });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: { details?: { code?: string } } }).error.details?.code).toBe("LAST_ADMIN");
+    });
+
+    it("allows the delete while another admin grant survives", async () => {
+      const h = await makeHarness();
+      const role = await customAdminRole(h);
+      await grant(h, h.adminId, role.id); // still holds the system admin role too
+      await grant(h, h.memberId, role.id);
+      const res = await h.app.request(`/identity/roles/${role.id}`, { ...asUser(h.adminId), method: "DELETE" });
+      expect(res.status).toBe(204);
+    });
+  });
+
   it("lists roles including the system roles (admin/maintainer/organizer/member)", async () => {
     const h = await makeHarness();
     const res = await h.app.request("/identity/roles", asUser(h.adminId));
@@ -144,5 +175,39 @@ describe("roles CRUD", () => {
     expect(byName.get("admin")).toBe(1);
     expect(byName.get("member")).toBe(1);
     expect(byName.get("organizer")).toBe(0);
+  });
+});
+
+// drive-share-service's hourly meeting sync reads the role list as the SYSTEM (an s2s call
+// with no x-dub-user-id). GET /identity/roles is key-gated and 401s that caller, which is how
+// deleted-role calendars kept their shares in prod; the internal twin needs only the marker.
+describe("GET /internal/roles (system actor)", () => {
+  it("returns the org's roles to an s2s call that carries no user id", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request("/internal/roles", internal());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as common.Paginated<identity.Role>;
+    const ids = body.items.map((r) => r.id);
+    expect(ids).toContain(h.adminRoleId);
+    expect(ids).toContain(h.memberRoleId);
+    expect(body.items.find((r) => r.id === h.memberRoleId)?.name).toBe("member");
+    expect(body.nextCursor).toBeNull();
+  });
+
+  it("is the same page as GET /identity/roles", async () => {
+    const h = await makeHarness();
+    const ext = (await (await h.app.request("/identity/roles", asUser(h.adminId))).json()) as common.Paginated<identity.Role>;
+    const int = (await (await h.app.request("/internal/roles", internal())).json()) as common.Paginated<identity.Role>;
+    expect(int).toEqual(ext);
+  });
+
+  it("the key-gated twin still 401s the same actor-less call (why the internal route exists)", async () => {
+    const h = await makeHarness();
+    expect((await h.app.request("/identity/roles", internal())).status).toBe(401);
+  });
+
+  it("is internal-only: an external caller, even an admin, is refused", async () => {
+    const h = await makeHarness();
+    expect((await h.app.request("/internal/roles", asUser(h.adminId))).status).toBe(403);
   });
 });

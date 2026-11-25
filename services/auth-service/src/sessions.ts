@@ -26,6 +26,16 @@ interface StoredSession {
   // resolves idempotently to `rotatedTo` instead of hard-failing. The record is
   // written with a short grace TTL so it self-evicts shortly after rotation.
   rotatedTo?: string;
+  // Set ONLY on an admin impersonation session (userId = the SUBJECT). The real admin's
+  // own session token is parked here, untouched, so stop/refresh can hand it back without
+  // a re-login. An impersonation record is never rotated or extended (no refresh).
+  impersonation?: StoredImpersonation;
+}
+
+interface StoredImpersonation {
+  actorId: string;
+  actorToken: string;
+  startedAt: number; // epoch ms
 }
 
 const SESSION_PREFIX = "session:";
@@ -54,6 +64,16 @@ function toSessionInfo(s: StoredSession): auth.SessionInfo {
   return { userId: s.userId, client: s.client, sessionExpiresAt: s.accessExpiresAt };
 }
 
+function toImpersonationInfo(s: StoredSession): auth.ImpersonationInfo | null {
+  if (!s.impersonation) return null;
+  return {
+    actorId: s.impersonation.actorId,
+    subjectId: s.userId,
+    startedAt: s.impersonation.startedAt,
+    expiresAt: s.absoluteExpiresAt,
+  };
+}
+
 /** Idle anchor. Legacy records have no lastSeenAt; issuedAt is the backward-compatible one. */
 function lastSeenOf(s: StoredSession): number {
   return s.lastSeenAt ?? s.issuedAt;
@@ -72,7 +92,25 @@ export interface CreatedSession {
   effectiveExpiresAt: number;
 }
 
-export interface RefreshedSession extends CreatedSession {}
+export interface RefreshedSession extends CreatedSession {
+  /** Set when the refreshed token was an impersonation session: it was ENDED, and the
+   *  returned token is the admin's own (restored) session. The caller audits the stop. */
+  endedImpersonation?: { impersonation: auth.ImpersonationInfo; expired: boolean };
+}
+
+export type ImpersonationStartError = "actor_session_invalid" | "nested";
+
+export interface StartedImpersonation extends CreatedSession {
+  impersonation: auth.ImpersonationInfo;
+}
+
+export interface StoppedImpersonation {
+  impersonation: auth.ImpersonationInfo;
+  /** The hard deadline had already passed when it was ended. */
+  expired: boolean;
+  /** The admin's restored (rotated) session, or an error when it died meanwhile. */
+  restored: RefreshedSession | { error: auth.AuthVerifyReason };
+}
 
 /** Clock is injectable so tests can advance time deterministically. */
 export type Clock = () => number;
@@ -151,13 +189,23 @@ export class SessionService {
     // the grace only lets /auth/refresh converge on the successor (see refresh()).
     if (stored.rotatedTo) return this.invalid("revoked");
     if (await this.isUserRevoked(stored.userId)) return this.invalid("revoked");
+    // An impersonation dies with its admin: revoking the actor (suspend/offboard) must also
+    // end the session they opened as someone else.
+    if (stored.impersonation && (await this.isUserRevoked(stored.impersonation.actorId))) return this.invalid("revoked");
     const now = this.now();
     // Effective = min(absolute, idle). Checking the absolute deadline alone is not enough
     // now that it slides: a record nobody has refreshed for idleTtl is logically dead even
     // with sliding window left, and the KV TTL floor can keep it physically present.
     if (now >= this.effectiveDeadline(stored)) return this.invalid("revoked");
     if (now >= stored.accessExpiresAt) return this.invalid("expired");
-    return { valid: true, userId: stored.userId, session: toSessionInfo(stored), reason: null };
+    const impersonation = toImpersonationInfo(stored);
+    return {
+      valid: true,
+      userId: stored.userId,
+      session: toSessionInfo(stored),
+      reason: null,
+      ...(impersonation ? { impersonation } : {}),
+    };
   }
 
   /**
@@ -181,6 +229,13 @@ export class SessionService {
     if (!token || !looksLikeToken(token)) return { error: "malformed" };
     const stored = await this.read(token);
     if (!stored) return { error: "revoked" }; // absent old token = logout / reuse past grace
+    if (stored.impersonation) {
+      // No refresh for impersonation: a refresh ENDS it (expired or not) and rotates the
+      // admin's parked session instead, so the browser lands back on its own account.
+      const ended = await this.endImpersonation(token, stored);
+      if ("error" in ended.restored) return ended.restored;
+      return { ...ended.restored, endedImpersonation: { impersonation: ended.impersonation, expired: ended.expired } };
+    }
     if (await this.isUserRevoked(stored.userId)) return { error: "revoked" };
     const now = this.now();
 
@@ -240,9 +295,90 @@ export class SessionService {
     };
   }
 
-  /** Idempotent: deleting an unknown token is a no-op success. */
+  /**
+   * Idempotent: deleting an unknown token is a no-op success. Logging out of an
+   * impersonation session signs the ADMIN out too (their parked session is deleted): the
+   * person at the keyboard asked to leave, not to switch back.
+   */
   async logout(token: string): Promise<void> {
-    if (token && looksLikeToken(token)) await this.kv.delete(sessionKey(token));
+    if (!token || !looksLikeToken(token)) return;
+    const stored = await this.read(token);
+    if (stored?.impersonation) await this.kv.delete(sessionKey(stored.impersonation.actorToken));
+    await this.kv.delete(sessionKey(token));
+  }
+
+  /**
+   * Mint an impersonation session for `subjectId` on behalf of the admin holding
+   * `actorToken`. Eligibility of the SUBJECT is the caller's job (app.ts, shared rule in
+   * @dub/types); this checks only the actor's session: it must be a live web session of
+   * `actorId` and must not itself be an impersonation (no nesting).
+   *
+   * The record lives `ttlSec` (hard — never extended) but stays in KV `restoreGraceSec`
+   * longer so a refresh arriving after expiry (backgrounded tab) can still hand the admin
+   * their own session back instead of logging them out. verify() enforces the deadline.
+   */
+  async startImpersonation(
+    actorToken: string,
+    actorId: string,
+    subjectId: string,
+    ttlSec: number,
+    restoreGraceSec: number,
+  ): Promise<StartedImpersonation | { error: ImpersonationStartError }> {
+    if (!actorToken || !looksLikeToken(actorToken)) return { error: "actor_session_invalid" };
+    const actor = await this.read(actorToken);
+    if (!actor || actor.rotatedTo || actor.userId !== actorId) return { error: "actor_session_invalid" };
+    if (actor.impersonation) return { error: "nested" };
+    const verified = await this.verify(actorToken);
+    if (!verified.valid) return { error: "actor_session_invalid" };
+
+    const now = this.now();
+    const expiresAt = now + ttlSec * 1000;
+    const stored: StoredSession = {
+      sessionId: newSessionToken(),
+      userId: subjectId,
+      client: "web",
+      issuedAt: now,
+      accessExpiresAt: expiresAt,
+      absoluteExpiresAt: expiresAt,
+      lastSeenAt: now,
+      impersonation: { actorId, actorToken, startedAt: now },
+    };
+    const token = newSessionToken();
+    await this.kv.put(sessionKey(token), JSON.stringify(stored), {
+      expirationTtl: kvTtl(ttlSec + restoreGraceSec),
+    });
+    return {
+      token,
+      session: toSessionInfo(stored),
+      absoluteExpiresAt: expiresAt,
+      effectiveExpiresAt: expiresAt,
+      impersonation: toImpersonationInfo(stored)!,
+    };
+  }
+
+  /** The impersonation behind a token, or null (not one / unknown / malformed). */
+  async impersonationOf(token: string): Promise<auth.ImpersonationInfo | null> {
+    if (!token || !looksLikeToken(token)) return null;
+    const stored = await this.read(token);
+    return stored ? toImpersonationInfo(stored) : null;
+  }
+
+  /** End an impersonation and restore the admin. `null` when the token is not one. */
+  async stopImpersonation(token: string): Promise<StoppedImpersonation | null> {
+    if (!token || !looksLikeToken(token)) return null;
+    const stored = await this.read(token);
+    if (!stored?.impersonation) return null;
+    return this.endImpersonation(token, stored);
+  }
+
+  private async endImpersonation(token: string, stored: StoredSession): Promise<StoppedImpersonation> {
+    const impersonation = toImpersonationInfo(stored)!;
+    const expired = this.now() >= stored.absoluteExpiresAt;
+    await this.kv.delete(sessionKey(token));
+    // refresh() re-checks the admin's own deadlines + revocation, and rotates the token so
+    // the parked value (which sat in another record) is never reused as-is.
+    const restored = await this.refresh(stored.impersonation!.actorToken);
+    return { impersonation, expired, restored };
   }
 
   /** Force-revoke every session for a user (identity suspend/delete). Flag TTL = longest absolute. */

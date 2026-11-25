@@ -2,10 +2,12 @@
 //  - 上にステータスの絞り込み (件数つき): すべて / オンボーディング前 / 各ステータス。
 //    「オンボーディング前」= 採用 + オンボーディング調整 (採用済みでオンボーディングが終わっていない人)。
 //  - 列見出しで並べ替え、氏名・フリガナ・学科で検索。
-//  - ステータスは行のプルダウンでその場で変えられる (楽観的 UI・失敗で戻る)。名簿にいない人を採用系に
-//    するときだけ確認ダイアログ → 名簿に追加。
+//  - ステータスは手で変えない (表示だけ)。面談の予約で 面談確定 になり、面談確定・面談済みの人には
+//    「面談結果を登録」(合否 → メール → 合格ならアカウント発行) が出て、採用 / 不採用 に進む。
 //  - 行を押すと詳細ドロワー (面談日・メモ・履歴)。
+//  - 行末のごみ箱で応募を削除 (確認 → 楽観的に消える)。hr:admin で、採用〜オンボーディング完了でない人だけ押せる。
 import { useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Button,
   Card,
@@ -27,20 +29,20 @@ import {
   ApplicantDrawer,
   formatDate,
   formatDateTime,
-  JoinConfirmDialog,
-  NewApplicantModal,
+  RemoveApplicantButton,
+  RemoveApplicantDialog,
   StageBadge,
   STAGE_LABELS,
-  StatusSelect,
   useHrCapability,
-  type JoinRequest,
 } from "./HrShared.tsx";
+import { canRegisterResult, InterviewResultDialog } from "./InterviewResultDialog.tsx";
 import { HrTabs, type HrTabId } from "./HrTabs.tsx";
+import { ENTER_ON_BEHALF_PARAM } from "./interviewFormApi.tsx";
 import styles from "./hr.module.css";
 
 export function HrFrame({ active, children }: { active: HrTabId; children: JSX.Element }): JSX.Element {
   const { canWrite } = useHrCapability();
-  const [creating, setCreating] = useState(false);
+  const navigate = useNavigate();
   return (
     <Stack gap={6} testId={`fe2-hr-${active}-screen`}>
       <PageHeader
@@ -49,17 +51,22 @@ export function HrFrame({ active, children }: { active: HrTabId; children: JSX.E
         description="面談から採用・オンボーディングまでを一覧で管理します。採用した人は運営メンバー・名簿に追加されます。"
         actions={
           canWrite && active === "applicants" ? (
-            <Button testId="fe2-hr-new" onClick={() => setCreating(true)}>
-              応募者を登録
+            // 応募者は面談申し込みフォーム経由で登録する (人事が聞き取った分は「代わりに入力する」)。
+            <Button testId="fe2-hr-enter-on-behalf" onClick={openOnBehalf(navigate)}>
+              面談申し込みを代わりに入力
             </Button>
           ) : undefined
         }
       />
       <HrTabs active={active} />
       {children}
-      <NewApplicantModal open={creating} onClose={() => setCreating(false)} />
     </Stack>
   );
+}
+
+/** 申し込みフォーム タブへ移り、「代わりに入力する」を開いた状態にする。 */
+function openOnBehalf(navigate: ReturnType<typeof useNavigate>): () => void {
+  return () => void navigate({ to: "/hr/form", search: { [ENTER_ON_BEHALF_PARAM]: 1 } as never });
 }
 
 /** 絞り込み。"all" / "before_onboarding" / 各ステータス。 */
@@ -98,12 +105,14 @@ function compare(a: hr.ApplicantListItem, b: hr.ApplicantListItem, key: string, 
 export function HrApplicantsScreen(): JSX.Element {
   const list = useApplicants();
   const teams = useHrTeams();
-  const { canWrite } = useHrCapability();
+  const { canWrite, canRegister } = useHrCapability();
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<HrFilter>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "updated", direction: "desc" });
   const [openId, setOpenId] = useState<string | null>(null);
-  const [joinReq, setJoinReq] = useState<JoinRequest | null>(null);
+  const [resultFor, setResultFor] = useState<hr.Applicant | null>(null);
+  const [removeReq, setRemoveReq] = useState<hr.Applicant | null>(null);
   const teamName = (id: string | null) => teams.data?.teams.find((t) => t.id === id)?.name ?? "";
 
   const all = list.data?.applicants ?? [];
@@ -142,13 +151,19 @@ export function HrApplicantsScreen(): JSX.Element {
       header: "ステータス",
       sortable: true,
       noWrap: true,
-      minWidth: "13rem",
-      cell: (a) =>
-        canWrite ? (
-          <StatusSelect applicant={a} onRequestJoin={setJoinReq} testId={`fe2-hr-row-${a.id}-status`} />
-        ) : (
+      minWidth: "16rem",
+      cell: (a) => (
+        <span className={styles.stageCell} data-testid={`fe2-hr-row-${a.id}-status`}>
           <StageBadge stage={a.stage} />
-        ),
+          {canRegister && canRegisterResult(a) ? (
+            <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+              <Button size="sm" variant="secondary" testId={`fe2-hr-row-${a.id}-result`} onClick={() => setResultFor(a)}>
+                面談結果を登録
+              </Button>
+            </span>
+          ) : null}
+        </span>
+      ),
     },
     { key: "interview", header: "面談日", sortable: true, noWrap: true, cell: (a) => formatDateTime(a.interviewAt) },
     { key: "updated", header: "更新日", sortable: true, noWrap: true, cell: (a) => formatDate(a.updatedAt) },
@@ -158,6 +173,18 @@ export function HrApplicantsScreen(): JSX.Element {
       minWidth: "14rem",
       cell: (a) => <span className={styles.noteCell}>{a.latestNote ?? ""}</span>,
     },
+    ...(canWrite
+      ? [
+          {
+            key: "actions",
+            header: <span className={styles.visuallyHidden}>操作</span>,
+            align: "right",
+            noWrap: true,
+            width: "3.5rem",
+            cell: (a) => <RemoveApplicantButton applicant={a} onRequest={setRemoveReq} />,
+          } satisfies ColumnDef<hr.ApplicantListItem>,
+        ]
+      : []),
   ];
 
   let body: JSX.Element;
@@ -176,7 +203,21 @@ export function HrApplicantsScreen(): JSX.Element {
       />
     );
   } else if (all.length === 0) {
-    body = <EmptyState testId="fe2-hr-empty" icon="user" title="まだ応募者がいません" description="「応募者を登録」から追加できます。" />;
+    body = (
+      <EmptyState
+        testId="fe2-hr-empty"
+        icon="user"
+        title="まだ応募者がいません"
+        description="面談申し込みフォームに回答があると、ここに「面談日程調整中」で入ります。聞き取った内容は「代わりに入力する」から登録できます。"
+        action={
+          canWrite ? (
+            <Button variant="secondary" testId="fe2-hr-empty-enter" onClick={openOnBehalf(navigate)}>
+              面談申し込みを代わりに入力
+            </Button>
+          ) : undefined
+        }
+      />
+    );
   } else {
     body = (
       <DataTable<hr.ApplicantListItem>
@@ -221,8 +262,9 @@ export function HrApplicantsScreen(): JSX.Element {
           </div>
         </div>
         {body}
-        <ApplicantDrawer applicantId={openId} onClose={() => setOpenId(null)} onRequestJoin={setJoinReq} />
-        <JoinConfirmDialog request={joinReq} onDone={() => setJoinReq(null)} />
+        <ApplicantDrawer applicantId={openId} onClose={() => setOpenId(null)} onRequestResult={setResultFor} />
+        <InterviewResultDialog applicant={resultFor} onClose={() => setResultFor(null)} />
+        <RemoveApplicantDialog applicant={removeReq} onClose={() => setRemoveReq(null)} />
       </>
     </HrFrame>
   );

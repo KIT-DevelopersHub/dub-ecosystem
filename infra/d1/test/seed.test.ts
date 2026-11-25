@@ -162,6 +162,21 @@ describe("seedScenario", () => {
     }
   });
 
+  // 0028: nobody's deliveries change on deploy — admin/maintainer keep 管理者向け, every role that
+  // can open 通知 keeps 全体への通知, and organizer/member do NOT gain 管理者向け.
+  it("0028 backfills notif:receive_* to exactly today's recipients", async () => {
+    const { raw } = await migratedD1();
+    const has = (roleId: string, key: string) =>
+      (raw.prepare("SELECT 1 AS ok FROM identity_role_permissions WHERE role_id = ? AND permission_key = ?").get(roleId, key) as
+        | { ok: number }
+        | undefined)?.ok === 1;
+    for (const roleId of ["role_sys_admin", "role_sys_maintainer"]) expect(has(roleId, "notif:receive_admin"), roleId).toBe(true);
+    for (const roleId of ["role_sys_organizer", "role_sys_member"]) expect(has(roleId, "notif:receive_admin"), roleId).toBe(false);
+    for (const roleId of ["role_sys_admin", "role_sys_maintainer", "role_sys_organizer", "role_sys_member"]) {
+      expect(has(roleId, "notif:receive_all"), roleId).toBe(true);
+    }
+  });
+
   // Super-admin invariant (prod incident 2026-08-15 — "adminなのに操作ボタンが押せない" が頻発):
   // the `admin` system role must hold EVERY key in the frozen RBAC catalog. The 0002 seed
   // drifted below the catalog and single holes were patched reactively (drive:* / mail:read_all /

@@ -72,7 +72,7 @@ paths:
       summary: Create a channel
       tags:
         - chat
-      description: Requires chat:create.
+      description: Requires chat:create. A private non-DM channel also requires chat:create_private (403 otherwise).
       requestBody:
         required: true
         content:

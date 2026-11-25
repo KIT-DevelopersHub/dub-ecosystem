@@ -65,6 +65,23 @@ export const POLICY_TABLE = definePolicyTable({
   // no actor and no key to demand. Read-only, and the content is authored to be public.
   "GET /members/internal/onboarding": INTERNAL,
 
+  // 公開 面談申し込みフォーム (人事アプリ). api-gateway の PUBLIC GET|POST /api/v1/public/hr-interview-form
+  // が未ログインの応募者のために s2s で転送してくる (POST は gateway で囮フィールド・Turnstile・レート制限を
+  // 通した後)。参加届の公開受付と同じく発信者が居ないので鍵は要求できず INTERNAL。GET が返すのは人事が公開
+  // 前提で書いた質問だけ、POST の応答は accepted のみ (誰が応募済みかは返さない)。回答は
+  // `system:public-hr-interview-form` に帰属し、応募者を 面談日程調整中 で作る (hr-form-service)。
+  "GET /members/internal/hr/interview-form": INTERNAL,
+  "POST /members/internal/hr/interview-form": INTERNAL,
+  // 公開の面談日程選択。api-gateway の PUBLIC POST /api/v1/public/hr-interview-booking/* が s2s で転送する。
+  // 誰の予約かはメールで渡したトークンでハンドラが判定する (hr-interview-service)。
+  "POST /members/internal/hr/interview-booking/view": INTERNAL,
+  "POST /members/internal/hr/interview-booking/book": INTERNAL,
+  // 面談結果の登録 (api-gateway POST /api/v1/admin/hr/applicants/:id/interview-result が鍵を検査済み)。
+  "POST /members/internal/hr/applicants/:id/interview-result/claim": INTERNAL,
+  "POST /members/internal/hr/applicants/:id/interview-result/link": INTERNAL,
+  "POST /members/internal/hr/applicants/:id/interview-result/complete": INTERNAL,
+  "POST /members/internal/hr/applicants/:id/interview-result/release": INTERNAL,
+
   // Self 参加届 (アカウント設定 -> 参加情報), reached through api-gateway's GET|POST
   // /api/v1/me/participation, which authenticates the session and forwards the caller's
   // identity id alongside the marker. Self-scoped by construction: no target id is accepted
@@ -74,6 +91,16 @@ export const POLICY_TABLE = definePolicyTable({
   // `reqCtx` check, which gate.ts prescribes for INTERNAL routes that need an actor).
   "GET /members/internal/me/participation": INTERNAL,
   "POST /members/internal/me/participation": INTERNAL,
+
+  // 参加届からのアカウント発行 (api-gateway POST /api/v1/admin/participation/:id/onboard-account
+  // -> ここ)。鍵 (members:onboard_mail) は gateway の表が検査済みで、ここは対象の確認と紐付けだけ:
+  // 参加届に紐付いた追加済の名簿行で、まだアカウントの無い人に限る (service が保証)。既存の
+  // 紐付けは張り替えない。internalWithKeys にしないのは、鍵の検査を 2 か所に分けないため。
+  "GET /members/internal/participation/:id/onboard-target": INTERNAL,
+  "POST /members/internal/participation/:id/onboard-link": INTERNAL,
+  // スポンサーのメール連携: mail-gateway が Dub のメールを送った / 受け取った時に呼ぶ (system origin・ユーザーなし)。
+  // 営業先の日付とステータスを決まりどおりに進めるだけで、本文・件名は受け取らない。
+  "POST /members/internal/sponsor/mail-activity": INTERNAL,
 
   // ---- 運営メンバー (名簿): reads = 閲覧 ----
   // The former gate was `requireAny(["identity:read", "app:members:view"])` (OR). There is no
@@ -86,11 +113,15 @@ export const POLICY_TABLE = definePolicyTable({
   // `app:members:view` (the delegated 統括 role #526 enabled) passed the OR and passes this
   // rule too, so collapsing to the per-app tier loses nobody and makes ロール管理 authoritative.
   // See docs/policy-coverage-inventory.md b-6.
-  "GET /members/overview": appLevel("members", "view"),
+  //
+  // overview は名簿の全項目を返すので 運営名簿 の範囲 (members:roster_view) を重ねる。組織図までの
+  // ロールは org-overview を読む: 同じ形で個人情報の項目だけ落としたもの (service.getOrgOverview)。
+  "GET /members/overview": appLevel("members", "view", "members:roster_view"),
+  "GET /members/org-overview": appLevel("members", "view"),
   // The CANONICAL team list other apps (gantt 等) read for their own team switchers.
   "GET /members/teams": appLevel("members", "view"),
   // 名簿行の逆引き (identity user -> member row).
-  "GET /members/people/by-identity/:identityUserId": appLevel("members", "view"),
+  "GET /members/people/by-identity/:identityUserId": appLevel("members", "view", "members:roster_view"),
 
   // ---- 運営メンバー (名簿): writes = 編集 ----
   // The app's 編集 tier is the WHOLE requirement — deliberately NOT "編集 AND identity:admin".
@@ -102,8 +133,13 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /members/teams/:id": appLevel("members", "edit"),
   "DELETE /members/teams/:id": appLevel("members", "edit"),
   "POST /members/people": appLevel("members", "edit"),
-  "POST /members/people/:id/identity-link": appLevel("members", "edit"),
-  "PATCH /members/people/:id": appLevel("members", "edit"),
+  // 本人の情報に触る書き込みは 運営名簿 の編集範囲を重ねる。組織図までの編集は /org (運営での項目だけを
+  // 受け付け、個人情報を落として返す) と チーム・メンバーの追加削除まで。追加は書くだけで他人の情報を
+  // 読まず、削除も内容を返さないので 運営メンバータブの編集として残す。
+  "POST /members/people/:id/identity-link": appLevel("members", "edit", "members:roster_edit"),
+  "POST /members/people/:id/profile-reminder": appLevel("members", "edit", "members:roster_edit"),
+  "PATCH /members/people/:id": appLevel("members", "edit", "members:roster_edit"),
+  "PATCH /members/people/:id/org": appLevel("members", "edit"),
   "DELETE /members/people/:id": appLevel("members", "edit"),
 
   // チーム・役職ロールの一括付与。全員のロール割当を書き換えるので、ロール管理と同じ
@@ -163,6 +199,48 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /members/hr/applicants/:id/notes": appLevel("hr", "edit", "hr:write"),
   "POST /members/hr/applicants/:id/join": appLevel("hr", "edit", "hr:admin"),
   "DELETE /members/hr/applicants/:id": appLevel("hr", "edit", "hr:admin"),
+  // 面談申し込みフォーム: 定義と回答一覧は応募者の個人情報と同格なので 閲覧 + hr:read。定義の編集 (公開ページを
+  // 書き換える) と代理入力 (応募者を作る = POST /applicants と同じ) は 編集 + hr:write。
+  "GET /members/hr/interview-form": appLevel("hr", "view", "hr:read"),
+  "PUT /members/hr/interview-form": appLevel("hr", "edit", "hr:write"),
+  "GET /members/hr/interview-form/responses": appLevel("hr", "view", "hr:read"),
+  "POST /members/hr/interview-form/responses": appLevel("hr", "edit", "hr:write"),
+  // 面談の日程調整: 枠・招待の一覧は応募者の個人情報と同格なので 閲覧 + hr:read。枠・設定の編集とメール送信は 編集 + hr:write。
+  "GET /members/hr/interviews": appLevel("hr", "view", "hr:read"),
+  "PUT /members/hr/interviews/settings": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/slots": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/slots/delete": appLevel("hr", "edit", "hr:write"),
+  "DELETE /members/hr/interviews/slots/:id": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/slots/:id/release": appLevel("hr", "edit", "hr:write"),
+  "POST /members/hr/interviews/invites/:id/send": appLevel("hr", "edit", "hr:write"),
   "GET /members/hr/onboarding": appLevel("hr", "view", "hr:read"),
   "PUT /members/hr/onboarding/:memberId/items/:itemId": appLevel("hr", "edit", "hr:write"),
+  // ---- スポンサー (スポンサーアプリ: 名刺の共有) ----
+  // スポンサーアプリ自身の 無効/閲覧/編集 行で出し分ける。名刺は社外の個人の連絡先なので、閲覧 (写真を含む)
+  // にも詳細権限 sponsor:read を重ねる。登録・編集・写真の撮り直しは 編集 + sponsor:write、削除は 編集 + sponsor:admin。
+  "GET /members/sponsor/cards": appLevel("sponsor", "view", "sponsor:read"),
+  "GET /members/sponsor/cards/:id": appLevel("sponsor", "view", "sponsor:read"),
+  "GET /members/sponsor/cards/:id/image": appLevel("sponsor", "view", "sponsor:read"),
+  "POST /members/sponsor/cards": appLevel("sponsor", "edit", "sponsor:write"),
+  "PATCH /members/sponsor/cards/:id": appLevel("sponsor", "edit", "sponsor:write"),
+  "PUT /members/sponsor/cards/:id/image": appLevel("sponsor", "edit", "sponsor:write"),
+  "DELETE /members/sponsor/cards/:id": appLevel("sponsor", "edit", "sponsor:admin"),
+  // 営業進捗も名刺と同じ段階 (閲覧 = read・登録/編集/取り込み = write・削除 = admin)。
+  "GET /members/sponsor/leads": appLevel("sponsor", "view", "sponsor:read"),
+  "GET /members/sponsor/leads/:id": appLevel("sponsor", "view", "sponsor:read"),
+  "POST /members/sponsor/leads": appLevel("sponsor", "edit", "sponsor:write"),
+  "POST /members/sponsor/leads/import": appLevel("sponsor", "edit", "sponsor:write"),
+  "PATCH /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:write"),
+  "DELETE /members/sponsor/leads/:id": appLevel("sponsor", "edit", "sponsor:admin"),
+  "GET /members/sponsor/goals": appLevel("sponsor", "view", "sponsor:read"),
+  // メール連携: メールの相手を担当者メールに登録 (= 営業先の編集) と自動更新の履歴は営業進捗と同じ段階。
+  // 既存メールからの一括補完は全社の日付を書き換えうるので削除と同じ sponsor:admin。
+  "POST /members/sponsor/leads/:id/contact-emails": appLevel("sponsor", "edit", "sponsor:write"),
+  "GET /members/sponsor/leads/:id/activity": appLevel("sponsor", "view", "sponsor:read"),
+  "POST /members/sponsor/leads/mail-backfill": appLevel("sponsor", "edit", "sponsor:admin"),
+
+  // 目標管理。閲覧 + goals:read で全チームの進捗 (件数だけで個人情報は含まない) を読める。編集は 編集 のみ。
+  "GET /members/goals": appLevel("goals", "view", "goals:read"),
+  "PUT /members/goals/:teamId/:month": appLevel("goals", "edit"),
+  "DELETE /members/goals/:teamId/:month": appLevel("goals", "edit"),
 });

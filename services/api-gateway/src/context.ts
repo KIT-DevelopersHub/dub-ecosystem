@@ -19,6 +19,8 @@ export interface GatewayVariables {
    * `authenticateOnce` runs, so one request never verifies twice.
    */
   authed?: import("./auth").Authenticated;
+  /** Set when impersonation.ts refused this request (so it is audited once, as blocked). */
+  impersonationBlocked?: boolean;
 }
 
 /** Mint (or inherit) x-dub-request-id and expose it on the response. Runs first. */

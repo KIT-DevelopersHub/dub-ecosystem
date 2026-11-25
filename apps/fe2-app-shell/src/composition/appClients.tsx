@@ -50,6 +50,7 @@ import type {
   UnfurlResponse,
   UnreadSummary,
   UpdateChannelRequest,
+  UpdateChannelVisibilityRequest,
   UpdateSectionRequest,
   WsTicketResponse,
 } from "./featureEntries.tsx";
@@ -182,6 +183,8 @@ export function createChatApiClient(api: ApiClient): ChatApiClient {
       api.request<Channel>({ method: "PATCH", path: `${CHAT}/channels/${id}` as ApiPath, body: req }),
     deleteChannel: (id: common.ChannelId) =>
       api.request<void>({ method: "DELETE", path: `${CHAT}/channels/${id}` as ApiPath }),
+    updateChannelVisibility: (id: common.ChannelId, req: UpdateChannelVisibilityRequest) =>
+      api.request<Channel>({ method: "PUT", path: `${CHAT}/channels/${id}/visibility` as ApiPath, body: req }),
     listSections: () =>
       api
         .request<Partial<ChatSectionList> | null>({ method: "GET", path: `${CHAT}/sections` })

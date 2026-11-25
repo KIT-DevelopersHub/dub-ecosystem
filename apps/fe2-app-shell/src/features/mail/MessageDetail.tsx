@@ -9,7 +9,7 @@ import type { mail } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useMailApi } from "./MailProvider.tsx";
-import { sanitizeHtml } from "./sanitize.tsx";
+import { LinkifiedText, SanitizedHtml } from "./MailBody.tsx";
 import { formatBytes, saveBlob } from "./mailApi.tsx";
 
 function formatReceived(iso: string): string {
@@ -25,16 +25,10 @@ function addressLabel(a: mail.MailAddress): string {
 function MessageBody({ message }: { message: mail.MailMessageDetail }): JSX.Element {
   if (message.textBody && message.textBody.trim().length > 0) {
     return (
-      <div data-testid="fe2-mail-body-text" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-        {message.textBody}
-      </div>
+      <LinkifiedText testId="fe2-mail-body-text" text={message.textBody} />
     );
   }
-  if (message.htmlBody) {
-    const safe = sanitizeHtml(message.htmlBody);
-    // safe is an allowlisted subset produced by sanitize.tsx (no scripts/handlers/js: urls).
-    return <div data-testid="fe2-mail-body-html" dangerouslySetInnerHTML={{ __html: safe }} />;
-  }
+  if (message.htmlBody) return <SanitizedHtml testId="fe2-mail-body-html" html={message.htmlBody} />;
   return <em data-testid="fe2-mail-body-empty">(本文なし)</em>;
 }
 

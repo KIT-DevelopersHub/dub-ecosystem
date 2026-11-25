@@ -7,6 +7,7 @@ import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { common, identity, meeting } from "@dub/types";
+import { meeting as meetingValues } from "@dub/types";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { ApiError } from "../../lib/api-client.tsx";
 import type { CalendarApi } from "./calendarApi.tsx";
@@ -30,6 +31,7 @@ function mtg(over: Partial<meeting.Meeting>): meeting.Meeting {
     description: null,
     targetId: "all",
     targetName: "全体",
+    targets: meetingValues.legacyTargets(over.targetId ?? "all").map((t) => ({ ...t, name: over.targetName ?? "全体" })),
     startsAt: "2026-01-05T12:00:00.000Z", // weekly from a Monday long ago → visible in any month
     durationMinutes: 60,
     recurrence: "weekly",
@@ -37,6 +39,7 @@ function mtg(over: Partial<meeting.Meeting>): meeting.Meeting {
     meetUrl: "https://meet.google.com/abc-defg-hij",
     htmlLink: "https://calendar.google.com/x",
     attendeeCount: 9,
+    trackAttendance: false,
     createdBy: ME,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
@@ -70,10 +73,12 @@ function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccoun
     listUserTasks: vi.fn(async () => []),
     listMeetings: vi.fn(() => Promise.resolve({ items, account })),
     listMeetingTargets: vi.fn(() => Promise.resolve({ items: TARGETS })),
-    createMeeting: vi.fn((b: meeting.CreateMeetingRequest) => Promise.resolve(mtg({ ...b, id: "mtg_new", description: b.description ?? null, until: b.until ?? null }))),
+    createMeeting: vi.fn((b: meeting.CreateMeetingRequest) => Promise.resolve(mtg({ ...b, targetId: b.targetId ?? "all", targets: (b.targets ?? []).map((t) => ({ ...t, name: t.id })), id: "mtg_new", description: b.description ?? null, until: b.until ?? null }))),
     updateMeeting: vi.fn(),
     deleteMeeting: vi.fn(() => Promise.resolve()),
     syncMeetings: vi.fn(),
+    joinMeeting: vi.fn(async () => ({ meetUrl: "https://meet.google.com/abc-defg-hij", recordedFor: null })),
+    listMeetingAttendees: vi.fn(async () => ({ items: [], responsesAvailable: true })),
     ...over,
   };
   return api;
@@ -122,6 +127,67 @@ describe("カレンダー > ミーティング permissions", () => {
     expect(screen.queryByTestId("calendar-meeting-detail-delete")).not.toBeInTheDocument();
   });
 
+  it("the detail lists invitees with their Google Calendar answers for the clicked occurrence", async () => {
+    const api = fakeApi({
+      listMeetingAttendees: vi.fn(async () => ({
+        responsesAvailable: true,
+        items: [
+          { userId: "usr_a" as common.UserId, name: "山田 恵美", email: null, response: "accepted" as const, comment: null },
+          { userId: null, name: "外部 ゲスト", email: "guest@example.com", response: "tentative" as const, comment: null },
+          { userId: "usr_b" as common.UserId, name: "佐藤 太郎", email: null, response: "declined" as const, comment: "授業です" },
+          { userId: "usr_c" as common.UserId, name: "鈴木 一郎", email: null, response: "needsAction" as const, comment: null },
+        ],
+      })),
+    });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    const chip = chipsOf("mtg_all")[0]!;
+    await userEvent.click(chip);
+    const section = await screen.findByTestId("calendar-meeting-attendees");
+    await waitFor(() => expect(within(section).getAllByTestId("calendar-meeting-attendees-row")).toHaveLength(4));
+    expect(section).toHaveTextContent("参加者 4人");
+    expect(within(section).getByTestId("calendar-meeting-attendees-summary")).toHaveTextContent("参加 1 · 未定 1 · 不参加 1 · 未返信 1");
+    expect(within(section).getAllByTestId("calendar-meeting-attendees-response").map((b) => b.textContent)).toEqual(["参加", "未定", "不参加", "未返信"]);
+    expect(section).toHaveTextContent("guest@example.com");
+    expect(section).toHaveTextContent("「授業です」");
+    // A weekly meeting asks for the clicked occurrence (its JST date, from the chip id).
+    const day = chip.getAttribute("data-testid")!.split(":").pop();
+    expect(api.listMeetingAttendees).toHaveBeenCalledWith("mtg_all", day);
+  });
+
+  it("answers Google could not provide are hidden, the invitee list still shows", async () => {
+    const api = fakeApi({
+      listMeetingAttendees: vi.fn(async () => ({
+        responsesAvailable: false,
+        items: [{ userId: "usr_a" as common.UserId, name: "山田 恵美", email: null, response: "needsAction" as const, comment: null }],
+      })),
+    });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    await userEvent.click(chipsOf("mtg_all")[0]!);
+    const section = await screen.findByTestId("calendar-meeting-attendees");
+    await within(section).findByTestId("calendar-meeting-attendees-unavailable");
+    expect(within(section).getAllByTestId("calendar-meeting-attendees-row")).toHaveLength(1);
+    expect(within(section).queryByTestId("calendar-meeting-attendees-response")).not.toBeInTheDocument();
+  });
+
+  it("a 定例 shows that attendance is taken, and Meet に参加 goes through the join (records attendance)", async () => {
+    const tab = { opener: {}, location: { href: "" }, close: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    const api = fakeApi({
+      listMeetings: vi.fn(async () => ({ items: [mtg({ trackAttendance: true })], account: { email: "hackit.dub@gmail.com", calendarReady: true } })),
+    });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    await userEvent.click(chipsOf("mtg_all")[0]!);
+    const detail = await screen.findByTestId("calendar-meeting-detail");
+    expect(within(detail).getByTestId("calendar-meeting-detail-attendance")).toHaveTextContent("全体定例");
+    await userEvent.click(within(detail).getByTestId("calendar-meeting-detail-join"));
+    expect(api.joinMeeting).toHaveBeenCalledWith("mtg_all");
+    await waitFor(() => expect(tab.location.href).toBe("https://meet.google.com/abc-defg-hij"));
+    open.mockRestore();
+  });
+
   it("meetings_edit on a カレンダー 閲覧 role is capped at 閲覧", async () => {
     const perms = viewerPermissions("calendar", ["task:read", "calendar:meetings_view", "calendar:meetings_edit"]);
     render(wrap(<CalendarScreen />, fakeApi(), perms));
@@ -129,6 +195,15 @@ describe("カレンダー > ミーティング permissions", () => {
     expect(screen.queryByTestId("calendar-meetings-create")).not.toBeInTheDocument();
   });
 });
+
+/** Replace the default 全体 chip with one found by typing (Backspace removes, Enter adds). */
+async function pickOnlyTarget(dialog: HTMLElement, query: string): Promise<void> {
+  const input = within(dialog).getByTestId("calendar-meeting-form-target");
+  await userEvent.click(input);
+  await userEvent.keyboard("{Backspace}");
+  await userEvent.type(input, query);
+  await userEvent.keyboard("{Enter}");
+}
 
 describe("定例ミーティングを設定", () => {
   it("submits the JST date + time as a UTC startsAt and shows the new meeting optimistically", async () => {
@@ -148,7 +223,7 @@ describe("定例ミーティングを設定", () => {
     expect(api.createMeeting).not.toHaveBeenCalled();
 
     await userEvent.type(within(dialog).getByTestId("calendar-meeting-form-title"), "統括定例");
-    await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-target"), "role_lead");
+    await pickOnlyTarget(dialog, "統括");
     // Today at 12:00 JST — same calendar day in any test TZ, so it lands in the visible week.
     const now = new Date();
     const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -157,17 +232,22 @@ describe("定例ミーティングを設定", () => {
     await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-duration"), "30");
     await userEvent.selectOptions(within(dialog).getByTestId("calendar-meeting-form-recurrence"), "none");
     expect(within(dialog).queryByTestId("calendar-meeting-form-until")).not.toBeInTheDocument();
+    // 定例として出席を取る (チーム定例: target is a role).
+    expect(within(dialog).getByText("チーム定例として出席を取る")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByText("チーム定例として出席を取る"));
     await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-submit"));
 
     const [y, m, d] = date.split("-").map(Number) as [number, number, number];
     expect(api.createMeeting).toHaveBeenCalledWith({
       title: "統括定例",
       description: null,
+      targets: [{ kind: "role", id: "role_lead" }],
       targetId: "role_lead",
       startsAt: new Date(Date.UTC(y, m - 1, d, 12 - 9, 0)).toISOString(),
       durationMinutes: 30,
       recurrence: "none",
       until: null,
+      trackAttendance: true,
     });
     // Optimistic chip before the server answers (統括 is one of the caller's default-on targets).
     await waitFor(() => expect(chipsOf("tmp_[a-z0-9]+").length).toBe(1));
@@ -227,6 +307,100 @@ describe("定例ミーティングを設定", () => {
     expect(api.deleteMeeting).not.toHaveBeenCalled();
     await userEvent.click(within(confirm).getByRole("button", { name: "削除する" }));
     await waitFor(() => expect(api.deleteMeeting).toHaveBeenCalledWith("mtg_all"));
+  });
+});
+
+describe("対象を複数選ぶ", () => {
+  it("adds a role and a member as chips (Enter / click), removes with × and Backspace, and sends targets[]", async () => {
+    const api = fakeApi({
+      listMeetingTargets: vi.fn(() => Promise.resolve({ items: TARGETS, people: [{ id: "usr_hana" as meeting.MeetingPersonOption["id"], name: "花子" }] })),
+    });
+    render(wrap(<CalendarScreen />, api, EDIT));
+    await waitFor(() => expect(screen.getByTestId("calendar-meetings-create")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("calendar-meetings-create"));
+    const dialog = await screen.findByTestId("calendar-meeting-form");
+    const chips = () => within(dialog).queryAllByTestId("calendar-meeting-form-target-chip").map((c) => c.getAttribute("data-value"));
+    expect(chips()).toEqual(["all:all"]);
+
+    const input = within(dialog).getByTestId("calendar-meeting-form-target");
+    await userEvent.type(input, "統括{Enter}");
+    await userEvent.type(input, "花");
+    await userEvent.click(within(dialog).getByRole("option", { name: /花子/ }));
+    expect(chips()).toEqual(["all:all", "role:role_lead", "person:usr_hana"]);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "全体 を外す" }));
+    expect(chips()).toEqual(["role:role_lead", "person:usr_hana"]);
+    await userEvent.keyboard("{Backspace}");
+    expect(chips()).toEqual(["role:role_lead"]);
+    await userEvent.type(input, "花{Enter}");
+    expect(chips()).toEqual(["role:role_lead", "person:usr_hana"]);
+
+    await userEvent.type(within(dialog).getByTestId("calendar-meeting-form-title"), "合同定例");
+    await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-submit"));
+    expect(api.createMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({ targets: [{ kind: "role", id: "role_lead" }, { kind: "person", id: "usr_hana" }], targetId: "role_lead" }),
+    );
+  });
+
+  it("no chip left is a form error, and nothing is sent", async () => {
+    const api = fakeApi();
+    render(wrap(<CalendarScreen />, api, EDIT));
+    await waitFor(() => expect(screen.getByTestId("calendar-meetings-create")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("calendar-meetings-create"));
+    const dialog = await screen.findByTestId("calendar-meeting-form");
+    await userEvent.type(within(dialog).getByTestId("calendar-meeting-form-title"), "x");
+    await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-target"));
+    await userEvent.keyboard("{Backspace}");
+    await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-submit"));
+    expect(await within(dialog).findByText("対象を1つ以上追加してください")).toBeInTheDocument();
+    expect(api.createMeeting).not.toHaveBeenCalled();
+  });
+});
+
+describe("予定の作成で繰り返し", () => {
+  it("a repeating 予定 hands what was typed to the meeting form, which registers it", async () => {
+    const api = fakeApi();
+    render(wrap(<CalendarScreen />, api, EDIT));
+    await waitFor(() => expect(screen.getByTestId("calendar-meetings-create")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("calendar-create"));
+    const panel = await screen.findByTestId("calendar-create-panel");
+    await userEvent.type(within(panel).getByTestId("calendar-form-title"), "統括定例 Meeting");
+    await userEvent.selectOptions(within(panel).getByTestId("calendar-form-start-time"), "19:00");
+    await userEvent.selectOptions(within(panel).getByTestId("calendar-form-end-time"), "20:00");
+    expect(within(panel).getByTestId("calendar-form-save")).toHaveTextContent("保存");
+    await userEvent.selectOptions(within(panel).getByTestId("calendar-form-repeat"), "weekly");
+    expect(within(panel).getByTestId("calendar-form-repeat-note")).toHaveTextContent("定例ミーティング");
+    await userEvent.click(within(panel).getByTestId("calendar-form-save"));
+
+    expect(api.createTask).not.toHaveBeenCalled();
+    const dialog = await screen.findByTestId("calendar-meeting-form");
+    expect(within(dialog).getByTestId("calendar-meeting-form-title")).toHaveValue("統括定例 Meeting");
+    expect(within(dialog).getByTestId("calendar-meeting-form-time")).toHaveValue("19:00");
+    expect(within(dialog).getByTestId("calendar-meeting-form-duration")).toHaveValue("60");
+    expect(within(dialog).getByTestId("calendar-meeting-form-recurrence")).toHaveValue("weekly");
+    await pickOnlyTarget(dialog, "統括");
+    await userEvent.click(within(dialog).getByTestId("calendar-meeting-form-submit"));
+    expect(api.createMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "統括定例 Meeting", targetId: "role_lead", durationMinutes: 60, recurrence: "weekly" }),
+    );
+  });
+
+  it("繰り返さない stays a plain 予定; no 繰り返し without meetings_edit", async () => {
+    const api = fakeApi({ createTask: vi.fn(() => new Promise<never>(() => undefined)) });
+    const { unmount } = render(wrap(<CalendarScreen />, api, EDIT));
+    await waitFor(() => expect(screen.getByTestId("calendar-meetings-create")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("calendar-create"));
+    const panel = await screen.findByTestId("calendar-create-panel");
+    await userEvent.type(within(panel).getByTestId("calendar-form-title"), "単発");
+    await userEvent.click(within(panel).getByTestId("calendar-form-save"));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalled());
+    expect(screen.queryByTestId("calendar-meeting-form")).not.toBeInTheDocument();
+    unmount();
+
+    render(wrap(<CalendarScreen />, fakeApi(), VIEW));
+    await userEvent.click(await screen.findByTestId("calendar-create"));
+    await screen.findByTestId("calendar-create-panel");
+    expect(screen.queryByTestId("calendar-form-repeat")).not.toBeInTheDocument();
   });
 });
 

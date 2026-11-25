@@ -71,6 +71,14 @@ export const POLICY_TABLE = definePolicyTable({
   // 持っていないのがこのページの前提なので PUBLIC。読み取り専用で、返すのは管理者が公開前提で
   // 書いた案内項目だけ（名簿・個人情報は含まない）。
   "GET /api/v1/public/onboarding": PUBLIC,
+  // 人事の 面談申し込みフォーム。申し込む人は参加届より前の段階でアカウントをまだ持っていないので PUBLIC。
+  // GET は人事が公開前提で書いた質問だけ (個人情報なし)、POST は応募者を 面談日程調整中 で作る書き込み。
+  // bot 対策 (囮フィールド・Turnstile・IP レート制限) は認可ではないのでハンドラに置く。参加届と同じく
+  // Turnstile は token が来たときだけ検証する (上の CAVEAT と同じ弱さ・widget を出したら token 必須化を検討)。
+  "GET /api/v1/public/hr-interview-form": PUBLIC,
+  "POST /api/v1/public/hr-interview-form": PUBLIC,
+  "POST /api/v1/public/hr-interview-booking/view": PUBLIC,
+  "POST /api/v1/public/hr-interview-booking/book": PUBLIC,
   // LP visit beacon. The handler drops non-LP origins and forwards only a sanitized row to
   // lp-analytics s2s; there is no session to check and nothing readable comes back (204).
   "POST /api/v1/public/lp-visits": PUBLIC,
@@ -117,4 +125,19 @@ export const POLICY_TABLE = definePolicyTable({
   // Same subject shape (`:userId` from the caller) and the same secret: the account-issue
   // mail carries that user's password to their Gmail, so it needs exactly the view right.
   "POST /api/v1/admin/users/:userId/account-mail": ["identity:admin"],
+  // 参加届からのアカウント発行 (人事向け)。identity:admin / mail:admin / ロール管理の編集を
+  // 渡さずに済むよう専用の鍵 1 つで開ける。安全性は鍵ではなく形で担保する: 対象は参加届から
+  // 導かれる「アカウントの無い人」だけ・ロールは identity-roster が一般メンバーに固定・
+  // 既存アカウントには触れない (handlers/participation-onboard.ts)。`:participationId` は
+  // 呼び出し元が選ぶが、選べるのは参加届の行だけで、既存アカウントは 409 で弾かれる。
+  "POST /api/v1/admin/participation/:participationId/onboard-account": ["members:onboard_mail"],
+  // 面談結果の登録 (人事)。合格はアカウントを発行するので参加届からの発行と同じ鍵も要る。
+  // 対象は応募者から導かれ (面談確定/面談済みで結果が未登録の人だけ)、ロールは identity-roster が
+  // 一般メンバーに固定・既存アカウントには触れない (handlers/hr-interview-result.ts)。
+  "POST /api/v1/admin/hr/applicants/:applicantId/interview-result": ["hr:write", "members:onboard_mail"],
+  // 代理表示 (admin impersonation) start. Same `:userId`-subject shape; demands the dedicated
+  // key, not identity:admin (granted separately, default role_sys_admin only). Target
+  // eligibility (self / inactive / privileged / nested) is auth-service's instance check, and
+  // while impersonating the subject never holds this key, so a nested start 403s here first.
+  "POST /api/v1/admin/users/:userId/impersonation": ["identity:impersonate"],
 });

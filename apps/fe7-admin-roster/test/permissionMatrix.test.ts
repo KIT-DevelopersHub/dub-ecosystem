@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { identity } from "@dub/types";
-import { togglePermission, buildRoleUpdate, lockedKeysForRole } from "../src/lib/permissionMatrix";
+import { appRequiredKeys, togglePermission, buildRoleUpdate, lockedKeysForRole } from "../src/lib/permissionMatrix";
 
 
 
@@ -49,6 +49,20 @@ describe("permissionMatrix — buildRoleUpdate (diff only)", () => {
 
 describe("permissionMatrix — buildRoleUpdate bundles per-app domain keys", () => {
   const original = { name: "統括", permissions: [] as identity.PermissionKey[] };
+
+  it("saves a key the legacy role lacks even though a granted app already implies it", () => {
+    const legacy = { name: "統括", permissions: ["app:lp:view"] as identity.PermissionKey[] };
+    expect(buildRoleUpdate(legacy, { name: "統括", permissions: ["app:lp:view", "infra:read"] })).toEqual({
+      permissions: ["app:lp:view", "infra:read"],
+    });
+  });
+
+  it("reports the domain keys of granted apps only", () => {
+    const required = appRequiredKeys(["app:lp:view", "infra:deploy"]);
+    expect(required.get("infra:read")).toBe("LP管理");
+    expect(required.has("infra:deploy")).toBe(false);
+    expect(appRequiredKeys(["infra:read"]).size).toBe(0);
+  });
 
   it("granting app:members:edit saves app:members:view + identity:read too (実効権限)", () => {
     const patch = buildRoleUpdate(original, { name: "統括", permissions: ["app:members:edit"] });

@@ -267,7 +267,14 @@ describe("drive internal-only paths 404 at the edge (inventory a-5)", () => {
 // an anonymous caller; anonymous access is a 401 and is covered by the runtime tests above.
 const KEY_SETS: Record<string, identity.PermissionKey[]> = {
   "admin (identity:admin)": ["identity:admin"],
+  // identity:admin alone does NOT open impersonation — it is its own key (sys admin only)
+  "impersonator (identity:admin + identity:impersonate)": ["identity:admin", "identity:impersonate"],
   "member (identity:read, app:members:view)": ["identity:read", "app:members:view"],
+  // 人事: 参加届からのアカウント発行だけ。identity:admin を持たないので管理者の面には届かない
+  "hr (members:onboard_mail)": ["members:onboard_mail"],
+  // 人事の書き込み + 発行の鍵: 面談結果の登録 (合格でアカウント発行) まで届く。どちらか片方では届かない。
+  "hr writer (hr:write + members:onboard_mail)": ["hr:write", "members:onboard_mail"],
+  "hr writer without onboard key (hr:write)": ["hr:write"],
   "signed-in holding nothing": [],
 };
 
@@ -279,8 +286,12 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 }
 
 const PUBLIC_ROUTES = [
+  "GET /api/v1/public/hr-interview-form",
   "GET /api/v1/public/onboarding",
   "GET /healthz",
+  "POST /api/v1/public/hr-interview-booking/book",
+  "POST /api/v1/public/hr-interview-booking/view",
+  "POST /api/v1/public/hr-interview-form",
   "POST /api/v1/public/inquiries",
   "POST /api/v1/public/lp-visits",
   "POST /api/v1/public/participation",
@@ -300,30 +311,39 @@ const ADMIN_ROUTES = [
   "POST /api/v1/admin/users/:userId/account-mail",
   "POST /api/v1/admin/users/:userId/password",
 ];
+const IMPERSONATE_ROUTES = ["POST /api/v1/admin/users/:userId/impersonation"];
+const ONBOARD_ROUTES = ["POST /api/v1/admin/participation/:participationId/onboard-account"];
+const HR_RESULT_ROUTES = ["POST /api/v1/admin/hr/applicants/:applicantId/interview-result"];
 
 const EVERYONE = [...PUBLIC_ROUTES, ...SELF_ROUTES].sort();
 const WITH_ADMIN = [...PUBLIC_ROUTES, ...SELF_ROUTES, ...ADMIN_ROUTES].sort();
+const WITH_IMPERSONATE = [...WITH_ADMIN, ...IMPERSONATE_ROUTES].sort();
 
 describe("role x endpoint matrix (frozen)", () => {
   it("matches the committed matrix for every key set", () => {
     expect(Object.fromEntries(Object.entries(KEY_SETS).map(([role, keys]) => [role, allowedRoutes(keys)]))).toEqual({
       "admin (identity:admin)": WITH_ADMIN,
+      "impersonator (identity:admin + identity:impersonate)": WITH_IMPERSONATE,
       "member (identity:read, app:members:view)": EVERYONE,
+      "hr (members:onboard_mail)": [...EVERYONE, ...ONBOARD_ROUTES].sort(),
+      "hr writer (hr:write + members:onboard_mail)": [...EVERYONE, ...ONBOARD_ROUTES, ...HR_RESULT_ROUTES].sort(),
+      "hr writer without onboard key (hr:write)": EVERYONE,
       "signed-in holding nothing": EVERYONE,
     });
   });
 
   it("the matrix covers the whole table and the whole router (nothing omitted)", () => {
-    expect(WITH_ADMIN).toEqual(Object.keys(POLICY_TABLE).sort());
-    expect(WITH_ADMIN).toEqual(protectableRouteKeys(buildApp()).sort());
+    const all = [...WITH_IMPERSONATE, ...ONBOARD_ROUTES, ...HR_RESULT_ROUTES].sort();
+    expect(all).toEqual(Object.keys(POLICY_TABLE).sort());
+    expect(all).toEqual(protectableRouteKeys(buildApp()).sort());
   });
 
-  it("the admin user surface (password + account-mail) is the only key-gated set, and no /me route takes a subject id", () => {
+  it("the admin user surface (password + account-mail + impersonation + 参加届 onboard + 面談結果) is the only key-gated set, and no /me route takes a subject id", () => {
     const gated = Object.entries(POLICY_TABLE)
       .filter(([, rule]) => Array.isArray(rule))
       .map(([route]) => route)
       .sort();
-    expect(gated).toEqual(ADMIN_ROUTES);
+    expect(gated).toEqual([...ADMIN_ROUTES, ...IMPERSONATE_ROUTES, ...ONBOARD_ROUTES, ...HR_RESULT_ROUTES].sort());
     // The AUTHENTICATED guard rail from rule.ts, enforced: a route whose path names a subject
     // can never be self-scoped, so it must not be AUTHENTICATED.
     for (const route of SELF_ROUTES) expect(route).not.toMatch(/:/);

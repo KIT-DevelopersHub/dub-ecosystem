@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "driveshare-drift-noroles",
+  "worker": "dub-demo-driveshare-drift-noroles",
+  "url": "https://dub-demo-driveshare-drift-noroles.developershub-site.workers.dev",
+  "deployedSha": "f96cbf92",
+  "branch": "fix/driveshare-drift-no-roles",
+  "actor": "ko-tarou",
+  "markers": ["fe2-driveshare-drift-noroles","残っている共有はすべてロール外です"],
+  "live": true,
+  "verifiedAt": "2026-11-06T05:42:15Z",
+  "updatedAt": "2026-11-06T05:42:15Z",
+  "note": "Drive共有 ロールなしの残った共有を検知"
+}

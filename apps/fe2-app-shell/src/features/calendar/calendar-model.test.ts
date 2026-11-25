@@ -3,6 +3,8 @@
 import { describe, expect, it } from "vitest";
 import type { common, task } from "@dub/types";
 import {
+  datesAfterDrag,
+  dragPatch,
   dayFromKey,
   dayIndexOf,
   dayKeyOf,
@@ -23,12 +25,15 @@ import {
   layoutSpans,
   layoutTimedDay,
   monthGridDays,
+  sameDates,
   shiftAnchor,
   toCalendarItem,
   toCalendarItems,
   validateDraft,
   visibleDays,
   weekdayOf,
+  type CalendarItem,
+  type ItemDrag,
 } from "./calendar-model";
 
 function mk(id: string, over: Partial<task.Task> = {}): task.Task {
@@ -244,5 +249,113 @@ describe("予定 vs タスク", () => {
     expect(isScheduleTask(at("メモ", "2026-10-09T00:00:00.000Z", "2026-10-10T00:00:00.000Z"))).toBe(false);
     // An event task with a time is still a タスク.
     expect(isScheduleTask(at(null, null, "2026-10-10T09:00:00Z", "evt_1"))).toBe(false);
+  });
+});
+
+describe("datesAfterDrag", () => {
+  const day = dayFromKey("2026-11-04");
+  const task = (startAt: string, dueAt: string, id = "t1") => ({ id, title: "x", description: "#予定", startAt, dueAt }) as unknown as task.Task;
+  const itemOf = (t: task.Task) => toCalendarItem(t)!;
+  /** Timed values as the calendar writes them (local offset), so this holds in any TZ. */
+  const slot = (startMin: number, endMin: number, id?: string) => {
+    const d = draftToDates(draftForSlot(day, startMin, endMin));
+    return itemOf(task(d.startAt, d.dueAt, id));
+  };
+  const timed = slot(10 * 60, 11 * 60);
+  const move = (item: CalendarItem, fromDay = item.startDay, grabMinute = 0): ItemDrag => ({ item, mode: "move", fromDay, grabMinute });
+  const resize = (item: CalendarItem): ItemDrag => ({ item, mode: "resize", fromDay: item.startDay, grabMinute: 0 });
+  const hhmm = (iso: string | null | undefined) => iso!.slice(11, 16);
+
+  it("moves a timed item across days on the 15-minute grid, keeping the grab point and duration", () => {
+    const got = datesAfterDrag(move(timed, day, 20), { kind: "timed", day: day + 2, minute: 14 * 60 + 27 })!;
+    expect(got.startAt!.slice(0, 16)).toBe("2026-11-06T14:00");
+    expect(got.dueAt!.slice(0, 16)).toBe("2026-11-06T15:00");
+  });
+
+  it("never writes a timed value that reads as 終日", () => {
+    const got = datesAfterDrag(move(timed), { kind: "timed", day, minute: 9 * 60 })!;
+    expect(toCalendarItem({ ...timed.task, ...got })!.allDay).toBe(false);
+  });
+
+  it("keeps a short item's stored duration, not the padded drawn one", () => {
+    const short = slot(10 * 60, 10 * 60 + 15);
+    const got = datesAfterDrag(move(short), { kind: "timed", day, minute: 12 * 60 })!;
+    expect([hhmm(got.startAt), hhmm(got.dueAt)]).toEqual(["12:00", "12:15"]);
+  });
+
+  it("stops at the end of the day instead of spilling into the next", () => {
+    const got = datesAfterDrag(move(timed), { kind: "timed", day, minute: 23 * 60 + 50 })!;
+    expect([hhmm(got.startAt), got.dueAt!.slice(0, 16)]).toEqual(["23:00", "2026-11-05T00:00"]);
+    expect(toCalendarItem({ ...timed.task, ...got })!.endDay).toBe(day);
+  });
+
+  it("月: keeps the time of day and shifts the date", () => {
+    const got = datesAfterDrag(move(timed), { kind: "day", day: day + 3 })!;
+    expect(got.startAt!.slice(0, 16)).toBe("2026-11-07T10:00");
+  });
+
+  it("converts between 終日 and timed like Google", () => {
+    const toAllDay = datesAfterDrag(move(timed), { kind: "allday", day: day + 1 })!;
+    expect(toAllDay).toEqual({ startAt: "2026-11-05T00:00:00.000Z", dueAt: "2026-11-05T00:00:00.000Z" });
+    const allDay = itemOf(task("2026-11-04T00:00:00.000Z", "2026-11-05T00:00:00.000Z"));
+    const toTimed = datesAfterDrag(move(allDay), { kind: "timed", day, minute: 9 * 60 })!;
+    expect([hhmm(toTimed.startAt), hhmm(toTimed.dueAt)]).toEqual(["09:00", "10:00"]);
+  });
+
+  it("moves a multi-day 終日 item by the days the pointer moved from its grab day", () => {
+    const allDay = itemOf(task("2026-11-04T00:00:00.000Z", "2026-11-06T00:00:00.000Z"));
+    expect(datesAfterDrag(move(allDay, allDay.startDay + 1), { kind: "day", day: allDay.startDay + 3 })).toEqual({
+      startAt: "2026-11-06T00:00:00.000Z",
+      dueAt: "2026-11-08T00:00:00.000Z",
+    });
+  });
+
+  it("a meeting cannot become 終日", () => {
+    const meet = slot(10 * 60, 11 * 60, "meet:m1:2026-11-04");
+    expect(datesAfterDrag(move(meet), { kind: "allday", day })).toBeNull();
+  });
+
+  it("a 終日 item dropped at the very bottom stays on that day", () => {
+    const allDay = itemOf(task("2026-11-04T00:00:00.000Z", "2026-11-04T00:00:00.000Z"));
+    const got = datesAfterDrag(move(allDay), { kind: "timed", day, minute: 23 * 60 + 50 })!;
+    expect(toCalendarItem({ ...allDay.task, ...got })).toMatchObject({ allDay: false, startDay: day, endDay: day });
+  });
+
+  it("a meeting cannot be stretched past what the server accepts", () => {
+    const meet = slot(9 * 60, 10 * 60, "meet:m1:2026-11-04");
+    expect(hhmm(datesAfterDrag(resize(meet), { kind: "timed", day, minute: 23 * 60 })!.dueAt)).toBe("21:00");
+  });
+
+  it("a 予定 saved before kinds existed keeps being a 予定 when made 終日", () => {
+    const d = draftToDates(draftForSlot(day, 600, 660));
+    const legacy = itemOf({ ...task(d.startAt, d.dueAt), description: "メモ" } as task.Task);
+    const dates = datesAfterDrag(move(legacy), { kind: "allday", day })!;
+    const patch = dragPatch(legacy, dates);
+    expect(patch.description).toBe("#予定\nメモ");
+    expect(isScheduleTask({ ...legacy.task, ...patch })).toBe(true);
+    expect(dragPatch(timed, datesAfterDrag(move(timed), { kind: "allday", day })!).description).toBeUndefined();
+  });
+
+  it("resizes a timed item's end, never below the shortest block or past 24:00", () => {
+    expect(hhmm(datesAfterDrag(resize(timed), { kind: "timed", day, minute: 12 * 60 + 8 })!.dueAt)).toBe("12:15");
+    expect(hhmm(datesAfterDrag(resize(timed), { kind: "timed", day, minute: 60 })!.dueAt)).toBe("10:30");
+    expect(datesAfterDrag(resize(timed), { kind: "timed", day, minute: 24 * 60 + 60 })!.dueAt!.slice(0, 16)).toBe("2026-11-05T00:00");
+  });
+
+  it("resizes a 終日 item's last day, never before its first", () => {
+    const allDay = itemOf(task("2026-11-04T00:00:00.000Z", "2026-11-04T00:00:00.000Z"));
+    expect(datesAfterDrag(resize(allDay), { kind: "day", day: allDay.startDay + 2 })!.dueAt).toBe("2026-11-06T00:00:00.000Z");
+    expect(datesAfterDrag(resize(allDay), { kind: "day", day: allDay.startDay - 2 })!.dueAt).toBe("2026-11-04T00:00:00.000Z");
+  });
+
+  it("an item ending at 24:00 opens in the edit form as a valid range", () => {
+    const got = datesAfterDrag(resize(timed), { kind: "timed", day, minute: 24 * 60 })!;
+    expect(validateDraft(draftFromItem(toCalendarItem({ ...timed.task, ...got })!))).toBeNull();
+  });
+
+  it("sameDates compares instants, not spellings", () => {
+    const { startAt, dueAt } = timed.task;
+    expect(sameDates(timed.task, { startAt: new Date(startAt!).toISOString(), dueAt })).toBe(true);
+    expect(sameDates(timed.task, { startAt, dueAt: new Date(Date.parse(dueAt!) + 60_000).toISOString() })).toBe(false);
   });
 });

@@ -26,6 +26,8 @@ interface UserDb {
   created_at: string;
   updated_at: string;
 }
+const ROLE_ID_CHUNK = 50;
+
 interface RoleDb {
   id: string;
   org_id: string;
@@ -191,6 +193,10 @@ export class D1IdentityRepo implements IdentityRepo {
       row.updatedAt,
     );
   }
+  async deleteInvitedUser(userId: string): Promise<boolean> {
+    const res = await this.db.run("DELETE FROM identity_users WHERE id = ? AND status = 'invited'", userId);
+    return (res.meta?.changes ?? 0) > 0;
+  }
   async updateUser(
     userId: string,
     patch: Partial<Pick<UserRow, "displayName" | "furigana" | "githubLogin" | "status" | "source" | "avatarUrl">>,
@@ -227,6 +233,14 @@ export class D1IdentityRepo implements IdentityRepo {
     binds.push(userId);
     await this.db.run(`UPDATE identity_users SET ${sets.join(", ")} WHERE id = ?`, ...binds);
   }
+  async activateIfInvited(userId: string, updatedAt: string): Promise<boolean> {
+    const res = await this.db.run(
+      "UPDATE identity_users SET status = 'active', updated_at = ? WHERE id = ? AND status = 'invited'",
+      updatedAt,
+      userId,
+    );
+    return res.meta.changes > 0;
+  }
   async listUsersBySource(orgId: string, source: UserSource): Promise<UserRow[]> {
     const rows = await this.db.all<UserDb>(
       "SELECT * FROM identity_users WHERE org_id = ? AND source = ? ORDER BY id",
@@ -240,6 +254,29 @@ export class D1IdentityRepo implements IdentityRepo {
     const r = await this.db.first<RoleDb>("SELECT * FROM identity_roles WHERE id = ?", roleId);
     if (!r) return null;
     return this.toRole(r, await this.permissionsOf(roleId));
+  }
+  async getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]> {
+    // One query per chunk (roles LEFT JOIN permissions) instead of getRole + permissionsOf per
+    // role — loadEvalContext runs on every authz check. Chunked to stay under D1's bind limit.
+    const ids = [...new Set(roleIds)];
+    const byId = new Map<string, RoleRow>();
+    for (let i = 0; i < ids.length; i += ROLE_ID_CHUNK) {
+      const chunk = ids.slice(i, i + ROLE_ID_CHUNK);
+      const rows = await this.db.all<RoleDb & { permission_key: string | null }>(
+        `SELECT r.id, r.org_id, r.name, r.is_system, r.created_at, r.updated_at, rp.permission_key
+           FROM identity_roles r
+           LEFT JOIN identity_role_permissions rp ON rp.role_id = r.id
+          WHERE r.id IN (${chunk.map(() => "?").join(", ")})
+          ORDER BY r.id, rp.permission_key`,
+        ...chunk,
+      );
+      for (const r of rows) {
+        let role = byId.get(r.id);
+        if (!role) byId.set(r.id, (role = this.toRole(r, [])));
+        if (r.permission_key !== null) role.permissions.push(r.permission_key as identity.PermissionKey);
+      }
+    }
+    return [...byId.values()];
   }
   async getRoleByName(orgId: string, name: string): Promise<RoleRow | null> {
     const r = await this.db.first<RoleDb>("SELECT * FROM identity_roles WHERE org_id = ? AND name = ?", orgId, name);
@@ -404,13 +441,14 @@ export class D1IdentityRepo implements IdentityRepo {
 
   async orgWideRolePeers(orgId: string, userId: string, permission: identity.PermissionKey): Promise<string[]> {
     // One query: the caller's org-wide roles carrying `permission`, joined back to every other
-    // org-wide holder of those roles.
+    // org-wide holder of those roles. CROSS JOIN pins SQLite's join order to start from the
+    // caller's own rows; left to the planner it starts from every org-wide assignment (D1 rows read).
     const rows = await this.db.all<{ user_id: string }>(
       `SELECT DISTINCT peer.user_id
          FROM identity_role_assignments mine
-         JOIN identity_role_permissions rp ON rp.role_id = mine.role_id AND rp.permission_key = ?
-         JOIN identity_role_assignments peer ON peer.role_id = mine.role_id AND peer.org_id = mine.org_id
-         JOIN identity_users u ON u.id = peer.user_id
+         CROSS JOIN identity_role_permissions rp ON rp.role_id = mine.role_id AND rp.permission_key = ?
+         CROSS JOIN identity_role_assignments peer ON peer.role_id = mine.role_id AND peer.org_id = mine.org_id
+         CROSS JOIN identity_users u ON u.id = peer.user_id
         WHERE mine.user_id = ? AND mine.org_id = ?
           AND mine.resource_type IS NULL AND mine.resource_id IS NULL
           AND peer.resource_type IS NULL AND peer.resource_id IS NULL
@@ -440,12 +478,13 @@ export class D1IdentityRepo implements IdentityRepo {
 
   async orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]> {
     // The caller's org-wide roles -> their visible target roles -> every org-wide holder.
+    // CROSS JOIN pins the join order (see orgWideRolePeers).
     const rows = await this.db.all<{ user_id: string }>(
       `SELECT DISTINCT peer.user_id
          FROM identity_role_assignments mine
-         JOIN identity_role_mail_visibility v ON v.role_id = mine.role_id
-         JOIN identity_role_assignments peer ON peer.role_id = v.target_role_id AND peer.org_id = mine.org_id
-         JOIN identity_users u ON u.id = peer.user_id
+         CROSS JOIN identity_role_mail_visibility v ON v.role_id = mine.role_id
+         CROSS JOIN identity_role_assignments peer ON peer.role_id = v.target_role_id AND peer.org_id = mine.org_id
+         CROSS JOIN identity_users u ON u.id = peer.user_id
         WHERE mine.user_id = ? AND mine.org_id = ?
           AND mine.resource_type IS NULL AND mine.resource_id IS NULL
           AND peer.resource_type IS NULL AND peer.resource_id IS NULL

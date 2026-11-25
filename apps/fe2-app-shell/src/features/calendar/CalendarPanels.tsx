@@ -11,7 +11,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import type { task } from "@dub/types";
+import type { meeting, task } from "@dub/types";
 import {
   Button,
   Checkbox,
@@ -46,6 +46,8 @@ import {
   type EventDraft,
   type ItemKind,
 } from "./calendar-model";
+import { recurrenceLabel } from "./meeting-occurrences";
+import { useItemDragContext } from "./useItemDrag.tsx";
 import { KIND_ICON, KIND_VISUALS, PRIORITY_LABEL, UNTITLED_TITLE, itemVisual, type CalendarLabel } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
@@ -191,6 +193,19 @@ function labelOptions(labels: readonly CalendarLabel[], current: string): { valu
   return opts.some((o) => o.value === current) ? opts : [...opts, { value: current, label: "（不明なロール）" }];
 }
 
+/** 繰り返し on a 予定 = a 定例ミーティング: a timed, single-day 予定 (not 休暇). */
+export function canRepeat(d: EventDraft): boolean {
+  return !d.allDay && d.kind !== "vacation" && d.startDate === d.endDate;
+}
+
+/** The 繰り返し choice of the 作成 dialog (absent = no 繰り返し row). */
+export interface RepeatChoice {
+  value: meeting.MeetingRecurrence;
+  onChange: (r: meeting.MeetingRecurrence) => void;
+}
+
+const RECURRENCES = ["none", "weekly", "biweekly", "monthly_weekday"] as const;
+
 export function EventForm({
   draft,
   labels,
@@ -199,6 +214,7 @@ export function EventForm({
   onCancel,
   saving,
   submitLabel = "保存",
+  repeat,
 }: {
   draft: EventDraft;
   labels: readonly CalendarLabel[];
@@ -207,9 +223,12 @@ export function EventForm({
   onCancel?: () => void;
   saving: boolean;
   submitLabel?: string;
+  repeat?: RepeatChoice;
 }): JSX.Element {
   const id = useId();
   const error = validateDraft(draft);
+  const repeatable = !!repeat && canRepeat(draft);
+  const repeating = repeatable && repeat.value !== "none";
   const [touched, setTouched] = useState(false);
   const set = (patch: Partial<EventDraft>) => onChange({ ...draft, ...patch });
   const submit = () => {
@@ -322,6 +341,33 @@ export function EventForm({
         </div>
       </div>
 
+      {repeatable && (
+        <div className={styles.formRow}>
+          <span className={styles.formRowIcon}>
+            <Icon name="refresh" />
+          </span>
+          <div className={styles.repeatField}>
+            <label htmlFor={`${id}-repeat`} className={styles.srOnly}>
+              繰り返し
+            </label>
+            <span className={styles.repeatSelect}>
+              <Select<meeting.MeetingRecurrence>
+                id={`${id}-repeat`}
+                value={repeat.value}
+                onChange={repeat.onChange}
+                options={RECURRENCES.map((r) => ({ value: r, label: recurrenceLabel(r, draft.startDate) }))}
+                testId="calendar-form-repeat"
+              />
+            </span>
+            {repeating && (
+              <p className={styles.rowNote} data-testid="calendar-form-repeat-note">
+                繰り返す予定は定例ミーティングとして登録します。次の画面で対象を選ぶと、Google カレンダーに登録して Meet を発行し、対象のメンバーを招待します。
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {vacation && (
         <div className={styles.formRow}>
           <span className={styles.formRowIcon}>
@@ -379,7 +425,7 @@ export function EventForm({
           </Button>
         )}
         <Button type="submit" loading={saving} testId="calendar-form-save">
-          {submitLabel}
+          {repeating ? "次へ（定例ミーティング）" : submitLabel}
         </Button>
       </div>
     </form>
@@ -395,6 +441,7 @@ export function EventDialog({
   onSave,
   onClose,
   saving,
+  repeat,
 }: {
   editing: boolean;
   draft: EventDraft;
@@ -403,6 +450,7 @@ export function EventDialog({
   onSave: () => void;
   onClose: () => void;
   saving: boolean;
+  repeat?: RepeatChoice;
 }): JSX.Element {
   return (
     <Modal
@@ -412,7 +460,7 @@ export function EventDialog({
       size="md"
       testId={editing ? "calendar-edit-dialog" : "calendar-create-panel"}
     >
-      <EventForm draft={draft} labels={labels} onChange={onChange} onSubmit={onSave} onCancel={onClose} saving={saving} />
+      <EventForm draft={draft} labels={labels} onChange={onChange} onSubmit={onSave} onCancel={onClose} saving={saving} {...(repeat ? { repeat } : {})} />
     </Modal>
   );
 }
@@ -544,11 +592,17 @@ export function rectOf(el: Element): AnchorRect {
 export function ItemButton({
   item,
   onSelect,
+  draggable = false,
+  resizable = false,
   className,
   style,
 }: {
   item: CalendarItem;
   onSelect: (it: CalendarItem, anchor: AnchorRect) => void;
+  /** Lives on the grid: can be picked up. (Not in the 他N件 list, which floats over it.) */
+  draggable?: boolean;
+  /** 終日 bars only: shows the right-edge handle. */
+  resizable?: boolean;
   className?: string;
   style?: CSSProperties;
 }): JSX.Element {
@@ -557,13 +611,18 @@ export function ItemButton({
   const cancelled = item.task.status === "cancelled" ? styles.cancelled : "";
   const banner = item.allDay || item.startDay !== item.endDay;
   const vacation = banner && isVacationTask(item.task) ? styles.vacation : "";
+  const drag = useItemDragContext();
+  const dragging = drag.draggingId === item.task.id ? styles.dragging : drag.deniedId === item.task.id ? styles.dragDenied : "";
   return (
     <button
       type="button"
-      className={`${banner ? styles.bar : styles.monthItem} ${cancelled} ${vacation} ${className ?? ""}`}
+      className={`${banner ? styles.bar : styles.monthItem} ${cancelled} ${vacation} ${dragging} ${className ?? ""}`}
       style={banner ? { backgroundColor: v.color, ...style } : style}
       title={`${title}（${formatItemWhen(item)}）`}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        if (draggable) drag.begin(e, item);
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect(item, rectOf(e.currentTarget));
@@ -585,6 +644,9 @@ export function ItemButton({
             {title}
           </span>
         </>
+      )}
+      {resizable && item.allDay && drag.canDrag(item) && (
+        <span className={styles.resizeRight} data-cal-resize data-testid={`calendar-resize-${item.task.id}`} />
       )}
     </button>
   );

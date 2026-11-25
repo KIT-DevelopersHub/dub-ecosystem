@@ -130,4 +130,11 @@ describe("SegmentedControl", () => {
     await user.keyboard("{Home}");
     expect(list).toHaveFocus();
   });
+
+  it("keeps one tab stop when nothing in the strip is selected (controlled value=null)", () => {
+    render(<SegmentedControl aria-label="v" value={null} onChange={() => {}} options={[...opts]} />);
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.every((t) => t.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(tabs.map((t) => t.tabIndex)).toEqual([0, -1, -1]);
+  });
 });

@@ -24,6 +24,10 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 binding = "SVC_IDENTITY"
 service = "dub-identity-roster"   # POST /authz/check (app:lp:view / app:lp:edit)
 
+[[services]]
+binding = "SVC_LP_TICKETS"
+service = "dub-lp-tickets"        # 公開設定の release のうちチケット販売の 2 項目の正本
+
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
 LP_BASE_URL = "https://hokuriku-it-conf.com"
@@ -31,33 +35,16 @@ LP_BASE_URL = "https://hokuriku-it-conf.com"
 #   npx wrangler secret put CF_ANALYTICS_TOKEN   (Account Analytics:Read)
 CF_ACCOUNT_ID = "b8f6ddbf8fa8cf4e421eae870bdb6dac"
 LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
-# チケット購入 (Stripe Checkout)。secret が無ければ「決済準備中」(有料券 503・無料券はクーポンで動く):
-#   npx wrangler secret put STRIPE_SECRET_KEY       (sk_test_... = サンドボックス / sk_live_... = 本物の決済)
-# sk_live_ は STRIPE_ALLOW_LIVE = "1" を足すまで拒否される（決済準備中扱い）。本物の決済開始時だけ足す。
-#   npx wrangler secret put STRIPE_WEBHOOK_SECRET   (whsec_... 公開 LP の /tickets/stripe-webhook 用)
-# migration: npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0003_tickets.sql
-#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0005_ticket_payment_method.sql
-#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0006_ticket_order_preview.sql
-#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0007_ticket_payment_safety.sql
-#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0008_ticket_review_and_client.sql
-#            npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/lp/0009_ticket_coupons.sql
-#   ORDER: apply 0007 / 0008 / 0009 BEFORE deploying code that uses them (checkout INSERTs client_key; without
-#   it every checkout 500s). The deploy.yml D1 schema gate blocks the deploy otherwise. ALTER ADD COLUMN
-#   is not re-runnable: if an apply fails midway, check PRAGMA table_info(lp_ticket_orders) and add the rest.
-# LP管理「プレビュー」(販売あり) のテスト購入は STRIPE_SECRET_KEY がテストキー (sk_test_) の時だけ有効（設定不要）。
-# PayPay: 決済手段は Stripe ダッシュボード管理（コードは payment_method_types を送らない）。
-#   ダッシュボードで PayPay を有効化し審査が通ったら、LP / LP管理 の表記を出すために:
-# LP_PAYPAY_ENABLED = "1"
-# LP_DAILY_CHECKOUT_CAP = "300"   # 1 日 (JST) の checkout 作成上限（既定 300）
 
-# --- Ticket payment reconcile via a Durable Object ALARM, NOT a Cron Trigger. The account is at
-# the Workers FREE plan's 5/5 cron cap (a 6th cron makes CF reject this deploy); a DO alarm does
-# not count against it. Same pattern as github-sync's GithubReconcileDO. No manual bootstrap:
-# every paid checkout arms the loop (src/reconcile-do.ts), then it reschedules itself every 10 min.
-[[durable_objects.bindings]]
-name = "TICKET_RECONCILE_DO"
-class_name = "TicketReconcileDO"
-
+# --- TicketReconcileDO は lp-tickets (dub-lp-tickets) へ移った。適用済みの migration は消さず v1 を残し、
+# binding と class を外すのと同じデプロイで v2 の deleted_classes を流す（これが無いと class を失った
+# Worker のデプロイは拒否される）。v2 が適用されるとこの Worker の DO ストレージと alarm は破棄される:
+# 未確定の注文が無いことを確かめてから適用する (docs/runbooks/09-lp-tickets-cutover.md)。
+# 照合の alarm は lp-tickets 側で次の有料 checkout から動き始める。
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["TicketReconcileDO"]   # SQLite-backed DO is available on the Workers Free plan
+new_sqlite_classes = ["TicketReconcileDO"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["TicketReconcileDO"]

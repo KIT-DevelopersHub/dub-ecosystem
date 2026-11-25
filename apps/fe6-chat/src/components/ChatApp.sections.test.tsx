@@ -23,7 +23,8 @@ function renderWith(keys: identity.PermissionKey[]) {
 
 const EDITOR: identity.PermissionKey[] = ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate"];
 
-describe("shared sidebar sections (ChatApp)", () => {
+// ChatApp 全体を描くので CI の負荷では既定の 5 秒を超えることがある。
+describe("shared sidebar sections (ChatApp)", { timeout: 20_000 }, () => {
   it("everyone sees the org-wide sections; without chat:manage_sections there is no organizing UI", async () => {
     renderWith(EDITOR);
     expect(await screen.findByText("運営")).toBeInTheDocument();

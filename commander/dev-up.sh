@@ -101,12 +101,36 @@ for MIG in "$MIGRATIONS_DIR"/*.sql; do
     || echo "[dev-up]   skipped $(basename "$MIG") (already applied / idempotent)"
 done
 
+# --- GitHub token for the PR CI badge + 「確認」 button (optional, local secret) ----
+# Vault file first, else the logged-in `gh` CLI. Never printed. The confirm button (adds
+# the 確認した production-gate label) is switched on only when a token is found AND
+# COMMANDER_PR_CONFIRM_ENABLED is not set to 0.
+GH_VARS=()
+GH_TOKEN_FILE="${DUB_GITHUB_TOKEN_FILE:-$HOME/DubVault/secrets/commander-github-token.txt}"
+GH_TOKEN_VALUE=""
+if [[ "$MODE" != "--check" ]]; then
+  if [[ -f "$GH_TOKEN_FILE" ]]; then
+    GH_TOKEN_VALUE="$(tr -d '[:space:]' < "$GH_TOKEN_FILE")"
+  elif command -v gh >/dev/null 2>&1; then
+    GH_TOKEN_VALUE="$(gh auth token 2>/dev/null || true)"
+  fi
+fi
+if [[ -n "$GH_TOKEN_VALUE" ]]; then
+  GH_VARS=(--var "COMMANDER_GITHUB_TOKEN:$GH_TOKEN_VALUE")
+  if [[ "${COMMANDER_PR_CONFIRM_ENABLED:-1}" == "1" ]]; then
+    GH_VARS+=(--var "COMMANDER_PR_CONFIRM_ENABLED:1")
+  fi
+  echo "[dev-up] GitHub token loaded for the PR CI badge / 確認 button"
+else
+  echo "[dev-up] no GitHub token - PR CI badge and 確認 button are off"
+fi
+
 # --- 2) commander-service (phase-gate API) --------------------------------------
 echo "[dev-up] starting commander-service on port ${SERVICE_PORT} ..."
 ( cd "$REPO_ROOT/services/commander-service" && \
   CI=1 WRANGLER_SEND_METRICS=false CLOUDFLARE_API_TOKEN="" \
   node "$WRANGLER" dev --local --persist-to "$D1_DIR" --ip 127.0.0.1 --port "$SERVICE_PORT" \
-    --var "COMMANDER_OPERATOR_TOKEN:$TOKEN" ) >"$LOG_DIR/service.log" 2>&1 &
+    --var "COMMANDER_OPERATOR_TOKEN:$TOKEN" ${GH_VARS[@]+"${GH_VARS[@]}"} ) >"$LOG_DIR/service.log" 2>&1 &
 PIDS+=("$!")
 
 # --- 3) daemon (exec bridge) ----------------------------------------------------

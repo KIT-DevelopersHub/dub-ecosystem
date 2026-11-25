@@ -68,6 +68,8 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "app:admin:edit",
     "app:members:view",
     "app:members:edit",
+    "members:roster_view",
+    "members:roster_edit",
     "app:participation:view",
     "app:participation:edit",
     "app:hr:view",
@@ -75,17 +77,34 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "hr:read",
     "hr:write",
     "hr:admin",
+    "app:sponsor:view",
+    "app:sponsor:edit",
+    "sponsor:read",
+    "sponsor:write",
+    "sponsor:admin",
+    "app:goals:view",
+    "app:goals:edit",
+    "goals:read",
   ],
-  maintainer: ["identity:read", "app:members:view", "app:participation:view"],
-  organizer: ["identity:read", "app:members:view", "app:participation:view"],
-  member: ["identity:read", "app:members:view", "app:participation:view"],
-  "delegated-roster-editor": ["app:members:view", "app:members:edit"],
+  maintainer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
+  organizer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
+  member: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
+  "delegated-roster-editor": ["app:members:view", "app:members:edit", "members:roster_view", "members:roster_edit"],
   "participation-reviewer": ["identity:read", "app:participation:view", "app:participation:edit"],
   "disabled-tiers-with-legacy-identity-keys": ["identity:read", "identity:admin"],
   // 人事: 閲覧だけの面接官 / 段階を動かせるが参加確定はできない担当 / 人事アプリ無効で詳細キーだけ持つ形。
   "hr-viewer": ["app:hr:view", "hr:read"],
   "hr-recruiter": ["app:hr:view", "app:hr:edit", "hr:read", "hr:write"],
   "hr-keys-but-app-disabled": ["hr:read", "hr:write", "hr:admin"],
+  // スポンサー: 閲覧だけ / 登録・編集はできるが削除できない担当 / アプリ無効で詳細キーだけ / 閲覧 (アプリ) だけで詳細キーなし。
+  "sponsor-viewer": ["app:sponsor:view", "sponsor:read"],
+  "sponsor-editor": ["app:sponsor:view", "app:sponsor:edit", "sponsor:read", "sponsor:write"],
+  "sponsor-keys-but-app-disabled": ["sponsor:read", "sponsor:write", "sponsor:admin"],
+  "sponsor-app-view-without-read": ["app:sponsor:view", "app:sponsor:edit"],
+  // 目標管理: 閲覧だけ / 編集 / アプリ無効で goals:read だけ持つ形。
+  "goals-viewer": ["app:goals:view", "goals:read"],
+  "goals-editor": ["app:goals:view", "app:goals:edit", "goals:read"],
+  "goals-read-but-app-disabled": ["goals:read"],
 };
 
 /**
@@ -104,6 +123,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 
 // 運営メンバー (名簿): 閲覧 reads, 編集 writes.
 const ROSTER_READS = [
+  "GET /members/org-overview",
   "GET /members/overview",
   "GET /members/people/by-identity/:identityUserId",
   "GET /members/teams",
@@ -112,9 +132,11 @@ const ROSTER_WRITES = [
   "DELETE /members/people/:id",
   "DELETE /members/teams/:id",
   "PATCH /members/people/:id",
+  "PATCH /members/people/:id/org",
   "PATCH /members/teams/:id",
   "POST /members/people",
   "POST /members/people/:id/identity-link",
+  "POST /members/people/:id/profile-reminder",
   "POST /members/teams",
 ];
 // 参加届: 自分の届を出す (閲覧) / 他人の届を見る (閲覧 + identity:read) / 反映確定 (編集).
@@ -134,15 +156,53 @@ const ONBOARDING_WRITES = [
   "PUT /members/onboarding/meetings",
 ];
 // 人事: 閲覧 (+hr:read) / 段階・メモ・チェック (編集 +hr:write) / 参加確定・削除 (編集 +hr:admin).
-const HR_READS = ["GET /members/hr/applicants", "GET /members/hr/applicants/:id", "GET /members/hr/onboarding"];
+const HR_READS = [
+  "GET /members/hr/applicants",
+  "GET /members/hr/applicants/:id",
+  "GET /members/hr/interview-form",
+  "GET /members/hr/interview-form/responses",
+  "GET /members/hr/interviews",
+  "GET /members/hr/onboarding",
+];
 const HR_WRITES = [
+  "DELETE /members/hr/interviews/slots/:id",
   "PATCH /members/hr/applicants/:id",
   "POST /members/hr/applicants",
   "POST /members/hr/applicants/:id/notes",
   "POST /members/hr/applicants/:id/stage",
+  "POST /members/hr/interview-form/responses",
+  "POST /members/hr/interviews/invites/:id/send",
+  "POST /members/hr/interviews/slots",
+  "POST /members/hr/interviews/slots/delete",
+  "POST /members/hr/interviews/slots/:id/release",
+  "PUT /members/hr/interview-form",
+  "PUT /members/hr/interviews/settings",
   "PUT /members/hr/onboarding/:memberId/items/:itemId",
 ];
 const HR_ADMIN = ["DELETE /members/hr/applicants/:id", "POST /members/hr/applicants/:id/join"];
+// スポンサー: 閲覧 (+sponsor:read・写真含む) / 登録・編集・写真 (編集 +sponsor:write) / 削除 (編集 +sponsor:admin).
+const SPONSOR_READS = [
+  "GET /members/sponsor/cards",
+  "GET /members/sponsor/cards/:id",
+  "GET /members/sponsor/cards/:id/image",
+  "GET /members/sponsor/goals",
+  "GET /members/sponsor/leads",
+  "GET /members/sponsor/leads/:id",
+  "GET /members/sponsor/leads/:id/activity",
+];
+const SPONSOR_WRITES = [
+  "PATCH /members/sponsor/cards/:id",
+  "PATCH /members/sponsor/leads/:id",
+  "POST /members/sponsor/cards",
+  "POST /members/sponsor/leads",
+  "POST /members/sponsor/leads/import",
+  "POST /members/sponsor/leads/:id/contact-emails",
+  "PUT /members/sponsor/cards/:id/image",
+];
+const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/sponsor/leads/:id", "POST /members/sponsor/leads/mail-backfill"];
+// 目標管理: 閲覧 (+goals:read) / 編集。
+const GOALS_READS = ["GET /members/goals"];
+const GOALS_WRITES = ["DELETE /members/goals/:teamId/:month", "PUT /members/goals/:teamId/:month"];
 // チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
 const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
@@ -150,12 +210,23 @@ const SELF = ["GET /members/me/mention-teams"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = [
   "GET /health",
+  "GET /members/internal/hr/interview-form",
   "GET /members/internal/me/participation",
   "GET /members/internal/onboarding",
+  "GET /members/internal/participation/:id/onboard-target",
   "GET /members/internal/team-members",
   "POST /members/internal/google-emails",
+  "POST /members/internal/hr/applicants/:id/interview-result/claim",
+  "POST /members/internal/hr/applicants/:id/interview-result/complete",
+  "POST /members/internal/hr/applicants/:id/interview-result/link",
+  "POST /members/internal/hr/applicants/:id/interview-result/release",
+  "POST /members/internal/hr/interview-booking/book",
+  "POST /members/internal/hr/interview-booking/view",
+  "POST /members/internal/hr/interview-form",
+  "POST /members/internal/sponsor/mail-activity",
   "POST /members/internal/me/participation",
   "POST /members/internal/participation",
+  "POST /members/internal/participation/:id/onboard-link",
 ];
 // The whole external surface — what a caller can reach through api-gateway at most.
 const FULL = [
@@ -169,6 +240,9 @@ const FULL = [
   ...HR_READS,
   ...HR_WRITES,
   ...HR_ADMIN,
+  ...SPONSOR_READS,
+  ...SPONSOR_WRITES,
+  ...SPONSOR_ADMIN, ...GOALS_READS, ...GOALS_WRITES,
   ...ROLE_SYNC_ADMIN,
   ...SELF,
 ].sort();
@@ -198,6 +272,17 @@ describe("role x endpoint matrix (frozen)", () => {
     "hr-recruiter": [...HR_READS, ...HR_WRITES, ...SELF].sort(),
     // 人事アプリが無効なら詳細キーだけでは何も触れない (ロール管理の 無効 が本当に効く)。
     "hr-keys-but-app-disabled": [...SELF].sort(),
+    "sponsor-viewer": [...SPONSOR_READS, ...SELF].sort(),
+    // 削除 (sponsor:admin) だけは届かない。
+    "sponsor-editor": [...SPONSOR_READS, ...SPONSOR_WRITES, ...SELF].sort(),
+    // スポンサーアプリが無効なら詳細キーだけでは何も触れない。
+    "sponsor-keys-but-app-disabled": [...SELF].sort(),
+    // 逆に アプリの 閲覧/編集 だけで詳細キーが無ければ名刺 (社外の個人情報) は見えない。
+    "sponsor-app-view-without-read": [...SELF].sort(),
+    "goals-viewer": [...GOALS_READS, ...SELF].sort(),
+    "goals-editor": [...GOALS_READS, ...GOALS_WRITES, ...SELF].sort(),
+    // 詳細キーだけではアプリが無効のまま。
+    "goals-read-but-app-disabled": [...SELF].sort(),
   };
 
   it("matches the committed matrix for every role", () => {

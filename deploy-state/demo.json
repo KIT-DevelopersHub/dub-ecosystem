@@ -1,12 +1,12 @@
 {
   "env": "demo",
   "url": "https://fe2-demo.developershub-site.workers.dev",
-  "deployedSha": "8859b628",
-  "branch": "HEAD",
+  "deployedSha": "11dbfb06",
+  "branch": "commander/task-ctask_01M6RYG5MFPYN96W9FB3M87C4T",
   "actor": "ko-tarou",
-  "markers": ["fe2-mail-avatar-img", "fe2-mail-inline-to"],
+  "markers": ["-required-"],
   "live": true,
-  "verifiedAt": "2026-11-04T04:59:48Z",
-  "updatedAt": "2026-11-04T04:59:48Z",
-  "note": "mail: 送信者アイコン + 宛先/Cc/Bcc の小アイコン (PR #745)"
+  "verifiedAt": "2026-11-06T17:57:03Z",
+  "updatedAt": "2026-11-06T17:57:03Z",
+  "note": "role save fix"
 }

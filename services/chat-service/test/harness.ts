@@ -50,6 +50,10 @@ export class FakeRealtime implements RealtimePublisher {
   async publishToChannel(channelId: common.ChannelId, event: chat.ChatRealtimeEvent): Promise<void> {
     this.events.push({ channelId, event });
   }
+  evicted: { channelId: string; memberIds: string[] }[] = [];
+  async evictNonMembers(channelId: common.ChannelId, memberIds: common.UserId[]): Promise<void> {
+    this.evicted.push({ channelId, memberIds });
+  }
   kinds(): string[] {
     return this.events.map((e) => e.event.kind);
   }
@@ -100,6 +104,7 @@ export const ALL_CHAT_KEYS: identity.PermissionKey[] = [
   "app:chat:view",
   "app:chat:edit",
   "chat:create",
+  "chat:create_private",
   "chat:moderate",
 ];
 

@@ -79,9 +79,9 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     const dialog = await screen.findByTestId("fe7-role-role_organizer-app-dialog");
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-level-view"));
     const toggle = within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-toggle-task:read");
-    expect((toggle as HTMLInputElement).checked).toBe(false);
-    await user.click(toggle);
+    // アプリに必須の鍵は有効化と同時に入り、そのアプリが有効な間は外せない。
     expect((toggle as HTMLInputElement).checked).toBe(true);
+    expect((toggle as HTMLInputElement).disabled).toBe(true);
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-close"));
 
     // role_organizer starts with 2 permissions (event:read, event:write)
@@ -125,8 +125,9 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     renderWithProviders(<RoleListPage />);
     await waitFor(() => expect(screen.getByTestId("fe7-roles-list")).toBeInTheDocument());
 
-    // The role strip is a tablist; each tab reflects selection via aria-selected.
-    expect(screen.getByTestId("fe7-roles-list")).toHaveAttribute("role", "tablist");
+    // Each genre section's strip is a tablist; each tab reflects selection via aria-selected.
+    expect(screen.getByTestId("fe7-roles-group-list-system")).toHaveAttribute("role", "tablist");
+    expect(screen.getByTestId("fe7-roles-group-list-ops")).toHaveAttribute("role", "tablist");
     const organizerTab = screen.getByTestId("fe7-roles-open-role_organizer");
     expect(organizerTab).toHaveAttribute("role", "tab");
     expect(organizerTab).toHaveAttribute("aria-selected", "false");
@@ -194,8 +195,7 @@ describe("RoleListPage (single-screen inline permissions)", () => {
     const dialog = await screen.findByTestId("fe7-role-role_organizer-app-dialog");
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-level-view"));
     const toggle = within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-toggle-task:read") as HTMLInputElement;
-    expect(toggle.checked).toBe(false);
-    await user.click(toggle);
+    expect(toggle.checked).toBe(true);
     await user.click(within(dialog).getByTestId("fe7-role-role_organizer-app-dialog-close"));
     await user.click(screen.getByTestId("fe7-role-role_organizer-save"));
     const confirm = await screen.findByTestId("fe7-role-role_organizer-save-confirm");
@@ -224,6 +224,28 @@ describe("RoleListPage (single-screen inline permissions)", () => {
       expect((screen.getByTestId("fe7-role-role_organizer-app-level-events-edit") as HTMLButtonElement).disabled).toBe(true),
     );
     expect(screen.queryByTestId("fe7-role-role_organizer-save")).not.toBeInTheDocument();
+  });
+
+  it("カスタムロールは確認ダイアログ経由で削除でき、次のロールに選択が移る", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RoleListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-roles-open-role_organizer")).toBeInTheDocument());
+
+    await user.click(screen.getByTestId("fe7-roles-open-role_organizer"));
+    await user.click(await screen.findByTestId("fe7-roles-delete-role_organizer"));
+    const dialog = await screen.findByTestId("fe7-roles-delete-confirm");
+    expect(within(dialog).getByText(/「organizer」を削除します。元に戻せません。/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "削除する" }));
+    await waitFor(() => expect(screen.queryByTestId("fe7-roles-open-role_organizer")).not.toBeInTheDocument());
+    expect(screen.getByTestId("fe7-roles-open-role_admin")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("システムロールには削除ボタンを出さず、削除できない理由を示す", async () => {
+    renderWithProviders(<RoleListPage />);
+    await waitFor(() => expect(screen.getByTestId("fe7-role-inline-role_admin")).toBeInTheDocument());
+    expect(screen.queryByTestId("fe7-roles-delete-role_admin")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe7-roles-delete-unavailable")).toBeInTheDocument();
   });
 
   it("read-only user can view permissions inline but cannot edit or create", async () => {

@@ -23,9 +23,16 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { identity as identityValues, appRegistry, mail as mailValues, member as memberValues, hr, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, lp as lpValues, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
+
+/** demo で「送った」面談結果メール (実際には送らない)。ローカル確認用に window.__dubDemoHrMails でも見える。 */
+export const demoHrOutbox: Array<{ to: string; subject: string; textBody: string }> = [];
+if (typeof window !== "undefined") (window as unknown as { __dubDemoHrMails?: typeof demoHrOutbox }).__dubDemoHrMails = demoHrOutbox;
+import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
+import { createHrInterviewsDemoStore } from "./demo-hr-interviews.ts";
+import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
@@ -36,6 +43,14 @@ const ME_ID = "usr_demo";
 const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "identity:read",
   "identity:admin",
+  "members:roster_view",
+  "members:roster_edit",
+  "members:mail_view",
+  "members:mail_edit",
+  // 参加届からのアカウント発行 (人事向け・アドレス + アカウント + 紐付け + 案内メールを 1 回で)。
+  "members:onboard_mail",
+  // 代理表示 (admin impersonation): メール名簿の「このメンバーとして表示」。
+  "identity:impersonate",
   "event:read",
   "event:write",
   "event:admin",
@@ -45,11 +60,15 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "file:read",
   "notif:inbox:self",
   "notif:prefs:self",
+  "notif:admin",
   "notif:broadcast_publish",
+  "notif:receive_all",
+  "notif:receive_admin",
   "mail:read",
   "mail:send",
   "mail:admin",
   "chat:create",
+  "chat:create_private",
   // The real admin role holds chat:moderate (identity 0002): rename / topic / archive /
   // members in the channel details modal. Hard delete is its own key (admin only by default).
   "chat:moderate",
@@ -57,6 +76,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:slack_import",
   "chat:emoji_import",
   "chat:manage_sections",
+  "chat:change_visibility",
   "audit:read",
   // The real admin role holds these (identity migrations 0005 / 0017). Drive共有 の「設定」 is
   // 編集 for the demo admin; ?driveSettings=view|none previews the other two levels.
@@ -75,6 +95,11 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "hr:read",
   "hr:write",
   "hr:admin",
+  // スポンサー: 名刺の閲覧・登録/編集・削除 (admin は identity/0027 で全部持つ)。
+  "sponsor:read",
+  "sponsor:write",
+  "sponsor:admin",
+  "goals:read",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -505,6 +530,8 @@ const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
   { id: "ntfn_adm_0006", type: "deploy.deployment.status_changed", title: "デプロイ完了: fe2-app-shell", body: "SPA シェルの本番デプロイが完了しました。", audience: "admin", createdAt: "2026-08-02T01:15:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0007", type: "feedback", title: "新しいフィードバック: 通知の一括操作がほしい", body: "カテゴリ: idea\n送信ユーザー: usr_bob\n\n大量に公開する時に一括操作がほしいです", audience: "admin", createdAt: "2026-08-02T01:00:00Z", publishedBroadcastId: null },
   // ⚙ → 問い合わせ (non-feedback kind) as the backend labels it.
+  // 「権限を申請する」ボタン (kind=permission_request) から届く通知の見え方。
+  { id: "ntfn_adm_0009", type: "feedback", title: "新しい権限の申請: 申請者: 一般メンバー 花子 アプリ: 運営メンバー 状況: 運営メンバーは閲覧のみの権限のため、作成・…", body: "種別: 権限の申請\n送信ユーザー: usr_member\n発生ページ: 運営メンバー\n\n申請者: 一般メンバー 花子 アプリ: 運営メンバー 状況: 運営メンバーは閲覧のみの権限のため、作成・編集・削除はできません。 希望する権限: 運営メンバーの編集", audience: "admin", createdAt: "2026-08-02T00:50:00Z", publishedBroadcastId: null },
   { id: "ntfn_adm_0008", type: "feedback", title: "新しい問い合わせ（名刺が切れた）: 希望枚数: 50枚", body: "種別: 名刺が切れた\n送信ユーザー: usr_alice\n発生ページ: ホーム\n\n希望枚数: 50枚", audience: "admin", createdAt: "2026-08-02T00:45:00Z", publishedBroadcastId: null },
 ];
 
@@ -513,9 +540,9 @@ const ADMIN_NOTIFICATIONS: notification.AdminNotificationItem[] = [
 function recordInquiryDemo(body: notification.CreateFeedbackRequest | null): { id: string } {
   const id = `nfb_demo_${Date.now()}`;
   const kind = body?.kind ?? "feedback";
-  const label = INQUIRY_KIND_SPECS.find((s) => s.kind === kind)?.label ?? kind;
+  const label = kind === "permission_request" ? "権限の申請" : (INQUIRY_KIND_SPECS.find((s) => s.kind === kind)?.label ?? kind);
   const message = (body?.message ?? "").replace(/\s+/g, " ").trim();
-  const heading = kind === "feedback" ? "フィードバック" : `問い合わせ（${label}）`;
+  const heading = kind === "feedback" || kind === "permission_request" ? label : `問い合わせ（${label}）`;
   const lines = [`種別: ${label}`];
   if (kind === "feedback") lines.push(`カテゴリ: ${body?.category ?? "other"}`);
   ADMIN_NOTIFICATIONS.unshift({
@@ -667,7 +694,65 @@ MAIL_DETAIL.msg_5 = {
   textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
 };
 
+// HTML mail: layout from the sender, an inline cid: image from its own attachments, a remote
+// image that stays off until 画像を表示, plus markup the sanitizer has to take out.
+const MSG_HTML: mail.MailMessageListItem = {
+  id: "msg_html", messageId: "<mhtml@demo>", threadId: "thr_html", from: { email: "news@conf.example", name: "カンファレンス事務局" },
+  to: [{ email: "demo@developershub.jp" }], subject: "【HTMLメール】カンファレンス開催のお知らせ",
+  snippet: "今年のカンファレンスの開催概要をお知らせします。", receivedAt: daysAgoIso(0.02), read: false, mine: true,
+};
+MAIL_DETAIL.msg_html = {
+  ...MSG_HTML,
+  textBody: "今年のカンファレンスの開催概要をお知らせします。\n日程: 11月30日\n会場: 金沢工業大学",
+  htmlBody:
+    `<script>alert("xss")</script>` +
+    `<form><input name="childNodes"><img src=x onerror="window.__mailXss=1"></form>` +
+    `<form name="body"><input name="childNodes"><img src=x onerror="window.__mailXss=2"></form>` +
+    `<form><input name="tagName"><input name="attributes"><img src=x onerror="window.__mailXss=3"></form>` +
+    `<table width="100%" cellpadding="0" cellspacing="0" style="position:fixed; top:0; background-color:#f4f6fb"><tr><td align="center" style="padding:24px">` +
+    `<img src="cid:logo@demo" alt="ロゴ" width="48" height="48">` +
+    `<h1 style="color:#1a56db; font-size:22px" onclick="alert(1)">カンファレンス開催のお知らせ</h1>` +
+    `<p style="color:#374151">今年のカンファレンスの開催概要をお知らせします。</p>` +
+    `<table style="border-collapse:collapse"><tr><td style="padding:4px 12px; border:1px solid #d1d5db">日程</td><td style="padding:4px 12px; border:1px solid #d1d5db">11月30日</td></tr>` +
+    `<tr><td style="padding:4px 12px; border:1px solid #d1d5db">会場</td><td style="padding:4px 12px; border:1px solid #d1d5db">金沢工業大学</td></tr></table>` +
+    `<p><img src="https://placehold.co/480x120/png?text=Dub+Conference" alt="バナー" width="480"></p>` +
+    `<p><a href="https://example.com/register" style="color:#fff; background-color:#1a56db; padding:8px 16px">参加登録</a> <a href="javascript:alert(1)">危険なリンク</a></p>` +
+    `</td></tr></table>`,
+  attachments: [{ ...seedMailImageBlob("mailatt_demo_logo", "logo.png", "image/png", DEMO_PNG_8x8), contentId: "logo@demo" }],
+};
+
+// Tricky-URL mail (ハイパーリンク表示の回帰確認用): long unbroken URLs, URLs glued to
+// Japanese brackets/punctuation, query/fragment/percent-encoding, Gmail-style
+// "label <url>" plain-text links and an angle-bracketed URL hard-wrapped across lines.
+const MSG_LINKS: mail.MailMessageListItem = {
+  id: "msg_6", messageId: "<m6@demo>", threadId: "thr_6", from: { email: "info@connpass.example", name: "イベント告知" },
+  to: [{ email: "demo@developershub.jp" }], subject: "【リンク確認】参加登録URLと資料のご案内",
+  snippet: "参加登録はこちら https://connpass.example/event/123456/registration/?utm_source=mail&utm_medium=email",
+  receivedAt: daysAgoIso(0.05), read: false, mine: true,
+};
+MAIL_DETAIL.msg_6 = {
+  ...MSG_LINKS,
+  textBody: [
+    "イベント運営チームです。参加登録URLと資料をお送りします。",
+    "",
+    "参加登録はこちら（https://connpass.example/event/123456/registration/?utm_source=mail&utm_medium=email）。",
+    "資料「https://drive.example.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/view?usp=sharing」をご確認ください。",
+    "",
+    "会場マップ: https://maps.example.com/maps/place/%E9%87%91%E6%B2%A2%E5%B7%A5%E6%A5%AD%E5%A4%A7%E5%AD%A6/@36.5310,136.6270,17z/data=!3m1!4b1!4m6!3m5!1s0x5ff8333b2e7d0c4d:0x1234567890abcdef!8m2!3d36.531!4d136.627#map-section",
+    "",
+    "タイムテーブルの詳細<https://conf.example.jp/2026/timetable?day=1&track=A#session-42>",
+    "Markdown形式: [申込フォーム](https://forms.example.com/apply?ref=mail&lang=ja) と [企業ページ](https://ja.wikipedia.org/wiki/Cloudflare_(企業))",
+    "アンケート <https://forms.example.com/d/e/1FAIpQLSf0123456789abcdefghijklmnopqrstuvwxyz/viewform?usp=pp_url&entry.1=",
+    "abc> へのご協力をお願いします。",
+    "",
+    "Wikipedia: https://ja.wikipedia.org/wiki/Cloudflare_(企業)、GitHub: https://github.com/KIT-DevelopersHub/dub-ecosystem/pull/752.",
+    "",
+    "よろしくお願いいたします。",
+  ].join("\n"),
+};
+
 const MAIL_THREAD: Record<string, mail.MailThread> = {
+  thr_6: { id: "thr_6", messages: [MAIL_DETAIL.msg_6!] },
   thr_1: { id: "thr_1", messages: [MAIL_DETAIL.msg_1!] },
   thr_2: { id: "thr_2", messages: [MAIL_DETAIL.msg_2!] },
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
@@ -769,9 +854,38 @@ const MEMBER_ACCOUNT_PERMISSIONS: identity.PermissionKey[] = [
   "mail:read",
 ];
 
-// チャット 編集 but NOT chat:manage_sections (the default for every non-admin role): sees the
-// org-wide sidebar sections without any organizing UI. ?demo_account=usr_bob previews it.
-const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "chat:manage_sections");
+// チャット 編集 but NOT chat:manage_sections / chat:change_visibility (the default for every
+// non-admin role): sees the org-wide sidebar sections without any organizing UI, and a
+// channel's 公開範囲 without the switch. ?demo_account=usr_bob previews it.
+const CHAT_EDITOR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter(
+  (k) => k !== "chat:manage_sections" && k !== "chat:change_visibility",
+);
+
+// チャンネル作成の 3 択の見え方を ?demo_account= で確かめる用 (全権限 = usr_bob)。
+const CHAT_CREATE_PUBLIC_PERMISSIONS: identity.PermissionKey[] = CHAT_EDITOR_PERMISSIONS.filter((k) => k !== "chat:create_private");
+const CHAT_CREATE_NONE_PERMISSIONS: identity.PermissionKey[] = CHAT_CREATE_PUBLIC_PERMISSIONS.filter((k) => k !== "chat:create");
+
+// 運営メンバーの範囲の見え方を ?demo_account= で確かめる用。
+const MEMBERS_SCOPE_ORG_CHART_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:"));
+const MEMBERS_SCOPE_ROSTER_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => !k.startsWith("members:mail_"));
+
+// 一般メンバー相当で、運営メンバー / 参加届 / LP / 通知 だけ「閲覧」・他アプリは「無効」・管理者権限なし。
+// 権限不足ダイアログ(+ 権限を申請する)の見え方を ?demo_account=usr_members_view で確かめる用。
+const MEMBERS_VIEW_ONLY_APPS = ["members", "participation", "lp", "notifications"] as const;
+const MEMBERS_VIEW_ONLY_PERMISSIONS: identity.PermissionKey[] = [
+  ...MEMBER_ACCOUNT_PERMISSIONS,
+  "members:roster_view",
+  "infra:read", // LP管理 のルートが要求する
+  ...MEMBERS_VIEW_ONLY_APPS.flatMap((id) => {
+    const view = appRegistry.getApp(id)?.access.view;
+    return view ? [view] : [];
+  }),
+];
+
+// 人事: mail:admin + members:mail_edit はあるが、ロール管理の編集と identity:admin は無い。
+// ?demo_account=usr_hr で参加届からの発行が出ること、usr_hr_before (新しい鍵なし) で出ないことを見る。
+const HR_PERMISSIONS: identity.PermissionKey[] = DEMO_PERMISSIONS.filter((k) => k !== "identity:admin" && k !== "app:admin:edit");
+const HR_BEFORE_PERMISSIONS: identity.PermissionKey[] = HR_PERMISSIONS.filter((k) => k !== "members:onboard_mail");
 
 const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: ME_ID, displayName: "デモ 管理者", email: "demo@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: Object.values(MAIL_DETAIL).map((m) => ({ ...m })), roleShareWith: ["usr_sponsor"] },
@@ -779,6 +893,13 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
   { id: "usr_super", displayName: "監督 (info@)", email: "info@developershub.jp", permissions: OVERSIGHT_PERMISSIONS, inbox: [] },
   { id: "usr_sponsor", displayName: "鈴木 一郎", email: "suzuki@developershub.jp", permissions: [...DEMO_PERMISSIONS, "mail:read_role_shared"], inbox: SPONSOR_INBOX.map((m) => ({ ...m })), roleShareWith: [ME_ID] },
   { id: "usr_member", displayName: "一般メンバー 花子", email: "hanako@developershub.jp", permissions: MEMBER_ACCOUNT_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_org", displayName: "範囲 組織図まで", email: "scope-org@developershub.jp", permissions: MEMBERS_SCOPE_ORG_CHART_PERMISSIONS, inbox: [] },
+  { id: "usr_scope_roster", displayName: "範囲 メール名簿以外", email: "scope-roster@developershub.jp", permissions: MEMBERS_SCOPE_ROSTER_PERMISSIONS, inbox: [] },
+  { id: "usr_members_view", displayName: "閲覧のみ 運営メンバー", email: "members-view@developershub.jp", permissions: MEMBERS_VIEW_ONLY_PERMISSIONS, inbox: [] },
+  { id: "usr_chat_public", displayName: "作成 パブリックのみ", email: "chat-public@developershub.jp", permissions: CHAT_CREATE_PUBLIC_PERMISSIONS, inbox: [] },
+  { id: "usr_chat_none", displayName: "作成 できない", email: "chat-none@developershub.jp", permissions: CHAT_CREATE_NONE_PERMISSIONS, inbox: [] },
+  { id: "usr_hr", displayName: "人事 担当", email: "hr@developershub.jp", permissions: HR_PERMISSIONS, inbox: [] },
+  { id: "usr_hr_before", displayName: "人事 (発行の鍵なし)", email: "hr-before@developershub.jp", permissions: HR_BEFORE_PERMISSIONS, inbox: [] },
   { id: "usr_lead", displayName: "統括 山本", email: "lead@developershub.jp", permissions: DEMO_PERMISSIONS, inbox: LEAD_INBOX.map((m) => ({ ...m })), roleShareWith: ["usr_bob", "usr_sponsor"] },
 ];
 
@@ -789,8 +910,58 @@ function isOversight(a: DemoAccount): boolean {
 
 const DEMO_ACCOUNT_STORAGE_KEY = "dub_demo_account";
 
-/** The active demo account (localStorage-selected, default admin). Read per request. */
+// ── 代理表示 (admin impersonation) — demo twin of auth-service + gateway ──────────
+// sessionStorage (this tab only, like a session cookie). While set, every request is
+// answered AS the subject (currentAccount) and /me names the real admin, exactly like the
+// gateway; the shared deny list (@dub/types) refuses the same high-risk actions.
+const DEMO_IMPERSONATION_KEY = "dub_demo_impersonation";
+
+interface DemoImpersonation {
+  actorId: string;
+  subject: { id: string; displayName: string; email: string; permissions: identity.PermissionKey[] };
+  startedAt: number;
+  expiresAt: number;
+}
+
+function readImpersonation(): DemoImpersonation | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(DEMO_IMPERSONATION_KEY);
+    if (!raw) return null;
+    const imp = JSON.parse(raw) as DemoImpersonation;
+    // Past the hard deadline it is over (the server would end it on the next refresh).
+    if (Date.now() >= imp.expiresAt) {
+      globalThis.sessionStorage?.removeItem(DEMO_IMPERSONATION_KEY);
+      return null;
+    }
+    return imp;
+  } catch {
+    return null;
+  }
+}
+
+function writeImpersonation(imp: DemoImpersonation | null): void {
+  try {
+    if (imp) globalThis.sessionStorage?.setItem(DEMO_IMPERSONATION_KEY, JSON.stringify(imp));
+    else globalThis.sessionStorage?.removeItem(DEMO_IMPERSONATION_KEY);
+  } catch {
+    // storage blocked: impersonation simply cannot persist across the reload
+  }
+}
+
+/** The account the request acts as: the impersonated member when 代理表示 is on. */
 function currentAccount(): DemoAccount {
+  const imp = readImpersonation();
+  if (imp) {
+    // Permissions are the ROSTER's (role-derived, captured at start) — what the member really
+    // holds — even when the member is also a switcher persona; the persona keeps its inbox.
+    const known = DEMO_ACCOUNTS.find((a) => a.id === imp.subject.id);
+    return known ? { ...known, permissions: imp.subject.permissions } : { ...imp.subject, inbox: [] };
+  }
+  return signedInAccount();
+}
+
+/** The active demo account (localStorage-selected, default admin). Read per request. */
+function signedInAccount(): DemoAccount {
   let key: string | null = null;
   try {
     // ?demo_account=<id|email> switches (and remembers) the account so a confirm link can
@@ -838,11 +1009,16 @@ function demoAccountsResponse(): authTypes.DemoAccountsResponse {
 /** The /me session for the active account (drives RequireAuth + the shell header). */
 function currentMe(): gateway.MeResponse {
   const a = currentAccount();
+  const imp = readImpersonation();
+  const actor = imp ? signedInAccount() : null;
   return {
     user: { id: a.id, displayName: a.displayName, avatarUrl: null, email: a.email },
     orgId: ORG,
     permissions: driveSettingsOverride(a.permissions),
-    sessionExpiresAt: Date.now() + 60 * 60 * 1000,
+    sessionExpiresAt: imp ? imp.expiresAt : Date.now() + 60 * 60 * 1000,
+    ...(imp && actor
+      ? { impersonation: { actor: { id: actor.id, displayName: actor.displayName, avatarUrl: null }, startedAt: imp.startedAt, expiresAt: imp.expiresAt } }
+      : {}),
   };
 }
 
@@ -1056,11 +1232,12 @@ function createMailStore() {
   // Idempotency (x-dub-idempotency-key, scoped per account like the gateway): a repeated
   // submit returns the first send's ack instead of appending a second Sent row.
   const idemAcks = new Map<string, mail.SendMailResponse>();
+  const draftsByAccount: Record<string, mail.MailDraft[]> = {};
 
   function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
     {
-      const m = /^\/api\/v1\/mail\/(?:messages|sent)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
+      const m = /^\/api\/v1\/mail\/(?:messages|sent|drafts)\/[^/]+\/attachments\/([^/]+)$/.exec(pathname);
       if (m && method === "GET") {
         const blob = DEMO_MAIL_BLOBS.get(decodeURIComponent(m[1]!));
         if (!blob) return notFound(`GET ${pathname}`);
@@ -1179,6 +1356,61 @@ function createMailStore() {
       if (m && method === "GET") {
         const found = readInbox.find((r) => r.id === decodeURIComponent(m[1]!));
         return found ? json(stampBlocked(found)) : notFound(`GET ${pathname}`);
+      }
+    }
+    // 既読 / 未読 for a selection: this account's own copies only, as on the gateway.
+    if (method === "POST" && pathname === "/api/v1/mail/read-state") {
+      const { ids, read } = body as mail.MailReadStateRequest;
+      const own = new Set(ids);
+      for (const r of inboxOf(me.id)) if (own.has(r.id)) r.read = read;
+      return json({ updated: ids.length, read });
+    }
+    if (method === "POST" && pathname === "/api/v1/mail/bulk") {
+      const { folder, action } = body as mail.MailBulkRequest;
+      const hit = folderThreads(readInbox).filter((t) => inView(t, folder));
+      if (action === "read" || action === "unread") {
+        for (const t of hit) for (const m of t.msgs) if (m.mine !== false) m.read = action === "read";
+      } else {
+        const flags = new Map(loadFlags().map((f) => [f.threadId, f]));
+        for (const t of hit) {
+          const f = flags.get(t.threadId) ?? { threadId: t.threadId, starred: false, archived: false, trashed: false, purged: false, noReplyAt: null };
+          flags.set(t.threadId, { ...f, ...(action === "archive" ? { archived: true } : { trashed: true }) });
+        }
+        saveFlags([...flags.values()]);
+      }
+      return json({ updated: hit.length });
+    }
+    // 下書き: per-account, in-session (a reload resets, like Sent).
+    {
+      const list = (draftsByAccount[me.id] ??= []);
+      if (pathname === "/api/v1/mail/drafts" && method === "GET") return json({ items: [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) });
+      const one = /^\/api\/v1\/mail\/drafts\/([^/]+)$/.exec(pathname);
+      if (one && method === "PUT") {
+        const id = decodeURIComponent(one[1]!);
+        const prev = list.find((d) => d.id === id);
+        const saved: mail.MailDraft = { ...(body as mail.MailDraftInput), id, updatedAt: new Date().toISOString(), attachments: prev?.attachments ?? [] };
+        draftsByAccount[me.id] = [saved, ...list.filter((d) => d.id !== id)];
+        return json(saved);
+      }
+      if (one && method === "DELETE") {
+        draftsByAccount[me.id] = list.filter((d) => d.id !== decodeURIComponent(one[1]!));
+        return json({ deleted: true });
+      }
+      const files = /^\/api\/v1\/mail\/drafts\/([^/]+)\/attachments(?:\/([^/]+))?$/.exec(pathname);
+      if (files && method !== "GET") {
+        const draft = list.find((d) => d.id === decodeURIComponent(files[1]!));
+        if (!draft) return notFound(`${method} ${pathname}`);
+        if (method === "DELETE") {
+          draft.attachments = draft.attachments.filter((a) => a.id !== decodeURIComponent(files[2] ?? ""));
+          return json({ deleted: true });
+        }
+        const input = body as mail.MailAttachmentInput;
+        const bytes = b64ToBytes(input.contentBase64);
+        const attId = `mailatt_draft_${++attSeq}`;
+        DEMO_MAIL_BLOBS.set(attId, { filename: input.filename, contentType: input.contentType, bytes });
+        const meta: mail.MailAttachment = { id: attId, filename: input.filename, contentType: input.contentType, sizeBytes: bytes.byteLength };
+        draft.attachments = [...draft.attachments, meta];
+        return json(meta);
       }
     }
     if (method === "POST") {
@@ -1559,11 +1791,29 @@ const MAINTAINER_PERMISSIONS: identity.PermissionKey[] = [
   "mail:send",
   "mail:admin",
   "chat:create",
+  "chat:create_private",
   "chat:moderate",
   "github:read",
   "notif:send",
+  // 通知 = 閲覧 like prod (identity 0004/0008) + 0028: receives 管理者向け + 全体 notifications.
+  "app:notifications:view",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "notif:broadcast_publish",
+  "notif:admin",
+  "notif:receive_admin",
+  "notif:receive_all",
 ];
-const MEMBER_PERMISSIONS: identity.PermissionKey[] = ["identity:read", "event:read", "task:read"];
+// 通知 = 閲覧 like prod; 0028 gives every 通知 role 「全体への通知を受け取る」.
+const MEMBER_PERMISSIONS: identity.PermissionKey[] = [
+  "identity:read",
+  "event:read",
+  "task:read",
+  "app:notifications:view",
+  "notif:inbox:self",
+  "notif:prefs:self",
+  "notif:receive_all",
+];
 
 // The roster carries `source` (Email Routing vs. 手動) — extra field over the frozen
 // IdentityUser, read by FE7's RosterUser projection and its 種別 column / sort.
@@ -1601,6 +1851,19 @@ const SEED_ROLES: DemoRole[] = [
   { id: "role_member", orgId: ORG, name: "member", permissions: MEMBER_PERMISSIONS, isSystem: true, mailVisibleRoleIds: [] },
   // 統括: also reads the maintainer + member roles' inbound mail (メール > 詳細設定).
   { id: "role_lead", orgId: ORG, name: "統括", permissions: [...MEMBER_PERMISSIONS, "app:mail:view", "mail:read"], isSystem: false, mailVisibleRoleIds: ["role_maintainer", "role_member"] },
+  // Prod-shaped extras so ロール管理's genre sections (運営 / チーム / 役職 / その他) all have rows.
+  ...[
+    ["role_ops_dev", "開発"],
+    ["role_ops_dayof", "当日運営"],
+    ["role_ops_sponsor", "スポンサー"],
+    ["role_ops_legal", "法務会計"],
+    ["role_auto_team_dev", "チーム: 開発チーム"],
+    ["role_auto_team_pr", "チーム: 広報チーム"],
+    ["role_auto_team_venue", "チーム: 会場チーム"],
+    ["role_auto_position_member", "役職: Member"],
+    ["role_auto_position_leader", "役職: Leader"],
+    ["role_demo_commander_bot", "commander-bot"],
+  ].map(([id, name]): DemoRole => ({ id: id!, orgId: ORG, name: name!, permissions: [...MEMBER_PERMISSIONS], isSystem: false, mailVisibleRoleIds: [] })),
 ];
 
 // FE7's RoleAssignment (contracts/pending) — org-wide (resource fields null) here.
@@ -1668,6 +1931,7 @@ function createRosterStore() {
   for (const [k, v] of Object.entries(SEED_USER_ROLES)) assignments[k] = v.map((a) => ({ ...a }));
   const audits: auditLog.AuditRecord[] = SEED_AUDITS.map((a) => ({ ...a }));
   const emails: DemoEmailAddress[] = SEED_EMAIL_ADDRESSES.map((a) => ({ ...a }));
+  let teamLists: mail.MailTeamList[] = [];
 
   const rid = (prefix: string): string => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
   const summaries = (): identity.UserSummary[] => users.map((u) => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
@@ -1711,7 +1975,25 @@ function createRosterStore() {
           return u ? json(detail(u)) : problem("NOT_FOUND", "user not found", 404);
         }
       }
-      if (pathname === "/api/v1/identity/roles") return json(page(roles));
+      if (pathname === "/api/v1/identity/roles") {
+        return json(page(roles.map((r) => ({ ...r, memberCount: users.filter((u) => u.roleIds.includes(r.id)).length }))));
+      }
+      // 通知管理「誰に届くか」: derived from the LIVE demo roles, so toggling 「管理者向け通知を
+      // 受け取る」 in ロール管理 changes this summary in the same session (mirrors identity
+      // GET /internal/permission-holders behind notification GET /audiences).
+      if (pathname === "/api/v1/notifications/audiences") {
+        const active = users.filter((u) => u.status === "active");
+        const items: notification.AudienceSummary[] = notificationValues.RECEIVE_AUDIENCES.map((def) => {
+          const holding = roles.filter((r) => (r.permissions as string[]).includes(def.permission));
+          const ids = new Set(holding.flatMap((r) => users.filter((u) => u.roleIds.includes(r.id)).map((u) => u.id)));
+          return {
+            ...def,
+            roles: holding.map((r) => ({ id: r.id, name: r.name, memberCount: users.filter((u) => u.roleIds.includes(r.id)).length })),
+            recipientCount: active.filter((u) => ids.has(u.id)).length,
+          };
+        });
+        return json({ items } satisfies notification.ListAudiencesResponse);
+      }
       if (pathname === "/api/v1/identity/permissions/catalog") return json(identityValues.PERMISSION_CATALOG);
       if (pathname === "/api/v1/audit/logs") {
         const action = url.searchParams.get("action") ?? "identity.";
@@ -1724,6 +2006,7 @@ function createRosterStore() {
       // /issued-addresses（zone ルール由来）に合わせる。旧 /addresses（アカウント送信先）はもう
       // フロントから呼ばれない。
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") return json(page(emails));
+      if (pathname === "/api/v1/mail/admin/lists") return json({ items: teamLists });
       // 名簿同期のソース: 受信アドレス（address/destination/enabled）。sync/preview がまず取得する。
       if (pathname === "/api/v1/mail/admin/email-routing/roster-addresses") {
         return json({ items: emails.map((a) => ({ address: a.address, destination: a.destination, enabled: a.enabled })) });
@@ -1768,6 +2051,15 @@ function createRosterStore() {
         audit("identity.user.provisioned", "user", user.id, { email: user.email });
         // 実 identity-roster と同じ { user } 形 (InviteUserResponse)。
         return json({ user }, 201);
+      }
+      if (pathname === "/api/v1/mail/admin/lists") {
+        const req = body as mail.MailTeamListCreateRequest;
+        const localPart = req?.localPart?.trim().toLowerCase() ?? "";
+        if (!LOCALPART_RE.test(localPart)) return problem("VALIDATION_FAILED", "ローカル部が不正です（英小文字・数字・.\_- のみ）", 400, [{ field: "localPart", reason: "format" }]);
+        if (emails.some((a) => a.localPart === localPart) || teamLists.some((l) => l.localPart === localPart)) return problem("CONFLICT", "このアドレスは既に使われています", 409);
+        const list: mail.MailTeamList = { id: rid("list"), address: `${localPart}@${EMAIL_DOMAIN}`, localPart, teamId: req.teamId, createdAt: new Date().toISOString() };
+        teamLists.push(list);
+        return json(list);
       }
       if (pathname === "/api/v1/mail/admin/email-routing/issued-addresses") {
         const req = body as { localPart?: string };
@@ -1839,6 +2131,7 @@ function createRosterStore() {
           if (role.isSystem) return problem("CONFLICT", "システムロールは削除できません", 409);
           roles.splice(roles.indexOf(role), 1);
           for (const r of roles) r.mailVisibleRoleIds = r.mailVisibleRoleIds.filter((t) => t !== role.id);
+          for (const u of users) u.roleIds = u.roleIds.filter((t) => t !== role.id);
           audit("identity.role.deleted", "role", role.id, { name: role.name });
           return json(null, 204);
         }
@@ -1862,6 +2155,11 @@ function createRosterStore() {
         }
       }
       {
+        const listId = seg(/^\/api\/v1\/mail\/admin\/lists\/([^/]+)$/);
+        if (listId) {
+          teamLists = teamLists.filter((l) => l.id !== listId);
+          return json({ id: listId });
+        }
         const id = seg(/^\/api\/v1\/mail\/admin\/email-routing\/issued-addresses\/([^/]+)$/);
         if (id) {
           const idx = emails.findIndex((a) => a.id === id);
@@ -1889,7 +2187,23 @@ function createRosterStore() {
     return users.find((u) => u.id === id);
   }
 
-  return { handle, addUsers, findUser };
+  /** 参加届からの発行 (gateway onboard-account の demo 版): アドレス + 招待中アカウント
+   *  (一般メンバー固定)。既にアドレス / アカウントがあれば何も作らず 409。 */
+  function onboard(localPart: string, displayName: string): { user: DemoRosterUser; address: string } | Response {
+    const address = `${localPart}@${EMAIL_DOMAIN}`;
+    if (users.some((u) => u.email === address)) return problem("GATEWAY_ONBOARD_EMAIL_EXISTS", `${address} のアカウントは既にあります`, 409);
+    if (emails.some((a) => a.localPart === localPart) || teamLists.some((l) => l.localPart === localPart)) {
+      return problem("MAIL_EMAIL_ROUTING_CONFLICT", "このアドレスは既に使われています", 409);
+    }
+    const memberRole = roles.find((r) => r.isSystem && r.name === "member");
+    emails.push({ id: rid("eml"), localPart, address, destination: MAIL_WORKER_DESTINATION, enabled: true, createdAt: isoNow() });
+    const user: DemoRosterUser = { id: rid("usr"), orgId: ORG, displayName, email: address, githubLogin: null, avatarUrl: null, status: "active", source: "manual", roleIds: memberRole ? [memberRole.id] : [], createdAt: isoNow(), updatedAt: isoNow() };
+    users.push(user);
+    audit("identity.user.invited", "user", user.id, { email: address, via: "participation-onboard" });
+    return { user, address };
+  }
+
+  return { handle, addUsers, findUser, onboard };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -2201,9 +2515,35 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
       return json({ url: target, preview: mockUnfurl(target) });
     }
     if (method === "POST" && pathname === "/api/v1/chat/channels") {
-      // DM only (channel creation is otherwise not demoed). Same participant set ->
-      // the existing DM, mirroring chat-service's dm_key dedup.
-      const req = (body ?? {}) as { type?: string; name?: string; memberIds?: string[] };
+      // Same gates as chat-service: 編集 + chat:create, plus chat:create_private for a private
+      // channel. Same participant set -> the existing DM (dm_key dedup).
+      const req = (body ?? {}) as { type?: string; name?: string; topic?: string; visibility?: "public" | "private"; memberIds?: string[] };
+      const perms = currentAccount().permissions;
+      const missing = !perms.includes("app:chat:edit")
+        ? "app:chat:edit"
+        : !perms.includes("chat:create")
+          ? "chat:create"
+          : req.type !== "dm" && req.visibility === "private" && !perms.includes("chat:create_private")
+            ? "chat:create_private"
+            : null;
+      if (missing) {
+        return json({ error: { code: "FORBIDDEN", message: `${missing} required`, retryable: false } } satisfies ErrorResponse, 403);
+      }
+      if (req.type === "topic") {
+        const created: DemoChatChannel = {
+          id: `chn_topic_${Date.now().toString(36)}`,
+          type: "topic",
+          name: req.name || "channel",
+          topic: req.topic ?? null,
+          eventId: null,
+          memberCount: 1,
+          roster: [{ userId: currentAccount().id, role: "admin", joinedAt: CH_TS }],
+          visibility: req.visibility === "private" ? "private" : "public",
+        };
+        all.push(created);
+        byId.set(created.id, created);
+        return json(toWire(created), 201);
+      }
       if (req.type !== "dm") return notFound(`POST ${pathname} (type=${String(req.type)})`);
       const memberIds = [...new Set([currentAccount().id, ...(req.memberIds ?? [])])];
       const key = [...memberIds].sort().join(",");
@@ -2285,6 +2625,30 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         if (sectionId === null) delete mine.assignments[channelId];
         else mine.assignments[channelId] = sectionId;
         return json(null, 204);
+      }
+    }
+    {
+      // Public <-> private, like chat-service: 編集 + chat:change_visibility (403 otherwise),
+      // DM 400, stale version 409, same value = unchanged. Existing members stay.
+      const m = /^\/api\/v1\/chat\/channels\/([^/]+)\/visibility$/.exec(pathname);
+      if (m && method === "PUT") {
+        const perms = currentAccount().permissions;
+        if (!perms.includes("app:chat:edit") || !perms.includes("chat:change_visibility")) {
+          return json({ error: { code: "FORBIDDEN", message: "chat:change_visibility required", retryable: false } } satisfies ErrorResponse, 403);
+        }
+        const c = byId.get(decodeURIComponent(m[1]!));
+        if (!c) return notFound(`PUT ${pathname}`);
+        if (c.type === "dm") return validationFailed("dm_visibility_fixed");
+        const req = (body ?? {}) as { visibility?: unknown; version?: unknown };
+        if (req.visibility !== "public" && req.visibility !== "private") return validationFailed("visibility must be public|private");
+        if (req.version !== (c.version ?? 1)) {
+          return json({ error: { code: "CHAT_VERSION_CONFLICT", message: "version conflict", retryable: false } } satisfies ErrorResponse, 409);
+        }
+        if ((c.visibility ?? "public") !== req.visibility) {
+          c.visibility = req.visibility;
+          c.version = (c.version ?? 1) + 1;
+        }
+        return json(toWire(c));
       }
     }
     {
@@ -2926,6 +3290,11 @@ function demoJstAt(days: number, hh: number, mm: number): string {
   return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() + days, hh - 9, mm)).toISOString();
 }
 
+/** Now minus `min` minutes, on a whole minute (UTC ISO). */
+function demoNowMinus(min: number): string {
+  return new Date(Math.floor((Date.now() - min * 60_000) / 60_000) * 60_000).toISOString();
+}
+
 function demoMeetUrl(): string {
   const r = (n: number) => Array.from({ length: n }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join("");
   return `https://meet.google.com/${r(3)}-${r(4)}-${r(3)}`;
@@ -2941,6 +3310,7 @@ function seedMeetings(): meeting.Meeting[] {
       description: "今週の進捗共有と来週の予定確認",
       targetId: "all",
       targetName: "全体",
+      targets: [{ kind: "all", id: "all", name: "全体" }],
       startsAt: "2026-09-07T12:00:00.000Z", // 月曜 21:00 JST
       durationMinutes: 60,
       recurrence: "weekly",
@@ -2948,6 +3318,7 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/abc-defg-hij",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_all",
       attendeeCount: 9,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -2956,6 +3327,7 @@ function seedMeetings(): meeting.Meeting[] {
       description: null,
       targetId: "role_lead",
       targetName: "統括",
+      targets: [{ kind: "role", id: "role_lead", name: "統括" }],
       startsAt: "2026-09-10T11:00:00.000Z", // 木曜 20:00 JST
       durationMinutes: 30,
       recurrence: "biweekly",
@@ -2963,6 +3335,24 @@ function seedMeetings(): meeting.Meeting[] {
       meetUrl: "https://meet.google.com/kln-opqr-stu",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_lead",
       attendeeCount: 2,
+      trackAttendance: true,
+    },
+    {
+      ...base,
+      id: "mtg_member_now",
+      title: "メンバー定例",
+      description: "デモ用: いま開催中（開始10分後）の定例。ダッシュボードの「定例に参加」から参加すると出席になります。",
+      targetId: "role_member",
+      targetName: "member",
+      targets: [{ kind: "role", id: "role_member", name: "member" }],
+      startsAt: demoNowMinus(10),
+      durationMinutes: 60,
+      recurrence: "weekly",
+      until: null,
+      meetUrl: "https://meet.google.com/mem-bers-now",
+      htmlLink: "https://calendar.google.com/calendar/event?eid=demo_member",
+      attendeeCount: 3,
+      trackAttendance: true,
     },
     {
       ...base,
@@ -2970,16 +3360,45 @@ function seedMeetings(): meeting.Meeting[] {
       title: "Hackit 秋 キックオフ",
       description: "会場・広報・審査の担当決め",
       targetId: "role_maintainer",
-      targetName: "maintainer",
+      targetName: "maintainer、統括 山本",
+      targets: [
+        { kind: "role", id: "role_maintainer", name: "maintainer" },
+        { kind: "person", id: "usr_lead", name: "統括 山本" },
+      ],
       startsAt: demoJstAt(3, 19, 0),
       durationMinutes: 90,
       recurrence: "none",
       until: null,
       meetUrl: "https://meet.google.com/vwx-yzab-cde",
       htmlLink: "https://calendar.google.com/calendar/event?eid=demo_kickoff",
-      attendeeCount: 3,
+      attendeeCount: 4,
+      trackAttendance: false,
     },
   ];
+}
+
+/** Invitees of a demo meeting with stable, varied answers per occurrence (as if from Google Calendar).
+ *  ?meetingAnswers=unavailable previews the "could not read Google" state. */
+function demoMeetingAttendees(m: meeting.Meeting, date: string | null): meeting.ListMeetingAttendeesResponse {
+  const unavailable = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("meetingAnswers") === "unavailable";
+  const targets = meetingValues.targetsOfMeeting(m);
+  const people = DEMO_REGULAR_PEOPLE.filter((p) => meetingValues.isInMeetingTargets({ id: p.userId, roleIds: p.roleIds }, targets));
+  const answers: meeting.MeetingResponseStatus[] = ["accepted", "accepted", "declined", "tentative", "accepted", "needsAction"];
+  const seed = [...`${m.id}${date ?? ""}`].reduce((n, ch) => n + ch.charCodeAt(0), 0);
+  const items: meeting.MeetingAttendee[] = people.map((p, i) => {
+    const response = unavailable ? "needsAction" : answers[(seed + i) % answers.length]!;
+    return {
+      userId: p.userId as meeting.MeetingAttendee["userId"],
+      name: p.name,
+      email: null,
+      response,
+      comment: response === "declined" ? "授業と重なっているため欠席します" : null,
+    };
+  });
+  if (m.id === "mtg_kickoff") items.push({ userId: null, name: "協賛企業 ご担当者", email: "sponsor@example.com", response: unavailable ? "needsAction" : "tentative", comment: null });
+  const order: meeting.MeetingResponseStatus[] = ["accepted", "tentative", "declined", "needsAction"];
+  items.sort((a, b) => order.indexOf(a.response) - order.indexOf(b.response) || a.name.localeCompare(b.name, "ja"));
+  return { items, responsesAvailable: !unavailable };
 }
 
 function createMeetingsDemoStore() {
@@ -3006,17 +3425,36 @@ function createMeetingsDemoStore() {
     if (mode === "reconnect") return { email: "hackit.dub@gmail.com", calendarReady: false };
     return { email: "hackit.dub@gmail.com", calendarReady: true };
   };
-  const target = (id: string) => DEMO_MEETING_TARGETS.find((t) => t.id === id);
+  /** Targets of a body with names, or null when one is unknown (the service's 400). */
+  const resolveTargets = (b: { targets?: unknown; targetId?: unknown }): meeting.MeetingTargetInfo[] | null => {
+    const refs = meetingValues.parseMeetingTargets(b);
+    if (!refs) return null;
+    const out: meeting.MeetingTargetInfo[] = [];
+    for (const r of refs) {
+      const name = r.kind === "person" ? DEMO_REGULAR_PEOPLE.find((p) => p.userId === r.id)?.name : DEMO_MEETING_TARGETS.find((t) => t.id === r.id)?.name;
+      if (!name) return null;
+      out.push({ ...r, name });
+    }
+    return out;
+  };
+  const invitedCount = (targets: meeting.MeetingTargetRef[]) =>
+    DEMO_REGULAR_PEOPLE.filter((p) => meetingValues.isInMeetingTargets({ id: p.userId, roleIds: p.roleIds }, targets)).length;
   const BASE = "/api/v1/meetings";
+  const attendance = createAttendanceDemo(read);
 
-  function handle(method: string, pathname: string, body: unknown): Response | null {
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
     if (!pathname.startsWith(BASE)) return null;
+    const att = attendance.handle(method, pathname, body, url);
+    if (att) return att;
     if (method === "GET" && pathname === BASE) {
       const res: meeting.ListMeetingsResponse = { items: read(), account: account() };
       return json(res);
     }
     if (method === "GET" && pathname === `${BASE}/targets`) {
-      const res: meeting.ListMeetingTargetsResponse = { items: DEMO_MEETING_TARGETS };
+      const res: meeting.ListMeetingTargetsResponse = {
+        items: DEMO_MEETING_TARGETS,
+        people: DEMO_REGULAR_PEOPLE.map((p) => ({ id: p.userId as meeting.MeetingPersonOption["id"], name: p.name })),
+      };
       return json(res);
     }
     if (method === "POST" && pathname === `${BASE}/sync`) {
@@ -3031,7 +3469,7 @@ function createMeetingsDemoStore() {
     }
     if (method === "POST" && pathname === BASE) {
       const b = (body ?? {}) as Partial<meeting.CreateMeetingRequest>;
-      const t = b.targetId ? target(b.targetId) : undefined;
+      const t = resolveTargets(b);
       if (!b.title?.trim() || !t || !b.startsAt || !b.durationMinutes || !b.recurrence) {
         return problem("VALIDATION_FAILED", "タイトル・対象・日時・所要時間・繰り返しは必須です", 400);
       }
@@ -3040,15 +3478,17 @@ function createMeetingsDemoStore() {
         id: `mtg_${Date.now().toString(36)}`,
         title: b.title.trim(),
         description: b.description ?? null,
-        targetId: t.id,
-        targetName: t.name,
+        targetId: meetingValues.calendarTargetOf(t),
+        targetName: t.map((x) => x.name).join("、"),
+        targets: t,
         startsAt: b.startsAt,
         durationMinutes: b.durationMinutes,
         recurrence: b.recurrence,
         until: b.recurrence === "none" ? null : (b.until ?? null),
         meetUrl: demoMeetUrl(),
         htmlLink: "https://calendar.google.com/calendar/",
-        attendeeCount: t.memberCount,
+        attendeeCount: invitedCount(t),
+        trackAttendance: b.trackAttendance ?? false,
         createdBy: ME_ID as meeting.Meeting["createdBy"],
         createdAt: now,
         updatedAt: now,
@@ -3059,6 +3499,12 @@ function createMeetingsDemoStore() {
         return problem("UPSTREAM_TIMEOUT", "Gateway Timeout", 504);
       }
       return json(created, 201);
+    }
+    const attendeesM = /^\/api\/v1\/meetings\/([^/]+)\/attendees$/.exec(pathname);
+    if (method === "GET" && attendeesM) {
+      const found = read().find((m) => m.id === decodeURIComponent(attendeesM[1]!));
+      if (!found) return problem("NOT_FOUND", "meeting not found", 404);
+      return json(demoMeetingAttendees(found, url?.searchParams.get("date") ?? null));
     }
     const one = /^\/api\/v1\/meetings\/([^/]+)$/.exec(pathname);
     if (one) {
@@ -3072,21 +3518,315 @@ function createMeetingsDemoStore() {
       }
       if (method === "PATCH") {
         const b = (body ?? {}) as meeting.UpdateMeetingRequest;
-        const t = b.targetId ? target(b.targetId) : target(found.targetId);
+        const t = b.targets !== undefined || b.targetId !== undefined ? resolveTargets(b) : meetingValues.targetsOfMeeting(found);
         if (!t) return problem("VALIDATION_FAILED", "対象が見つかりません", 400);
         const next: meeting.Meeting = {
           ...found,
           ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)),
           description: b.description !== undefined ? b.description ?? null : found.description,
-          targetId: t.id,
-          targetName: t.name,
-          attendeeCount: t.memberCount,
+          targetId: meetingValues.calendarTargetOf(t),
+          targetName: t.map((x) => x.name).join("、"),
+          targets: t,
+          attendeeCount: invitedCount(t),
           updatedAt: new Date().toISOString(),
         };
         if (next.recurrence === "none") next.until = null;
         write(cur.map((m) => (m.id === id ? next : m)));
         return json(next);
       }
+    }
+    return null;
+  }
+  return { handle };
+}
+
+// ── 定例の出席 (drive-share-service /meetings/:id/join · /me/regulars · /attendance …) ───────
+// Mirrors the service: Meet participant records (seeded for past occurrences: full / short stays,
+// one unmatched Google account per occurrence, an anonymous guest), Google account links, manual and
+// Dub-join records, the threshold and the same precedence (manual > Meet > Dub join). Nothing
+// reaches Google. State lasts for the tab (sessionStorage).
+//   ?demo_account=hanako@developershub.jp — a member (not linked: the dashboard offers Googleと連携)
+//   ?meetApi=missing — the shared account lacks the Meet records scope (再連携が必要)
+const DEMO_ATTENDANCE_KEY = "dub-demo:meeting-attendance-v2";
+const DEMO_REGULAR_PEOPLE: { userId: string; name: string; email: string; roleIds: string[] }[] = [
+  { userId: ME_ID, name: "デモ 管理者", email: "demo@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_lead", name: "統括 山本", email: "lead@developershub.jp", roleIds: ["role_lead"] },
+  { userId: "usr_bob", name: "佐藤 太郎", email: "taro@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_emi", name: "山田 恵美", email: "emi@developershub.jp", roleIds: ["role_maintainer"] },
+  { userId: "usr_member", name: "一般メンバー 花子", email: "hanako@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_carol", name: "鈴木 一郎", email: "ichiro@developershub.jp", roleIds: ["role_member"] },
+  { userId: "usr_frank", name: "高橋 文人", email: "fumito@developershub.jp", roleIds: ["role_member"] },
+];
+/** Members whose Google account is linked from the start (佐藤 太郎 and 花子 are not). */
+const DEMO_LINKED = ["usr_demo", "usr_lead", "usr_emi", "usr_carol", "usr_frank"];
+
+interface DemoAttendanceState {
+  records: (Omit<meeting.AttendanceRecord, "meet"> & { meetingId: string; date: string; source: "manual" | "join" })[];
+  participants: (Omit<meeting.MeetParticipant, "userId" | "suggestions"> & { meetingId: string; date: string })[];
+  ingests: Record<string, meeting.MeetIngestState>;
+  links: Record<string, string>;
+  minPercent: number;
+  lastRunAt: string | null;
+}
+
+function createAttendanceDemo(meetings: () => meeting.Meeting[]) {
+  const storage = (): Storage | null => {
+    try {
+      return typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      return null;
+    }
+  };
+  const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  const jstToday = () => new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+  const expected = (targetId: string) =>
+    DEMO_REGULAR_PEOPLE.filter((p) => targetId === meetingValues.ALL_MEMBERS_TARGET_ID || p.roleIds.includes(targetId));
+  const started = (m: meeting.Meeting, from: string, to: string) =>
+    meetingValues.occurrenceStarts(m, from, to).filter((o) => Date.parse(o.startsAt) <= Date.now());
+  const ended = (m: meeting.Meeting, o: meeting.OccurrenceStart) => Date.parse(o.startsAt) + m.durationMinutes * 60_000 <= Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  function seed(): DemoAttendanceState {
+    const st: DemoAttendanceState = { records: [], participants: [], ingests: {}, links: {}, minPercent: meetingValues.DEFAULT_MIN_ATTEND_PERCENT, lastRunAt: null };
+    for (const id of DEMO_LINKED) st.links[`g_${id}`] = id;
+    const today = jstToday();
+    for (const m of meetings()) {
+      if (!m.trackAttendance || m.id === "mtg_member_now") continue;
+      for (const [i, o] of started(m, addDays(today, -182), today).entries()) {
+        if (!ended(m, o)) continue;
+        const s = Date.parse(o.startsAt);
+        const len = m.durationMinutes * 60;
+        expected(m.targetId).forEach((p, j) => {
+          const k = (i * 3 + j * 5) % 9;
+          if (k === 0) return; // 欠席 (not in the Meet)
+          if (k === 1) {
+            st.records.push({ meetingId: m.id, date: o.date, userId: p.userId, status: "excused", source: "manual", joinedAt: null, recordedBy: ME_ID, updatedAt: o.startsAt });
+            return;
+          }
+          const short = k === 2; // in the Meet only 8 minutes -> below the threshold
+          const join = s + (j % 4) * 60_000;
+          const secs = short ? 8 * 60 : len - (j % 4) * 60 - (k % 3) * 60;
+          const gid = p.userId === "usr_bob" || p.userId === "usr_member" ? `g_${p.userId}_personal` : `g_${p.userId}`;
+          st.participants.push({
+            meetingId: m.id,
+            date: o.date,
+            key: `u:${gid}`,
+            kind: "signed_in",
+            displayName: p.userId === "usr_bob" ? "佐藤太郎" : p.userId === "usr_member" ? "Hanako (personal)" : p.name,
+            googleUserId: gid,
+            firstJoin: iso(join),
+            lastLeave: iso(join + secs * 1000),
+            durationSeconds: secs,
+            approx: false,
+          });
+        });
+        st.participants.push({
+          meetingId: m.id,
+          date: o.date,
+          key: `conferenceRecords/demo/participants/guest-${i}`,
+          kind: "anonymous",
+          displayName: "見学（ゲスト）",
+          googleUserId: null,
+          firstJoin: iso(s + 5 * 60_000),
+          lastLeave: iso(s + 25 * 60_000),
+          durationSeconds: 20 * 60,
+          approx: false,
+        });
+        const at = iso(s + (m.durationMinutes + 15) * 60_000);
+        st.ingests[`${m.id}|${o.date}`] = { status: "done", ingestedAt: at, error: null };
+        if (!st.lastRunAt || at > st.lastRunAt) st.lastRunAt = at;
+      }
+    }
+    return st;
+  }
+  let memory: DemoAttendanceState | null = null;
+  const state = (): DemoAttendanceState => {
+    const raw = storage()?.getItem(DEMO_ATTENDANCE_KEY);
+    if (raw) return JSON.parse(raw) as DemoAttendanceState;
+    return (memory ??= seed());
+  };
+  const save = (next: DemoAttendanceState) => {
+    memory = next;
+    storage()?.setItem(DEMO_ATTENDANCE_KEY, JSON.stringify(next));
+  };
+  const meetReady = () => typeof window === "undefined" || new URLSearchParams(window.location.search).get("meetApi") !== "missing";
+  const openOcc = (m: meeting.Meeting) => {
+    const today = jstToday();
+    return (
+      meetingValues.occurrenceStarts(m, addDays(today, -1), addDays(today, 1)).find((o) => {
+        const s = Date.parse(o.startsAt);
+        return Date.now() >= s - meetingValues.JOIN_WINDOW_BEFORE_MINUTES * 60_000 && Date.now() <= s + m.durationMinutes * 60_000;
+      }) ?? null
+    );
+  };
+  const norm = (v: string) => v.normalize("NFKC").toLowerCase().replace(/[\s・._\-()（）]/g, "");
+
+  function report(from: string, to: string): meeting.AttendanceReportResponse {
+    const st = state();
+    const tally = new Map<string, { expected: number; present: number; excused: number }>();
+    const list: meeting.AttendanceMeeting[] = meetings()
+      .filter((m) => m.trackAttendance)
+      .map((m) => {
+        const people = expected(m.targetId);
+        const threshold = Math.ceil((m.durationMinutes * 60 * st.minPercent) / 100);
+        const occurrences = started(m, from, to)
+          .reverse()
+          .map((o): meeting.AttendanceOccurrence => {
+            const parts = st.participants
+              .filter((p) => p.meetingId === m.id && p.date === o.date)
+              .map(({ meetingId: _m, date: _d, ...p }) => ({ ...p, userId: p.googleUserId ? st.links[p.googleUserId] ?? null : null }));
+            const matched = new Set(parts.map((p) => p.userId).filter((x): x is string => !!x));
+            const recs = st.records.filter((r) => r.meetingId === m.id && r.date === o.date);
+            const ids = new Set([...recs.map((r) => r.userId), ...matched]);
+            const records: meeting.AttendanceRecord[] = [];
+            for (const userId of ids) {
+              const mine = parts.filter((p) => p.userId === userId);
+              const meet: meeting.MeetPresence | null = mine.length
+                ? {
+                    firstJoin: mine.map((p) => p.firstJoin).sort()[0]!,
+                    lastLeave: mine.some((p) => !p.lastLeave) ? null : mine.map((p) => p.lastLeave!).sort().at(-1)!,
+                    durationSeconds: mine.reduce((a, p) => a + p.durationSeconds, 0),
+                    approx: false,
+                  }
+                : null;
+              const manual = recs.find((r) => r.userId === userId && r.source === "manual");
+              const join = recs.find((r) => r.userId === userId && r.source === "join");
+              const joinedAt = join?.joinedAt ?? null;
+              if (manual) records.push({ userId, status: manual.status, source: "manual", joinedAt, meet, recordedBy: manual.recordedBy, updatedAt: manual.updatedAt });
+              else if (meet) records.push({ userId, status: meet.durationSeconds >= threshold ? "present" : "absent", source: "meet_api", joinedAt, meet, recordedBy: null, updatedAt: null });
+              else if (join) records.push({ userId, status: "present", source: "join", joinedAt, meet: null, recordedBy: null, updatedAt: join.updatedAt });
+            }
+            const candidates = people.filter((p) => !matched.has(p.userId));
+            return {
+              ...o,
+              records,
+              participants: parts.map((p) => ({
+                ...p,
+                suggestions:
+                  !p.userId && p.kind === "signed_in"
+                    ? candidates.filter((c) => norm(c.name) === norm(p.displayName) || norm(p.displayName).includes(norm(c.name.split(/\s+/).at(-1) ?? "~"))).map((c) => ({ userId: c.userId, name: c.name }))
+                    : [],
+              })),
+              ingest: st.ingests[`${m.id}|${o.date}`] ?? null,
+            };
+          });
+        for (const p of people) {
+          const t = tally.get(p.userId) ?? { expected: 0, present: 0, excused: 0 };
+          t.expected += occurrences.length;
+          for (const o of occurrences) {
+            const r = o.records.find((x) => x.userId === p.userId);
+            if (r?.status === "present") t.present++;
+            else if (r?.status === "excused") t.excused++;
+          }
+          tally.set(p.userId, t);
+        }
+        return { id: m.id, title: m.title, targetId: m.targetId, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), durationMinutes: m.durationMinutes, recurrence: m.recurrence, expectedUserIds: people.map((p) => p.userId), occurrences };
+      });
+    const members: meeting.AttendanceMember[] = DEMO_REGULAR_PEOPLE.filter((p) => tally.has(p.userId))
+      .map((p) => {
+        const t = tally.get(p.userId)!;
+        const denom = t.expected - t.excused;
+        return { userId: p.userId, name: p.name, email: p.email, ...t, rate: denom > 0 ? t.present / denom : null };
+      })
+      .sort((a, b) => (a.rate ?? 2) - (b.rate ?? 2) || a.name.localeCompare(b.name, "ja"));
+    return { from, to, settings: { minPercent: st.minPercent }, meetApi: { ready: meetReady(), lastRunAt: st.lastRunAt }, meetings: list, members };
+  }
+
+  function handle(method: string, pathname: string, body: unknown, url?: URL): Response | null {
+    const me = currentAccount().id;
+    const P = "/api/v1/meetings";
+    if (method === "GET" && pathname === `${P}/me/regulars`) {
+      const st = state();
+      const person = DEMO_REGULAR_PEOPLE.find((p) => p.userId === me);
+      const today = jstToday();
+      const items: meeting.MyRegularMeeting[] = person
+        ? meetings()
+            .filter((m) => m.trackAttendance && (m.targetId === meetingValues.ALL_MEMBERS_TARGET_ID || person.roleIds.includes(m.targetId)))
+            .map((m) => {
+              const open = openOcc(m);
+              const next = open ?? meetingValues.occurrenceStarts(m, today, addDays(today, 62)).find((o) => Date.parse(o.startsAt) > Date.now()) ?? null;
+              const attended = !!open && st.records.some((r) => r.meetingId === m.id && r.date === open.date && r.userId === me && r.source === "join");
+              return { id: m.id, title: m.title, targetName: m.targetName, kind: meetingValues.regularKindOf(m.targetId), meetUrl: m.meetUrl, next, durationMinutes: m.durationMinutes, joinOpen: !!open, attended };
+            })
+            .sort((a, b) => Number(b.joinOpen) - Number(a.joinOpen) || (a.next?.startsAt ?? "~").localeCompare(b.next?.startsAt ?? "~"))
+        : [];
+      return json({ items, googleLinked: Object.values(st.links).includes(me) } satisfies meeting.ListMyRegularMeetingsResponse);
+    }
+    const joinM = /^\/api\/v1\/meetings\/([^/]+)\/join$/.exec(pathname);
+    if (method === "POST" && joinM) {
+      const m = meetings().find((x) => x.id === decodeURIComponent(joinM[1]!));
+      if (!m) return problem("NOT_FOUND", "meeting not found", 404);
+      if (!expected(m.targetId).some((p) => p.userId === me)) return problem("FORBIDDEN", "この定例の対象メンバーではありません。", 403);
+      const occ = m.trackAttendance ? openOcc(m) : null;
+      if (occ) {
+        const st = state();
+        if (!st.records.some((r) => r.meetingId === m.id && r.date === occ.date && r.userId === me && r.source === "join")) {
+          const now = new Date().toISOString();
+          st.records.push({ meetingId: m.id, date: occ.date, userId: me, status: "present", source: "join", joinedAt: now, recordedBy: me, updatedAt: now });
+          save(st);
+        }
+      }
+      return json({ meetUrl: m.meetUrl, recordedFor: occ?.date ?? null } satisfies meeting.JoinMeetingResponse);
+    }
+    if (method === "GET" && pathname === `${P}/attendance`) {
+      const to = url?.searchParams.get("to") || jstToday();
+      const from = url?.searchParams.get("from") || addDays(to, -83);
+      return json(report(from, to));
+    }
+    if (method === "POST" && pathname === `${P}/attendance/ingest`) {
+      if (!meetReady()) return json({ occurrences: 0, participants: 0, complete: true, skipped: "scope_missing" } satisfies meeting.IngestAttendanceResponse);
+      const st = state();
+      st.lastRunAt = new Date().toISOString();
+      save(st);
+      return json({ occurrences: 0, participants: 0, complete: true, skipped: null } satisfies meeting.IngestAttendanceResponse);
+    }
+    if (method === "PUT" && pathname === `${P}/attendance/settings`) {
+      const v = Number(((body ?? {}) as Partial<meeting.AttendanceSettings>).minPercent);
+      if (!Number.isInteger(v) || v < 1 || v > 100) return problem("VALIDATION_FAILED", "出席とみなす割合は 1〜100% の整数で指定してください。", 400);
+      const st = state();
+      st.minPercent = v;
+      save(st);
+      return json({ minPercent: v } satisfies meeting.AttendanceSettings);
+    }
+    const linkM = /^\/api\/v1\/meetings\/attendance\/links\/([^/]+)$/.exec(pathname);
+    if (linkM && (method === "PUT" || method === "DELETE")) {
+      const st = state();
+      const gid = decodeURIComponent(linkM[1]!);
+      if (method === "PUT") {
+        const userId = ((body ?? {}) as Partial<meeting.ConfirmParticipantRequest>).userId;
+        if (!userId || !DEMO_REGULAR_PEOPLE.some((p) => p.userId === userId)) return problem("VALIDATION_FAILED", "そのメンバーが見つかりません。", 400);
+        st.links[gid] = userId;
+      } else delete st.links[gid];
+      save(st);
+      return json({ ok: true });
+    }
+    const setM = /^\/api\/v1\/meetings\/([^/]+)\/attendance\/([^/]+)\/([^/]+)$/.exec(pathname);
+    if (method === "PUT" && setM) {
+      const [meetingId, date, userId] = [setM[1]!, setM[2]!, setM[3]!].map(decodeURIComponent) as [string, string, string];
+      const status = ((body ?? {}) as meeting.SetAttendanceRequest).status ?? null;
+      const st = state();
+      st.records = st.records.filter((r) => !(r.meetingId === meetingId && r.date === date && r.userId === userId && r.source === "manual"));
+      if (status === null) {
+        save(st);
+        return json({ record: null } satisfies meeting.SetAttendanceResponse);
+      }
+      const now = new Date().toISOString();
+      st.records.push({ meetingId, date, userId, status, source: "manual", joinedAt: null, recordedBy: me, updatedAt: now });
+      save(st);
+      return json({ record: { userId, status, source: "manual", joinedAt: null, meet: null, recordedBy: me, updatedAt: now } } satisfies meeting.SetAttendanceResponse);
+    }
+    if (method === "POST" && pathname === `${P}/me/google-link/start`) {
+      // No Google in the demo: come straight back to the return page with a fake code.
+      const origin = typeof window === "undefined" ? "https://demo.local" : window.location.origin;
+      return json({ authUrl: `${origin}/driveshare?code=demo&state=${meetingValues.GOOGLE_LINK_STATE_PREFIX}demo${Date.now()}` } satisfies meeting.StartGoogleLinkResponse);
+    }
+    if (method === "POST" && pathname === `${P}/me/google-link/callback`) {
+      const st = state();
+      // The member's personal Google account (seeded as an unmatched participant) becomes theirs.
+      const personal = `g_${me}_personal`;
+      st.links[st.participants.some((p) => p.googleUserId === personal) ? personal : `g_${me}`] = me;
+      save(st);
+      return json({ googleLinked: true });
     }
     return null;
   }
@@ -3187,7 +3927,7 @@ function createDriveShareStore() {
     // info@/admin@ are Cloudflare Email-Routing aliases with NO Google account (mirrors
     // the real bug): they ARE shared, but only via an invite, so their access is pending.
     role_admin: ["info@developershub.jp", "admin@developershub.jp"],
-    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp"],
+    role_maintainer: ["taro@developershub.jp", "araki@developershub.jp", "ikeda@developershub.jp", "ryoma@developershub.jp"],
     // The last address has no Google account AND is invalid: the fan-out applies the
     // others and reports this one as skipped, instead of failing the whole role.
     role_member: ["ichiro@developershub.jp", "jiro@developershub.jp", "ghost-no-account@example.invalid"],
@@ -3195,6 +3935,13 @@ function createDriveShareStore() {
   // Addresses that have no backing Google account → shareable only via an invite
   // (pending). Mirrors real Email-Routing aliases like info@/admin@developershub.jp.
   const NO_GOOGLE_ACCOUNT = new Set(["info@developershub.jp", "admin@developershub.jp"]);
+  // 名簿 Gmail: role sharing goes to it instead of the login address (mirrors the service).
+  const DEMO_GMAIL: Record<string, string> = { "ikeda@developershub.jp": "ikeda.h@gmail.com" };
+  // Login addresses Drive refuses outright (403 cannotInviteNonGoogleUser) while no Gmail is known.
+  const REFUSES_NON_GOOGLE = new Set(["ryoma@developershub.jp"]);
+  const NO_GMAIL_REASON =
+    "Google アカウントの無いアドレスのため共有できません。名簿にこのメンバーの Gmail を登録すると、そのアドレスで共有されます。";
+  const shareEmailOf = (email: string): string => DEMO_GMAIL[email] ?? email;
   interface DemoRoleGrant {
     id: string;
     fileId: string;
@@ -3208,6 +3955,21 @@ function createDriveShareStore() {
     permIds: string[]; // internal: the fanned-out Drive permission ids on the file
   }
   const roleGrants: DemoRoleGrant[] = [];
+  // 「ロールとの差分」 sample: maintainer is 編集 on Hackit 2026 共有, but in Drive someone
+  // lowered araki to 閲覧, ikeda (名簿 Gmail) and ryoma (no Gmail) were never shared, and
+  // staff-a (no role) still has 編集.
+  {
+    const root = byId.get("fld_root")!;
+    root.permissions.push(
+      { id: "perm_role_taro", type: "user", role: "writer", emailAddress: "taro@developershub.jp", displayName: "taro", domain: null },
+      { id: "perm_role_araki", type: "user", role: "reader", emailAddress: "araki@developershub.jp", displayName: "araki", domain: null },
+    );
+    roleGrants.push({
+      id: "rg_seed_root", fileId: "fld_root", roleId: "role_maintainer", roleName: "maintainer", driveRole: "writer",
+      memberCount: 4, appliedCount: 2, grantedBy: "demo@developershub.jp", grantedAt: "2026-08-10T10:00:00Z",
+      permIds: ["perm_role_taro", "perm_role_araki"],
+    });
+  }
   type FanResult = { skipped: { email: string; reason: string }[]; invited: { email: string }[] };
   const grantView = (g: DemoRoleGrant, extra: Partial<FanResult> = {}) => ({
     id: g.id, fileId: g.fileId, roleId: g.roleId, roleName: g.roleName, driveRole: g.driveRole,
@@ -3219,12 +3981,16 @@ function createDriveShareStore() {
   // real service: a malformed email is skipped with a reason; a no-Google-account address
   // is applied but flagged `invited` (pending); the rest apply normally — a partial
   // success, never an all-or-nothing failure.
-  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant): FanResult => {
-    const emails = roleMembers[g.roleId] ?? [];
+  const fanOut = (f: DemoDriveFile, g: DemoRoleGrant, emails: readonly string[] = roleMembers[g.roleId] ?? []): FanResult => {
     const skipped: { email: string; reason: string }[] = [];
     const invited: { email: string }[] = [];
     let applied = 0;
-    for (const email of emails) {
+    for (const member of emails) {
+      const email = shareEmailOf(member);
+      if (REFUSES_NON_GOOGLE.has(email)) {
+        skipped.push({ email, reason: NO_GMAIL_REASON });
+        continue;
+      }
       if (!EMAIL_RE.test(email) || email.endsWith(".invalid")) {
         skipped.push({ email, reason: "このメールアドレスとは共有できませんでした（Googleアカウントが無い、または無効なアドレスです）。" });
         continue;
@@ -3235,7 +4001,7 @@ function createDriveShareStore() {
       applied++;
       if (NO_GOOGLE_ACCOUNT.has(email)) invited.push({ email }); // shared via invite → pending
     }
-    g.appliedCount = applied;
+    g.appliedCount += applied;
     return { skipped, invited };
   };
   const clearFan = (f: DemoDriveFile, g: DemoRoleGrant): void => {
@@ -3250,7 +4016,53 @@ function createDriveShareStore() {
   });
   const permsView = (f: DemoDriveFile) => ({ fileId: f.id, permissions: f.permissions.map((p) => ({ ...p, inherited: p.inherited ?? false })) });
 
+  // Mirrors drive-share-service share-drift.ts: role grants (expanded to members) vs Drive.
+  const RANK: Record<DemoDrivePermission["role"], number> = { reader: 1, commenter: 2, writer: 3, owner: 4 };
+  const driftView = (f: DemoDriveFile) => {
+    const grants = roleGrants.filter((g) => g.fileId === f.id);
+    const expected = new Map<string, { driveRole: DemoRoleGrant["driveRole"]; roleNames: string[] }>();
+    for (const g of grants) {
+      for (const member of roleMembers[g.roleId] ?? []) {
+        const email = shareEmailOf(member);
+        const cur = expected.get(email);
+        if (!cur) expected.set(email, { driveRole: g.driveRole, roleNames: [g.roleName] });
+        else {
+          cur.roleNames.push(g.roleName);
+          if (RANK[g.driveRole] > RANK[cur.driveRole]) cur.driveRole = g.driveRole;
+        }
+      }
+    }
+    const items: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    let matchedCount = 0;
+    for (const p of f.permissions) {
+      if (p.role === "owner") continue;
+      const email = p.type === "user" && p.emailAddress ? p.emailAddress.toLowerCase() : null;
+      const exp = email ? expected.get(email) : undefined;
+      if (email && exp) seen.add(email);
+      if (p.inherited && (!exp || RANK[p.role] >= RANK[exp.driveRole])) {
+        if (exp) matchedCount++;
+        continue;
+      }
+      const grantee = { permissionId: p.id, granteeType: p.type, email: p.emailAddress, displayName: p.displayName, domain: p.domain, actualRole: p.role };
+      if (!exp) items.push({ kind: "unexpected", ...grantee, expectedRole: null, roleNames: [] });
+      else if (RANK[p.role] > RANK[exp.driveRole]) items.push({ kind: "excess_role", ...grantee, expectedRole: exp.driveRole, roleNames: exp.roleNames });
+      else if (RANK[p.role] < RANK[exp.driveRole]) items.push({ kind: "insufficient_role", ...grantee, expectedRole: exp.driveRole, roleNames: exp.roleNames });
+      else matchedCount++;
+    }
+    for (const [email, exp] of expected) {
+      if (seen.has(email)) continue;
+      items.push({ kind: "missing", permissionId: null, granteeType: "user", email, displayName: null, domain: null, actualRole: null, expectedRole: exp.driveRole, roleNames: exp.roleNames });
+    }
+    return { fileId: f.id, grantCount: grants.length, expectedCount: expected.size, matchedCount, items };
+  };
+
   function handle(method: string, pathname: string, url: URL, body: unknown): Response | null {
+    const driftMatch = method === "GET" ? /^\/api\/v1\/driveshare\/files\/([^/]+)\/drift$/.exec(pathname) : null;
+    if (driftMatch) {
+      const f = byId.get(driftMatch[1]!);
+      return f ? json(driftView(f)) : notFound(`${method} ${pathname}`);
+    }
     // ── role-based grants (matched before the generic file routes) ─────────────
     if (method === "GET" && pathname === "/api/v1/driveshare/role-grants") {
       return json({ items: roleGrants.map((g) => grantView(g)) });
@@ -3260,9 +4072,19 @@ function createDriveShareStore() {
       const f = byId.get(reapplyMatch[1]!);
       const g = roleGrants.find((x) => x.fileId === reapplyMatch[1]! && x.roleId === decodeURIComponent(reapplyMatch[2]!));
       if (!f || !g) return notFound(`${method} ${pathname}`);
-      clearFan(f, g);
-      const result = fanOut(f, g);
-      return json(grantView(g, result));
+      // Mirrors the service's per-request budget: two members per call, continued by cursor.
+      const members = roleMembers[g.roleId] ?? [];
+      const from = Number(url.searchParams.get("cursor") ?? 0);
+      if (from === 0) {
+        clearFan(f, g);
+        g.appliedCount = 0;
+      }
+      const result = fanOut(f, g, members.slice(from, from + 2));
+      const next = from + 2;
+      return json({
+        ...grantView(g, result),
+        ...(next < members.length ? { nextCursor: String(next), remaining: members.length - next } : {}),
+      });
     }
     const roleGrantItemMatch = /^\/api\/v1\/driveshare\/files\/([^/]+)\/role-grants\/([^/]+)$/.exec(pathname);
     if (roleGrantItemMatch && method === "DELETE") {
@@ -3627,6 +4449,7 @@ function createMembersStore() {
   members.push(mk("member_hr1", "小林 葵", "メンバー", "added", ["team_dev"], members.length, "aoi@example.com", "情報工学科", "1年"));
   members.push(mk("member_hr2", "佐野 陸", "メンバー", "added", ["team_pr"], members.length, "riku@example.com", "メディア情報学科", "2年"));
   members.push(mk("member_hr3", "高橋 美咲", "メンバー", "added", ["team_venue"], members.length, "misaki@example.com", "建築学科", "1年"));
+  members.push(mk("member_hr4", "野村 蓮", "メンバー", "added", ["team_dev"], members.length, "ren@example.com", "情報工学科", "2年"));
   const applicants: DemoApplicant[] = [
     applicant("app_demo_1", "青木 陽向", "scheduling", 1, { nameKana: "あおき ひなた", email: "hinata@example.com", department: "情報工学科", grade: "1年", desiredTeamId: "team_dev", motivation: "運営ツールの開発に関わりたいです。" }),
     applicant("app_demo_2", "井上 さくら", "scheduling", 2, { nameKana: "いのうえ さくら", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", source: "紹介" }),
@@ -3638,6 +4461,8 @@ function createMembersStore() {
     applicant("app_demo_8", "佐野 陸", "onboarding", 3, { nameKana: "さの りく", email: "riku@example.com", department: "メディア情報学科", grade: "2年", desiredTeamId: "team_pr", memberId: "member_hr2", version: 5, interviewAt: hrAt(12, 18) }),
     applicant("app_demo_9", "高橋 美咲", "onboarded", 6, { nameKana: "たかはし みさき", email: "misaki@example.com", department: "建築学科", grade: "1年", desiredTeamId: "team_venue", memberId: "member_hr3", version: 6, interviewAt: hrAt(20, 18) }),
     applicant("app_demo_10", "千葉 拓海", "withdrawn", 5, { nameKana: "ちば たくみ", department: "電気電子工学科", grade: "1年", source: "紹介" }),
+    // 採用後に辞退へ動かした人 (memberId が残る)。
+    applicant("app_demo_11", "野村 蓮", "withdrawn", 4, { nameKana: "のむら れん", email: "ren@example.com", department: "情報工学科", grade: "2年", desiredTeamId: "team_dev", memberId: "member_hr4", version: 5, interviewAt: hrAt(11, 18) }),
   ];
   const hrEvents: hr.ApplicantEvent[] = [];
   let hrSeq = 0;
@@ -3737,6 +4562,9 @@ function createMembersStore() {
     const action = m[2];
     if (!action && method === "GET") return json(detail(a));
     if (!action && method === "DELETE") {
+      // 本番と同じ: 採用〜オンボーディング完了の人は 409。
+      if (hr.blocksRemoval(a.stage, a.memberId !== null)) return err("HR_APPLICANT_JOINED", 409);
+      hrEvent(a.id, "deleted", a.stage, null, null, nowIso());
       applicants.splice(applicants.indexOf(a), 1);
       return json({ ok: true });
     }
@@ -3786,6 +4614,69 @@ function createMembersStore() {
     return null;
   }
 
+  // 面談結果 (gateway interview-result の demo 版)。応募者ごとに 1 件・2 回目は登録済みを返すだけ。
+  // メールは送らず demoOutbox に積む (ローカル確認用: window.__dubDemoHrMails)。
+  const hrResults = new Map<string, hrResultValues.InterviewResult>();
+  const nowIsoHr = () => new Date().toISOString();
+  function hrRegisterResult(
+    applicantId: string,
+    req: { decision: hrResultValues.InterviewDecision; reason: string; includeReasonInMail: boolean } & hrResultValues.PassPlacement,
+    issue: ((displayName: string) => { identityUserId: string; address: string } | Response) | null,
+  ): Response {
+    const a = applicants.find((x) => x.id === applicantId);
+    if (!a) return json({ error: { code: "HR_APPLICANT_NOT_FOUND", message: "応募者が見つかりません", retryable: false } }, 404);
+    const done = hrResults.get(applicantId);
+    if (done) return json({ result: { ...done }, applicant: { ...a }, alreadyRegistered: true, accountMailSent: false });
+    if (!hrResultValues.RESULT_STAGES.includes(a.stage)) {
+      return json({ error: { code: "HR_RESULT_NOT_ELIGIBLE", message: "面談確定・面談済みの人だけ登録できます", retryable: false } }, 409);
+    }
+    if (!a.email) return json({ error: { code: "HR_RESULT_NO_EMAIL", message: "応募者のメールアドレスが無いため結果を送れません", retryable: false } }, 409);
+    let issued: { identityUserId: string; address: string } | null = null;
+    let memberId: string | null = null;
+    // 合格の所属 (member-service と同じ確認: 組織のチーム・在籍中のメンバーでなければ 400)。省略 = 希望チーム・上長なし。
+    const placeTeams = req.decision === "pass" && req.teamIds !== undefined ? [...new Set(req.teamIds)] : null;
+    const placeLeader = req.decision === "pass" && req.leaderId ? req.leaderId : null;
+    if (placeTeams?.some((t) => !teams.some((x) => x.id === t))) {
+      return json({ error: { code: "VALIDATION_FAILED", message: "存在しないチームが選ばれています", retryable: false, details: [{ field: "teamIds", reason: "unknown_team" }] } }, 400);
+    }
+    if (placeLeader && !members.some((m) => m.id === placeLeader)) {
+      return json({ error: { code: "VALIDATION_FAILED", message: "上長が名簿にいません", retryable: false, details: [{ field: "leaderId", reason: "unknown_member" }] } }, 400);
+    }
+    if (req.decision === "pass") {
+      const made = issue ? issue(a.name) : null;
+      if (made instanceof Response) return made;
+      issued = made;
+      const created = mk(nid("member"), a.name, "メンバー", "added", placeTeams ?? (a.desiredTeamId ? [a.desiredTeamId] : []), members.length, a.email, a.department, a.grade, issued?.identityUserId ?? null, placeLeader);
+      members.push(created);
+      memberId = created.id;
+    }
+    const from = a.stage;
+    a.stage = hrResultValues.DECISION_STAGE[req.decision];
+    if (memberId) a.memberId = memberId;
+    a.version += 1;
+    a.updatedAt = nowIsoHr();
+    hrEvent(a.id, memberId ? "joined" : "stage", from, a.stage, `面談結果: ${hrResultValues.DECISION_LABELS[req.decision]}（${req.reason}）`, nowIsoHr());
+    const origin = typeof window === "undefined" ? "https://demo.local" : window.location.origin;
+    const mail = hrResultValues.renderResultMail({
+      decision: req.decision,
+      name: a.name,
+      reason: req.includeReasonInMail ? req.reason : null,
+      address: issued?.address ?? null,
+      teamNames: memberId ? teams.filter((t) => members.find((m) => m.id === memberId)?.teamIds.includes(t.id)).map((t) => t.name) : null,
+      appUrl: `${origin}/`,
+      participationUrl: `${origin}${hrFormValues.participationPrefillPath(hrFormValues.participationPrefill(a, null))}`,
+      onboardingUrl: `${origin}${hrResultValues.PUBLIC_ONBOARDING_PATH}`,
+    });
+    demoHrOutbox.push({ to: a.email, ...mail });
+    const result: hrResultValues.InterviewResult = {
+      id: nid("hir"), applicantId, decision: req.decision, reason: req.reason, includeReasonInMail: req.includeReasonInMail, status: "done",
+      issuedAddress: issued?.address ?? null, issuedIdentityUserId: issued?.identityUserId ?? null, issuedMemberId: memberId,
+      mailSentAt: nowIsoHr(), createdBy: ME_ID, createdAt: nowIsoHr(), completedAt: nowIsoHr(),
+    };
+    hrResults.set(applicantId, result);
+    return json({ result, applicant: { ...a }, alreadyRegistered: false, accountMailSent: req.decision === "pass" }, 201);
+  }
+
   const overview = () => json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => ({ ...m, teamIds: [...m.teamIds] })) });
 
   const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -3794,6 +4685,9 @@ function createMembersStore() {
     const hrRes = hrHandle(method, pathname, body);
     if (hrRes) return hrRes;
     if (method === "GET" && pathname === "/api/v1/members/overview") return overview();
+    if (method === "GET" && pathname === "/api/v1/members/org-overview") {
+      return json({ teams: teams.map((t) => ({ ...t })), members: members.map((m) => memberValues.toOrgChartMember(m)) });
+    }
     // canonical team list other apps read
     if (method === "GET" && pathname === "/api/v1/members/teams") return json({ teams: teams.map((t) => ({ ...t })) });
     // チーム単位メンション用 (self-scoped): チーム一覧 + ログイン中アカウントの所属。
@@ -3865,6 +4759,13 @@ function createMembersStore() {
       const mem = members.find((x) => x.identityUserId === iid);
       return json({ member: mem ? { ...mem, teamIds: [...mem.teamIds] } : null });
     }
+    // 情報不足の催促。デモでは通知を作らず、応答だけ返す。
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/profile-reminder$/.exec(pathname);
+    if (m && method === "POST") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      return json({ deduplicated: false, missing: memberValues.missingProfileKeys(mem) });
+    }
     // link / unlink to an identity account (#1).
     m = /^\/api\/v1\/members\/people\/([^/]+)\/identity-link$/.exec(pathname);
     if (m && method === "POST") {
@@ -3883,6 +4784,22 @@ function createMembersStore() {
       mem.version += 1;
       mem.updatedAt = isoNow();
       return json({ ...mem, teamIds: [...mem.teamIds] });
+    }
+    m = /^\/api\/v1\/members\/people\/([^/]+)\/org$/.exec(pathname);
+    if (m && method === "PATCH") {
+      const mem = members.find((x) => x.id === decodeURIComponent(m![1]!));
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (typeof body?.version === "number" && body.version !== mem.version) {
+        const err: ErrorResponse = { error: { code: "MEMBER_VERSION_CONFLICT", message: "version conflict", retryable: false } };
+        return json(err, 409);
+      }
+      if (body?.roleTitle !== undefined) mem.roleTitle = body.roleTitle ?? null;
+      if (body?.position !== undefined) mem.position = memberValues.isMemberPosition(body.position) ? body.position : null;
+      if (body?.status !== undefined) mem.status = body.status;
+      if (body?.teamIds !== undefined) mem.teamIds = Array.isArray(body.teamIds) ? [...body.teamIds] : [];
+      if (body?.leaderId !== undefined) mem.leaderId = body.leaderId ?? null;
+      mem.version += 1;
+      return json(memberValues.toOrgChartMember(mem));
     }
     m = /^\/api\/v1\/members\/people\/([^/]+)$/.exec(pathname);
     if (m) {
@@ -4160,12 +5077,29 @@ function createMembersStore() {
     });
   }
 
-  return { handle, findByIdentity, selfEntry };
+  /** 参加届からの発行の対象: 参加届に紐付いた追加済の名簿行で、まだアカウントの無い人だけ。 */
+  function onboardTarget(participationId: string): { participation: any; member: DemoMember } | Response {
+    const p = participations.find((x) => x.id === participationId);
+    if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
+    const mem = p.reviewState === "added" ? members.find((m) => m.id === p.memberId) : undefined;
+    if (!mem) return json({ error: { code: "MEMBER_ONBOARD_NOT_ADDED", message: "参加届がまだ運営メンバーに追加されていません", retryable: false } }, 409);
+    if (mem.identityUserId) return json({ error: { code: "MEMBER_ONBOARD_ALREADY_HAS_ACCOUNT", message: "この人には既にアカウントがあります", retryable: false } }, 409);
+    return { participation: p, member: mem };
+  }
+  function linkOnboarded(mem: DemoMember, identityUserId: string): DemoMember {
+    mem.identityUserId = identityUserId;
+    mem.version += 1;
+    mem.updatedAt = isoNow();
+    return { ...mem, teamIds: [...mem.teamIds] };
+  }
+
+  return { handle, findByIdentity, selfEntry, onboardTarget, linkOnboarded, hrRegisterResult, listTeams: () => teams.map((t) => ({ id: t.id, name: t.name, color: t.color })) };
 }
 
 // ── LP管理 → 流入URL / ログ管理 ────────────────────────────────────────────────
 // Answers the wire contract frozen in features/lp/lpApi.tsx:
-//   GET   /api/v1/lp/stats      ?from&to&includeBots
+//   GET   /api/v1/lp/stats      ?from&to&includeBots&source
+//   GET   /api/v1/lp/site-traffic ?from&to&referrer
 //   GET   /api/v1/lp/visits     ?from&to&source&cursor&limit
 //   GET   /api/v1/lp/links      ?from&to
 //   POST  /api/v1/lp/links      ?from&to   { name, slug }   409 on duplicate slug
@@ -4450,23 +5384,34 @@ function createLpStore() {
         const [pageViews, visits] = DEMO_LP_SITE_DAYS[k] ?? [0, 0];
         byDay.push({ date: k, pageViews, visits });
       }
+      // 流入元の実測は 9/28〜10/10 の合計しか持たないので、山の 10/01 を含む期間だけ出す。
+      const byReferrer = from <= "2026-10-01" && "2026-10-01" <= to ? DEMO_LP_SITE_REFERRERS : [];
+      // 流入元で絞った時: 日別の内訳を持たないので、その流入元の合計を全体の日別の形に按分する
+      // （見た目/挙動の確認用。実 backend は日ごとの流入元データから集計する）。
+      const referrer = url.searchParams.get("referrer");
+      if (referrer) {
+        const hit = byReferrer.find((r) => r.label === referrer);
+        const allPv = byDay.reduce((n, d) => n + d.pageViews, 0);
+        const allVisits = byDay.reduce((n, d) => n + d.visits, 0);
+        for (const d of byDay) {
+          d.pageViews = hit && allPv > 0 ? Math.round((d.pageViews / allPv) * hit.pageViews) : 0;
+          d.visits = hit && allVisits > 0 ? Math.round((d.visits / allVisits) * hit.visits) : 0;
+        }
+      }
       const pageViews = byDay.reduce((n, d) => n + d.pageViews, 0);
       const visits = byDay.reduce((n, d) => n + d.visits, 0);
-      return json({
-        configured: true,
-        range: { from, to },
-        totals: { pageViews, visits },
-        byDay,
-        // 流入元の実測は 9/28〜10/10 の合計しか持たないので、山の 10/01 を含む期間だけ出す。
-        byReferrer: from <= "2026-10-01" && "2026-10-01" <= to ? DEMO_LP_SITE_REFERRERS : [],
-      });
+      return json({ configured: true, range: { from, to }, totals: { pageViews, visits }, byDay, byReferrer });
     }
 
     if (pathname === "/api/v1/lp/stats") {
       const includeBots = url.searchParams.get("includeBots") === "true";
-      const windowed = visits.filter((v) => inRange(v, from, to));
+      const source = url.searchParams.get("source");
+      const inPeriod = visits.filter((v) => inRange(v, from, to));
+      // 流入元の絞り込みは bySource 以外に効かせる（bySource は絞り込みの候補一覧でもある）。
+      const windowed = source ? inPeriod.filter((v) => v.source === source) : inPeriod;
       const bots = windowed.filter((v) => v.device === "bot");
       const rows = includeBots ? windowed : windowed.filter((v) => v.device !== "bot");
+      const sourceRows = includeBots ? inPeriod : inPeriod.filter((v) => v.device !== "bot");
 
       // 日別は「0 件の日」も行として出す（抜け落ちると折れ線/表が嘘をつく）。
       const byDayMap = new Map<string, number>();
@@ -4489,7 +5434,7 @@ function createLpStore() {
           uniques: new Set(rows.map((v) => v.visitorId)).size,
           botExcluded: includeBots ? 0 : bots.length,
         },
-        bySource: bucket(rows, (v) => v.source, sourceLabelOf),
+        bySource: bucket(sourceRows, (v) => v.source, sourceLabelOf),
         byDay,
         byDevice: bucket(rows, (v) => v.device, deviceLabelOf),
       });
@@ -4537,7 +5482,7 @@ function createLpStore() {
 // Demo starts PUBLISHED but with paymentReady=false so the 「決済 未設定」 state is visible.
 // Event = 2027-09-13(月) / 14(火): 一般・学生は Day 別の券種。sold/pending are TICKET counts.
 // Orders are fixed (not random) so the stats a reviewer sees are the same every load.
-type DemoTicketField = { id: string; label: string; type: "text" | "textarea" | "select" | "checkbox"; required: boolean; options: string[] };
+type DemoTicketField = { id: string; label: string; description?: string; type: lpValues.LpFieldType; required: boolean; options: string[] };
 type DemoTicketType = {
   id: string;
   name: string;
@@ -4617,18 +5562,20 @@ function validDemoFields(raw: unknown, reserved: readonly string[]): DemoTicketF
         typeof f.label === "string" &&
         f.label.trim().length >= 1 &&
         f.label.length <= 60 &&
-        ["text", "textarea", "select", "checkbox"].includes(f.type) &&
+        lpValues.isLpFieldType(f.type) &&
+        (f.description === undefined || (typeof f.description === "string" && f.description.length <= lpValues.LP_FIELD_DESCRIPTION_MAX)) &&
         typeof f.required === "boolean" &&
         Array.isArray(f.options) &&
-        (f.type !== "select" || (f.options.length >= 1 && f.options.length <= 20)),
+        (!lpValues.isLpChoiceField(f.type) || (f.options.length >= 1 && f.options.length <= 20)),
     );
   if (!ok) return null;
   return (raw as DemoTicketField[]).map((f) => ({
     id: f.id,
     label: f.label.trim(),
+    ...(f.description ? { description: f.description } : {}),
     type: f.type,
     required: f.required,
-    options: f.type === "select" ? [...f.options] : [],
+    options: lpValues.isLpChoiceField(f.type) ? [...f.options] : [],
   }));
 }
 
@@ -4853,6 +5800,12 @@ function createLpTicketsStore() {
       return problem("LP_TICKET_PREVIEW_UNAVAILABLE", "Stripe がテストモードではないため、プレビューから購入テストはできません", 409);
     }
 
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/orders/export") {
+      const head = "注文番号,氏名,メールアドレス,枚数,金額\n";
+      const lines = orders.map((o) => [o.id, o.buyerName, o.buyerEmail, o.quantity, o.amountJpy].join(",")).join("\n");
+      return new Response(`\ufeff${head}${lines}\n`, { status: 200, headers: { "content-type": "text/csv; charset=utf-8" } });
+    }
+
     if (method === "GET" && pathname === "/api/v1/lp/tickets/orders") {
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 25)));
       const cursor = url.searchParams.get("cursor");
@@ -5041,9 +5994,11 @@ function createLpProposalsStore() {
     enabled: false,
     publicUrl: `${((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL).replace(/\/+$/, "")}/proposals`,
     fields: [
-      { id: "format", label: "発表形式", type: "select", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "format", label: "発表形式", type: "radio", required: true, options: ["セッション（30分）", "LT（5分）"] },
+      { id: "topics", label: "テーマ", description: "当てはまるものをすべて選んでください", type: "multiselect", required: false, options: ["Web", "モバイル", "インフラ", "AI"] },
       { id: "affiliation", label: "所属", type: "text", required: false, options: [] },
       { id: "bio", label: "自己紹介", type: "textarea", required: false, options: [] },
+      { id: "unavailable", label: "登壇できない日", type: "date", required: false, options: [] },
     ] as DemoTicketField[],
     updatedAt: null as string | null,
     updatedBy: null as string | null,
@@ -5135,6 +6090,327 @@ function createLpProposalsStore() {
   return { handle, settings };
 }
 
+// ── 目標管理 (member-service /members/goals の demo) ─────────────────────────────
+// 保存はメモリ上。実績は本物と同じ指標の見本値を月ごとに持ち、計算は @dub/types goal を使う。
+function createGoalsStore(
+  me: () => { id: string; displayName: string },
+  teams: () => goalValues.GoalTeam[],
+  sponsorActuals: (month: string) => Partial<Record<goalValues.GoalMetric, number>>,
+) {
+  type Row = Omit<goalValues.TeamGoal, "kpis" | "percent"> & { kpis: goalValues.Kpi[] };
+  const month = goalValues.currentMonth();
+  const prev = goalValues.shiftMonth(month, -1);
+  const kpi = (name: string, metric: goalValues.GoalMetric, target: number, manualActual = 0): goalValues.Kpi => ({ name, metric, target, manualActual });
+  const row = (teamId: string, m: string, title: string, kpis: goalValues.Kpi[]): Row => ({
+    teamId, month: m, title, kpis, version: 1, updatedBy: "usr_lead" as Row["updatedBy"], updatedByName: "統括 山本", updatedAt: `${m}-01T00:00:00.000Z`,
+  });
+  const rows: Row[] = [
+    row("team_dev", month, "参加者向け機能を期日どおりに出す", [kpi("期日までに終えるタスク", "tasks_done", 18), kpi("タスク完了率", "tasks_done_rate", 90)]),
+    row("team_sponsor", month, "協賛の打診を増やす", [kpi("新規接触数", "sponsor_contacted", 15), kpi("提案数", "sponsor_proposed", 4), kpi("内諾・契約数", "sponsor_agreed", 2), kpi("協賛額", "sponsor_amount", 1_000_000), kpi("お礼状の送付", "manual", 10, 4)]),
+    row("team_pr", month, "LP の認知を広げる", [kpi("LP の訪問者数", "lp_visitors", 1000), kpi("SNS 投稿数", "manual", 12, 13)]),
+    row("team_hq", month, "運営メンバーを増やす", [kpi("応募者数", "hr_applicants", 8), kpi("採用数", "hr_hired", 3)]),
+    row("team_dev", prev, "参加者向け機能の土台を作る", [kpi("期日までに終えるタスク", "tasks_done", 12)]),
+    row("team_sponsor", prev, "協賛の打診を始める", [kpi("新規接触数", "sponsor_contacted", 2), kpi("提案数", "sponsor_proposed", 1), kpi("内諾・契約数", "sponsor_agreed", 1)]),
+  ];
+  const actuals = (teamId: string, m: string): Partial<Record<goalValues.GoalMetric, number | null>> => {
+    const scale = m === month ? 1 : m === prev ? 1.3 : 0;
+    const team: Record<string, [number, number]> = { team_dev: [11, 15], team_sponsor: [2, 3], team_pr: [1, 4], team_hq: [3, 4] };
+    const [done, total] = team[teamId] ?? [0, 0];
+    return {
+      tasks_done: Math.round(done * scale),
+      tasks_done_rate: total === 0 || scale === 0 ? null : Math.round((Math.round(done * scale) / total) * 100),
+      hr_applicants: Math.round(5 * scale), hr_interviews: Math.round(4 * scale), hr_hired: Math.round(scale),
+      sponsor_cards: Math.round(13 * scale), participations: Math.round(6 * scale), lp_visitors: Math.round(640 * scale),
+      ...sponsorActuals(m),
+    };
+  };
+  const toGoal = ({ kpis, ...r }: Row): goalValues.TeamGoal => {
+    const a = actuals(r.teamId, r.month);
+    const progress = kpis.map((k): goalValues.KpiProgress => {
+      const actual = k.metric === "manual" ? k.manualActual : (a[k.metric] ?? null);
+      return { ...k, status: actual === null ? "empty" : "ok", actual, percent: goalValues.kpiPercent(actual, k.target) };
+    });
+    return { ...r, kpis: progress, percent: goalValues.goalPercent(progress) };
+  };
+  function handle(method: string, pathname: string, url: URL, body: any): Response | null {
+    if (pathname === "/api/v1/members/goals" && method === "GET") {
+      const m = url.searchParams.get("month") ?? month;
+      const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal) };
+      return json(res);
+    }
+    const hit = /^\/api\/v1\/members\/goals\/([^/]+)\/(\d{4}-\d{2})$/.exec(pathname);
+    if (!hit) return null;
+    const [, teamId, m] = hit as unknown as [string, string, string];
+    const i = rows.findIndex((r) => r.teamId === teamId && r.month === m);
+    if (method === "DELETE") {
+      if (i < 0) return json({ error: { code: "GOAL_NOT_FOUND", message: "Goal not found" } }, 404);
+      rows.splice(i, 1);
+      return new Response(null, { status: 204 });
+    }
+    if (method !== "PUT") return null;
+    if ((rows[i]?.version ?? 0) !== body.expectedVersion) return json({ error: { code: "GOAL_VERSION_CONFLICT", message: "conflict" } }, 409);
+    const u = me();
+    const next: Row = { teamId, month: m, title: body.title, kpis: body.kpis, version: body.expectedVersion + 1, updatedBy: u.id as Row["updatedBy"], updatedByName: u.displayName, updatedAt: new Date().toISOString() };
+    if (i < 0) rows.push(next); else rows[i] = next;
+    return json(toGoal(next));
+  }
+  return { handle, sponsorGoals: () => goalValues.sponsorGoalsOf(rows) };
+}
+
+// ── スポンサー (member-service /members/sponsor/* の demo) ──────────────────────
+// 名刺の CRUD + 写真 (生バイト)。seed の写真は SVG で描いた名刺風の画像。撮影/選択した写真は
+// メモリにそのまま持ち、一覧・詳細に出る (リロードで消える)。
+type DemoCardImage = { bytes: ArrayBuffer; type: string };
+
+function demoCardSvg(company: string, person: string, title: string, accent: string): string {
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="910" height="550" viewBox="0 0 910 550">` +
+    `<rect width="910" height="550" fill="#fbfaf7"/><rect width="910" height="18" fill="${accent}"/>` +
+    `<text x="60" y="120" font-family="sans-serif" font-size="34" fill="#333">${esc(company)}</text>` +
+    `<text x="60" y="210" font-family="sans-serif" font-size="26" fill="#666">${esc(title)}</text>` +
+    `<text x="60" y="290" font-family="sans-serif" font-size="60" font-weight="bold" fill="#111">${esc(person)}</text>` +
+    `<line x1="60" y1="360" x2="850" y2="360" stroke="#ddd" stroke-width="2"/>` +
+    `<text x="60" y="430" font-family="sans-serif" font-size="22" fill="#777">TEL 076-000-0000  /  info@example.co.jp</text>` +
+    `<circle cx="790" cy="150" r="56" fill="${accent}" opacity="0.85"/></svg>`;
+}
+
+function createSponsorStore(me: () => { id: string; displayName: string }, sponsorGoals: () => sponsorValues.MonthlyGoal[]) {
+  // 常に過去 (今日の分も 30 分前) にして、新しく登録した名刺が先頭に来るようにする。
+  const at = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000 - 30 * 60_000).toISOString();
+  const enc = new TextEncoder();
+  const images = new Map<string, DemoCardImage>();
+  const svg = (id: string, markup: string) => images.set(id, { bytes: enc.encode(markup).slice().buffer as ArrayBuffer, type: "image/svg+xml" });
+  type Card = sponsorValues.BusinessCard;
+  const card = (id: string, daysAgo: number, f: Partial<Card>): Card => ({
+    id, companyName: null, personName: null, department: null, title: null, email: null, phone: null, note: null,
+    hasImage: false, version: 1, createdBy: "usr_sponsor" as Card["createdBy"], createdByName: "鈴木 一郎",
+    createdAt: at(daysAgo), updatedAt: at(daysAgo), ...f,
+  });
+  const cards: Card[] = [
+    card("card_demo_1", 1, {
+      companyName: "株式会社北陸テック", personName: "山田 太郎", department: "事業開発部", title: "部長",
+      email: "yamada@hokuriku-tech.example.jp", phone: "076-123-4567", note: "北陸ITカンファレンスの懇親会で名刺交換。協賛に前向き、来週資料を送る。", hasImage: true,
+    }),
+    card("card_demo_2", 3, {
+      companyName: "金沢クラウド合同会社", personName: "中村 花", department: "マーケティング部", title: "マネージャー",
+      email: "nakamura@kanazawa-cloud.example.jp", phone: "090-1234-5678", note: "ブース出展に興味あり。予算は春に確定。", hasImage: true,
+      createdBy: ME_ID as Card["createdBy"], createdByName: "デモ 管理者",
+    }),
+    // 写真なし (手入力だけで登録した名刺)。
+    card("card_demo_3", 6, {
+      companyName: "一般社団法人 加賀デジタル協会", personName: "小松 健", title: "理事", email: "komatsu@kaga-digital.example.jp",
+      note: "後援の相談先として紹介してもらった。",
+    }),
+    // 同じ企業の別の担当者 (表記ゆれ「（株）」・別メンバーが登録) → 企業タブで 1 社にまとまる。
+    card("card_demo_5", 9, {
+      companyName: "（株）北陸テック", personName: "川口 恵", department: "人事部", title: "採用担当",
+      email: "kawaguchi@hokuriku-tech.example.jp", note: "学生向けハッカソンの後援に関心あり。", createdByName: "佐藤 三郎",
+    }),
+    // メール連携の見本: 名刺のアドレスとのメールは、同じ会社の営業先 (輪島メディア / 能美ロボティクス) として数える。
+    card("card_demo_6", 2, {
+      companyName: "輪島メディア株式会社", personName: "田中 美咲", department: "広報部", title: "課長", email: "tanaka@wajima-media.example.jp",
+      note: "Hackit の会場で名刺交換。協賛の案内を送る。",
+    }),
+    card("card_demo_7", 8, {
+      companyName: "能美ロボティクス（株）", personName: "加藤 誠", department: "技術開発部", title: "部長", email: "kato@nomi-robotics.example.jp",
+    }),
+    // テキスト未入力 (写真だけ撮って後で入力する想定)。
+    card("card_demo_4", 0, { hasImage: true, createdBy: ME_ID as Card["createdBy"], createdByName: "デモ 管理者" }),
+  ];
+  svg("card_demo_1", demoCardSvg("株式会社北陸テック", "山田 太郎", "事業開発部 部長", "#2f6fde"));
+  svg("card_demo_2", demoCardSvg("金沢クラウド合同会社", "中村 花", "マーケティング部 マネージャー", "#1f9d6b"));
+  svg("card_demo_4", demoCardSvg("能登ソフトウェア株式会社", "石川 翔", "代表取締役", "#d9822b"));
+
+  let seq = 0;
+  const FIELDS = ["companyName", "personName", "department", "title", "email", "phone", "note"] as const;
+  const pick = (body: any): Partial<Card> =>
+    Object.fromEntries(FIELDS.filter((k) => body && k in body).map((k) => [k, body[k] == null || String(body[k]).trim() === "" ? null : String(body[k]).trim()]));
+  const err = (code: string, status: number) => json({ error: { code, message: code, retryable: false } }, status);
+  // Blob.arrayBuffer が無い環境 (jsdom) は FileReader で読む。
+  const readBytes = async (raw: unknown): Promise<ArrayBuffer | null> => {
+    if (typeof Blob === "undefined" || !(raw instanceof Blob)) return null;
+    if (typeof raw.arrayBuffer === "function") return raw.arrayBuffer();
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as ArrayBuffer);
+      r.onerror = () => reject(r.error);
+      r.readAsArrayBuffer(raw);
+    });
+  };
+
+  // 営業進捗。企業はすべて架空。card_demo_1 / 5 と同じ会社名の行は詳細に名刺が出る。
+  type Lead = sponsorValues.SponsorLead;
+  const lead = (id: string, daysAgo: number, f: Partial<Lead> & Pick<Lead, "companyName">): Lead => ({
+    id, industry: "IT・SaaS", owner: null, contactName: null, contactRole: null, contactEmail: null, source: null, contactType: null,
+    evidence: null, priority: null, plan: null, status: "未接触", firstContactOn: null, lastContactOn: null, proposedOn: null, agreedOn: null, nextAction: null, nextActionOn: null,
+    expectedAmount: null, confidence: null, budgetPeriod: null, decisionPeriod: null, note: null,
+    version: 1, createdBy: "usr_sponsor" as Lead["createdBy"], createdByName: "鈴木 一郎", createdAt: at(daysAgo), updatedAt: at(daysAgo), ...f,
+  });
+  const dayOn = (offset: number): string => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+  const leads: Lead[] = [
+    lead("lead_demo_1", 1, {
+      companyName: "株式会社北陸テック", owner: "鈴木", contactName: "山田 太郎", contactRole: "事業開発部 部長", contactEmail: "yamada@hokuriku-tech.example.jp",
+      source: "北陸ITカンファレンス", contactType: "イベントで面識あり", priority: "S", plan: "Gold", status: "条件調整", firstContactOn: dayOn(-40), lastContactOn: dayOn(-3), proposedOn: dayOn(-3),
+      nextAction: "協賛内容の最終確認", nextActionOn: dayOn(4), expectedAmount: 300000, confidence: "高", budgetPeriod: "2026年度下期", decisionPeriod: "12月", note: "ロゴ掲載に加えて登壇枠を希望。",
+    }),
+    lead("lead_demo_2", 2, {
+      companyName: "金沢クラウド合同会社", owner: "前田", contactName: "中村 花", source: "紹介（OB）", contactType: "過去に協賛あり", priority: "A", plan: "Silver",
+      status: "内諾", firstContactOn: dayOn(-60), lastContactOn: dayOn(-7), proposedOn: dayOn(-30), agreedOn: dayOn(-1), nextAction: "契約書を送付", nextActionOn: dayOn(-2), expectedAmount: 100000, confidence: "高",
+    }),
+    lead("lead_demo_3", 3, {
+      companyName: "能登ソフトウェア株式会社", owner: "鈴木", source: "問い合わせフォーム", contactType: "問い合わせのみ", priority: "A", plan: "未定",
+      status: "社内検討", firstContactOn: dayOn(-20), lastContactOn: dayOn(-10), proposedOn: dayOn(-10), nextAction: "検討状況を確認", nextActionOn: dayOn(1),
+    }),
+    lead("lead_demo_4", 5, {
+      companyName: "加賀データサービス株式会社", owner: "森", contactEmail: "sato@kaga-data.example.jp", source: "インターン", contactType: "インターン先", priority: "B", status: "提案予定",
+      firstContactOn: dayOn(-14), lastContactOn: dayOn(-5), nextAction: "協賛資料を作成", nextActionOn: dayOn(6),
+    }),
+    lead("lead_demo_5", 6, {
+      companyName: "白山モビリティ株式会社", industry: "製造", owner: "前田", source: "知人の紹介", contactType: "担当者を確認中", priority: "B", status: "返信あり",
+      firstContactOn: dayOn(-9), lastContactOn: dayOn(-4), nextAction: "打ち合わせ日程の調整",
+    }),
+    lead("lead_demo_6", 7, { companyName: "七尾ネットワークス株式会社", industry: "通信", owner: "森", source: "Hackit", priority: "B", status: "初回連絡", firstContactOn: dayOn(-6) }),
+    lead("lead_demo_7", 8, { companyName: "小松リサーチ株式会社", industry: "コンサル", source: "Hackit", status: "初回連絡", firstContactOn: dayOn(-5) }),
+    // メール連携の見本: 未接触・担当者メールは空。名刺 (card_demo_6) のアドレス宛てに送ると 初回連絡 + 日付が入り、
+    // 同じドメインでも名刺に無いアドレス (info@…) 宛てでは何も変わらない。
+    lead("lead_demo_8", 9, { companyName: "輪島メディア株式会社", industry: "広告・メディア", owner: "松島", source: "知人の紹介", status: "未接触" }),
+    lead("lead_demo_9", 10, { companyName: "珠洲エナジー株式会社", industry: "インフラ", source: "紹介候補", status: "未接触" }),
+    lead("lead_demo_10", 12, {
+      companyName: "松任システムズ株式会社", owner: "鈴木", source: "インターン", contactType: "インターン先", plan: "その他", status: "見送り",
+      firstContactOn: dayOn(-50), lastContactOn: dayOn(-30), expectedAmount: 0, note: "今年度の予算が確保できず見送り。",
+    }),
+    // 返信まで進んだのに初回連絡日が空 (取り込んだ行) → 「メールから日付を補完」で過去の送受信から埋まる。
+    lead("lead_demo_11", 4, {
+      companyName: "能美ロボティクス株式会社", industry: "製造", owner: "鈴木", contactName: "加藤 誠", source: "Hackit", status: "返信あり",
+    }),
+  ];
+  const mailDemo = createSponsorMailDemo(leads, cards);
+  // 目標管理の実績。スポンサーの目標タブと同じ数字になるよう、同じ見本の企業から数える。
+  const actuals = (month: string): Partial<Record<goalValues.GoalMetric, number>> => {
+    const inMonth = (on: string | null) => on?.startsWith(`${month}-`) ?? false;
+    const agreed = leads.filter((l) => inMonth(l.agreedOn) && l.status !== "見送り");
+    return {
+      sponsor_contacted: leads.filter((l) => inMonth(l.firstContactOn)).length,
+      sponsor_proposed: leads.filter((l) => inMonth(l.proposedOn)).length,
+      sponsor_agreed: agreed.length,
+      sponsor_amount: agreed.reduce((sum, l) => sum + (l.expectedAmount ?? 0), 0),
+    };
+  };
+  let leadSeq = 0;
+  const LEAD_FIELDS = [
+    "companyName", "industry", "owner", "contactName", "contactRole", "contactEmail", "source", "contactType", "evidence", "priority", "plan", "status",
+    "firstContactOn", "lastContactOn", "proposedOn", "agreedOn", "nextAction", "nextActionOn", "expectedAmount", "confidence", "budgetPeriod", "decisionPeriod", "note",
+  ] as const;
+  const pickLead = (b: any): Partial<Lead> => Object.fromEntries(LEAD_FIELDS.filter((k) => b && k in b).map((k) => [k, b[k] === "" ? null : b[k]]));
+  const addLead = (b: any, at: string): Lead => {
+    const u = me();
+    const l: Lead = { ...lead(`lead_demo_new_${++leadSeq}`, 0, { companyName: "" }), ...pickLead(b), createdBy: u.id as Lead["createdBy"], createdByName: u.displayName, createdAt: at, updatedAt: at };
+    leads.push(l);
+    return l;
+  };
+
+  function handleLeads(method: string, pathname: string, body: any, now: string): Response | null {
+    const base = "/api/v1/members/sponsor/leads";
+    if (pathname === base) {
+      if (method === "GET") return json({ leads: [...leads].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((l) => ({ ...l })) });
+      if (method === "POST") {
+        const l = addLead(body, now);
+        Object.assign(l, sponsorValues.applyLeadMilestones("未接触", l, [], sponsorValues.jstDate(now)));
+        return json({ ...l }, 201);
+      }
+      return null;
+    }
+    if (pathname === `${base}/import` && method === "POST") {
+      const seen = new Set(leads.map((l) => sponsorValues.companyKey(l.companyName)));
+      const created: Lead[] = [];
+      for (const row of body?.leads ?? []) {
+        const key = sponsorValues.companyKey(row.companyName);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        created.push({ ...addLead(row, now) });
+      }
+      return json({ leads: created, skipped: (body?.leads?.length ?? 0) - created.length }, 201);
+    }
+    const l = leads.find((x) => x.id === decodeURIComponent(pathname.slice(base.length + 1)));
+    if (!l) return err("SPONSOR_LEAD_NOT_FOUND", 404);
+    if (method === "GET") return json({ ...l });
+    if (method === "PATCH") {
+      if (body?.expectedVersion !== l.version) return err("SPONSOR_VERSION_CONFLICT", 409);
+      const patch = pickLead(body);
+      const prevStatus = l.status;
+      Object.assign(l, sponsorValues.applyLeadMilestones(prevStatus, { ...l, ...patch }, Object.keys(patch), sponsorValues.jstDate(now)));
+      l.version += 1;
+      l.updatedAt = now;
+      return json({ ...l });
+    }
+    if (method === "DELETE") {
+      leads.splice(leads.indexOf(l), 1);
+      return json(null, 204);
+    }
+    return null;
+  }
+
+  async function handle(method: string, pathname: string, body: any, raw: unknown, headers: Headers): Promise<Response | null> {
+    if (!pathname.startsWith("/api/v1/members/sponsor/")) return null;
+    const now = new Date().toISOString();
+    const mailHit = mailDemo.handle(method, pathname, body);
+    if (mailHit) return mailHit;
+    if (pathname.startsWith("/api/v1/members/sponsor/leads")) return handleLeads(method, pathname, body, now);
+    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: sponsorGoals() });
+    if (pathname === "/api/v1/members/sponsor/cards") {
+      if (method === "GET") return json({ cards: [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => ({ ...c })) });
+      if (method === "POST") {
+        const u = me();
+        const c = card(`card_demo_new_${++seq}`, 0, { ...pick(body), createdBy: u.id as Card["createdBy"], createdByName: u.displayName });
+        c.createdAt = now;
+        c.updatedAt = now;
+        cards.push(c);
+        return json({ ...c }, 201);
+      }
+      return null;
+    }
+    const m = /^\/api\/v1\/members\/sponsor\/cards\/([^/]+)(\/image)?$/.exec(pathname);
+    if (!m) return null;
+    const c = cards.find((x) => x.id === decodeURIComponent(m[1]!));
+    if (!c) return err("SPONSOR_CARD_NOT_FOUND", 404);
+    if (m[2]) {
+      if (method === "GET") {
+        const img = images.get(c.id);
+        return img ? new Response(img.bytes, { status: 200, headers: { "content-type": img.type } }) : err("SPONSOR_IMAGE_NOT_FOUND", 404);
+      }
+      if (method === "PUT") {
+        const type = (headers.get("content-type") ?? "").split(";")[0]!.trim();
+        if (!sponsorValues.isCardImageType(type)) return err("VALIDATION_FAILED", 400);
+        const bytes = await readBytes(raw);
+        if (!bytes || bytes.byteLength === 0) return err("VALIDATION_FAILED", 400);
+        if (bytes.byteLength > sponsorValues.CARD_IMAGE_MAX_BYTES) return err("PAYLOAD_TOO_LARGE", 413);
+        images.set(c.id, { bytes, type });
+        c.hasImage = true;
+        c.version += 1;
+        c.updatedAt = now;
+        return json({ ...c });
+      }
+      return null;
+    }
+    if (method === "GET") return json({ ...c });
+    if (method === "PATCH") {
+      if (body?.expectedVersion !== c.version) return err("SPONSOR_VERSION_CONFLICT", 409);
+      Object.assign(c, pick(body));
+      c.version += 1;
+      c.updatedAt = now;
+      return json({ ...c });
+    }
+    if (method === "DELETE") {
+      cards.splice(cards.indexOf(c), 1);
+      images.delete(c.id);
+      return json(null, 204);
+    }
+    return null;
+  }
+
+  return { handle, actuals, recordMail: mailDemo.recordMail };
+}
+
 /** A `fetch` that serves the demo feature surface, delegating boot + unknown
  *  routes to the offline boot mock. Feed to createApiClient({ fetchImpl }). */
 export function createDemoFetch(): typeof fetch {
@@ -5181,6 +6457,34 @@ export function createDemoFetch(): typeof fetch {
   const meetingsStore = createMeetingsDemoStore();
   // Mutable 運営メンバー store (teams + members CRUD persists for the session).
   const membersStore = createMembersStore();
+  // 人事 > 面談申し込みフォーム (回答は上の人事 demo の POST /applicants を通して応募者になる)。
+  const hrInterviewFormStore = createHrInterviewFormDemoStore({
+    createApplicant: async (body) =>
+      (await membersStore.handle("POST", "/api/v1/members/hr/applicants", new URL("https://demo.local"), body)!.json()) as hr.ApplicantDetail,
+    listApplicants: async () =>
+      (await membersStore.handle("GET", "/api/v1/members/hr/applicants", new URL("https://demo.local"), undefined)!.json()) as hr.ListApplicantsResponse,
+    addNote: async (id, text) => {
+      membersStore.handle("POST", `/api/v1/members/hr/applicants/${id}/notes`, new URL("https://demo.local"), { body: text });
+    },
+  });
+  // 人事 > 面談 (応募者は上の人事 demo を読み、予約で面談確定へ動かす)。
+  const hrApplicants = async () =>
+    (await membersStore.handle("GET", "/api/v1/members/hr/applicants", new URL("https://demo.local"), undefined)!.json()) as hr.ListApplicantsResponse;
+  const moveApplicant = async (id: string, stage: hr.ApplicantStage, interviewAt: string | null) => {
+    const a = (await hrApplicants()).applicants.find((x) => x.id === id);
+    if (!a) return;
+    const base = `/api/v1/members/hr/applicants/${id}`;
+    membersStore.handle("PATCH", base, new URL("https://demo.local"), { interviewAt, expectedVersion: a.version });
+    membersStore.handle("POST", `${base}/stage`, new URL("https://demo.local"), { stage, expectedVersion: a.version + 1 });
+  };
+  const hrInterviewsStore = createHrInterviewsDemoStore({
+    listApplicants: async () => {
+      await hrInterviewFormStore.handle("GET", "/api/v1/members/hr/interview-form", new URL("https://demo.local"), undefined);
+      return hrApplicants();
+    },
+    confirmInterview: (id, at) => moveApplicant(id, "interview_set", at),
+    cancelInterview: (id) => moveApplicant(id, "scheduling", null),
+  });
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
   const chatStore = createChatStore({ addUsers: roster.addUsers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
@@ -5189,6 +6493,9 @@ export function createDemoFetch(): typeof fetch {
   const lpTicketsStore = createLpTicketsStore();
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
+  // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
+  const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.actuals(m));
+  const sponsorStore = createSponsorStore(() => currentMe().user, goalsStore.sponsorGoals);
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
   const lpSiteConfigStore = createLpSiteConfigStore({
     publish: lpStore.publish,
@@ -5207,6 +6514,45 @@ export function createDemoFetch(): typeof fetch {
         parsedBody = JSON.parse(init.body);
       } catch {
         parsedBody = undefined;
+      }
+    }
+    // 代理表示: the shared deny list, refused exactly as the gateway does.
+    {
+      const imp = readImpersonation();
+      const blocked = imp ? authValues.impersonationBlockReason(method, url.pathname) : null;
+      if (blocked) return problem("IMPERSONATION_ACTION_BLOCKED", authValues.IMPERSONATION_BLOCKED_MESSAGE, 403, { reason: blocked });
+      if (method === "POST" && url.pathname === "/api/v1/auth/impersonation/stop") {
+        if (!imp) return problem("AUTH_NOT_IMPERSONATING", "This session is not an impersonation", 409);
+        writeImpersonation(null);
+        const me = currentMe();
+        return json({ session: { userId: me.user.id, client: "web", sessionExpiresAt: me.sessionExpiresAt } });
+      }
+      const start = /^\/api\/v1\/admin\/users\/([^/]+)\/impersonation$/.exec(url.pathname);
+      if (start && method === "POST") {
+        const actor = signedInAccount();
+        if (!actor.permissions.includes(authValues.IMPERSONATE_PERMISSION)) return problem("FORBIDDEN", "missing identity:impersonate", 403);
+        const uid = decodeURIComponent(start[1]!);
+        const detailRes = roster.handle("GET", `/api/v1/identity/users/${encodeURIComponent(uid)}`, url, undefined);
+        if (!detailRes || !detailRes.ok) return problem("NOT_FOUND", "user not found", 404);
+        const target = (await detailRes.json()) as identity.IdentityUserDetail;
+        const refusal = authValues.impersonationRefusal({
+          actorId: actor.id,
+          actorImpersonating: imp !== null,
+          target: { id: target.id, status: target.status, roleIds: target.roleIds, holdsImpersonate: target.permissions.includes(authValues.IMPERSONATE_PERMISSION) },
+        });
+        if (refusal) return problem("AUTH_IMPERSONATION_NOT_ALLOWED", "This member cannot be impersonated", 403, { reason: refusal });
+        const startedAt = Date.now();
+        const next: DemoImpersonation = {
+          actorId: actor.id,
+          subject: { id: target.id, displayName: target.displayName, email: target.email, permissions: target.permissions },
+          startedAt,
+          expiresAt: startedAt + authValues.IMPERSONATION_DEFAULT_TTL_SEC * 1000,
+        };
+        writeImpersonation(next);
+        const res: authTypes.StartImpersonationResponse = {
+          impersonation: { actorId: actor.id, subjectId: target.id, startedAt, expiresAt: next.expiresAt },
+        };
+        return json(res);
       }
     }
     // /me reflects the ACTIVE demo account (localStorage-selected) so switching accounts
@@ -5237,6 +6583,68 @@ export function createDemoFetch(): typeof fetch {
 
     // Registering a meeting takes seconds against Google; keep 「作成中…」 visible like production.
     if (method === "POST" && url.pathname === "/api/v1/meetings") await new Promise((r) => setTimeout(r, 3_000));
+
+    // 参加届からのアカウント発行 (gateway-owned・members:onboard_mail)。ロールは送らせず一般メンバー
+    // 固定・対象は参加届の「アカウントの無い人」だけ。案内メールは実際には送らない。
+    {
+      const ob = /^\/api\/v1\/admin\/participation\/([^/]+)\/onboard-account$/.exec(url.pathname);
+      if (ob && method === "POST") {
+        if (!currentAccount().permissions.includes("members:onboard_mail")) {
+          return problem("FORBIDDEN", "permission denied: members:onboard_mail", 403);
+        }
+        const req = (parsedBody ?? {}) as { localPart?: unknown; sendAccountMail?: unknown };
+        const localPart = typeof req.localPart === "string" ? req.localPart.trim().toLowerCase() : "";
+        if (!/^[a-z0-9._%+-]{1,64}$/.test(localPart)) {
+          return problem("VALIDATION_FAILED", "メールアドレスは半角英小文字・数字と . _ % + - で入力してください", 400, [{ field: "localPart", reason: "invalid" }]);
+        }
+        if (["info", "archive", "admin", "administrator", "root", "postmaster", "hostmaster", "webmaster", "abuse", "security", "noreply", "no-reply", "mailer-daemon", "support", "contact", "hello", "staff", "hr", "system"].includes(localPart)) {
+          return problem("VALIDATION_FAILED", `${localPart}@ は運営用のアドレスなので発行できません`, 400, [{ field: "localPart", reason: "reserved" }]);
+        }
+        const target = membersStore.onboardTarget(decodeURIComponent(ob[1]!));
+        if (target instanceof Response) return target;
+        const made = roster.onboard(localPart, target.participation.name);
+        if (made instanceof Response) return made;
+        const linked = membersStore.linkOnboarded(target.member, made.user.id);
+        const to = (linked.gmail ?? "").trim() || null;
+        const requested = req.sendAccountMail === true;
+        return json({ address: made.address, identityUserId: made.user.id, member: linked, accountMail: { requested, sent: requested && to !== null, to } }, 201);
+      }
+    }
+
+    // 面談結果の登録 (gateway-owned・hr:write + members:onboard_mail)。合格は上と同じ demo の発行を使う。
+    // メールは送らない (window.__dubDemoHrMails に積むだけ)。
+    {
+      const ir = /^\/api\/v1\/admin\/hr\/applicants\/([^/]+)\/interview-result$/.exec(url.pathname);
+      if (ir && method === "POST") {
+        const perms = currentAccount().permissions;
+        if (!perms.includes("members:onboard_mail") || !perms.includes("hr:write")) {
+          return problem("FORBIDDEN", "permission denied: hr:write + members:onboard_mail", 403);
+        }
+        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown; teamIds?: unknown; leaderId?: unknown };
+        if (!hrResultValues.isInterviewDecision(req.decision)) return problem("VALIDATION_FAILED", "合否を選んでください", 400, [{ field: "decision", reason: "invalid" }]);
+        const reason = typeof req.reason === "string" ? req.reason.trim() : "";
+        if (!reason) return problem("VALIDATION_FAILED", "理由を入力してください", 400, [{ field: "reason", reason: "required" }]);
+        const localPart = typeof req.localPart === "string" ? req.localPart.trim().toLowerCase() : "";
+        if (req.decision === "pass" && !/^[a-z0-9._%+-]{1,64}$/.test(localPart)) {
+          return problem("VALIDATION_FAILED", "メールアドレスは半角英小文字・数字と . _ % + - で入力してください", 400, [{ field: "localPart", reason: "invalid" }]);
+        }
+        await new Promise((r) => setTimeout(r, 600)); // 発行と送信の待ちを本番らしく見せる
+        return membersStore.hrRegisterResult(
+          decodeURIComponent(ir[1]!),
+          {
+            decision: req.decision,
+            reason,
+            includeReasonInMail: req.includeReasonInMail === true,
+            ...(Array.isArray(req.teamIds) ? { teamIds: req.teamIds.filter((t): t is string => typeof t === "string") } : {}),
+            ...(typeof req.leaderId === "string" ? { leaderId: req.leaderId } : {}),
+          },
+          (displayName) => {
+            const made = roster.onboard(localPart, displayName);
+            return made instanceof Response ? made : { identityUserId: made.user.id, address: made.address };
+          },
+        );
+      }
+    }
 
     // アカウント発行メール (gateway-owned): member Gmail (to) + login (cc). Nothing is sent.
     {
@@ -5272,11 +6680,33 @@ export function createDemoFetch(): typeof fetch {
       }
     }
 
+    const hrInterviewsHit = await hrInterviewsStore.handle(method, url.pathname, parsedBody);
+    if (hrInterviewsHit) return hrInterviewsHit;
+
+    const hrFormHit = await hrInterviewFormStore.handle(method, url.pathname, url, parsedBody);
+    if (hrFormHit) return hrFormHit;
+
+    const sponsorHit = await sponsorStore.handle(method, url.pathname, parsedBody, init?.body, new Headers(init?.headers));
+    if (sponsorHit) return sponsorHit;
+
+    // メールを送ったら、宛先がスポンサーの営業先なら進捗を進める (本番の mail-gateway → member-service 通知の代わり)。
+    if (method === "POST" && url.pathname === "/api/v1/mail/outbox") {
+      const res = mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers));
+      if (res?.ok) {
+        const sent = (parsedBody ?? {}) as Partial<mail.SendMailRequest>;
+        const me = currentMe().user;
+        sponsorStore.recordMail("sent", [...(sent.to ?? []), ...(sent.cc ?? [])].map((a) => a.email), new Date().toISOString(), me.email ?? null);
+      }
+      if (res) return res;
+    }
+    const goalsHit = goalsStore.handle(method, url.pathname, url, parsedBody);
+    if (goalsHit) return goalsHit;
+
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??
       mailStore.handle(method, url.pathname, url, parsedBody, new Headers(init?.headers)) ??
       driveGoogleStore.handle(method, url.pathname, parsedBody) ??
-      meetingsStore.handle(method, url.pathname, parsedBody) ??
+      meetingsStore.handle(method, url.pathname, parsedBody, url) ??
       driveShareStore.handle(method, url.pathname, url, parsedBody) ??
       membersStore.handle(method, url.pathname, url, parsedBody) ??
       chatStore.handle(method, url.pathname, url, parsedBody) ??

@@ -5,7 +5,18 @@
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
+import type { HrFormRepo } from "./hr-form-repo";
+import type { HrInterviewRepo } from "./hr-interview-repo";
+import type { HrResultRepo } from "./hr-result-repo";
+import type { HrMailSender, InterviewerNotifier } from "./hr-interview-mail";
+import type { GoalMetricSources, GoalRepo } from "./goal-repo";
+import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
+import type { SponsorLeadRepo } from "./sponsor-lead-repo";
+import type { SponsorMailRepo } from "./sponsor-mail-repo";
+import type { MailContactsSource } from "./sponsor-mail-service";
 import type { RoleSyncPort } from "./roleSync";
+import type { ProfileReminderTarget } from "./profileReminder";
+import type { IdentityActivationPort } from "./identityActivation";
 
 export type MemberStatus = member.MemberStatus;
 export const MEMBER_STATUSES = ["added", "invited", "considering", "on_leave", "declined"] as const;
@@ -187,11 +198,46 @@ export interface AppDeps {
   newOnboardingItemId: () => string;
   /** 人事 (member_hr_*) の永続化。名簿リポジトリとは分けてある (hr-repo.ts)。 */
   hrRepo: HrRepo;
-  /** 人事の id 採番 (app = 応募者 / hre = 履歴)。 */
-  newHrId: (prefix: "app" | "hre") => string;
+  /** 面談申し込みフォーム (member_hr_forms / member_hr_form_responses) の永続化 (hr-form-repo.ts)。 */
+  hrFormRepo: HrFormRepo;
+  /** 面談の日程調整 (member_hr_interview_*) の永続化 (hr-interview-repo.ts)。 */
+  hrInterviewRepo: HrInterviewRepo;
+  /** 面談結果 (member_hr_interview_results) の永続化 (hr-result-repo.ts)。 */
+  hrResultRepo: HrResultRepo;
+  /** 応募者への案内メール (mail-gateway)。undefined ならメールは保留のまま (binding の無い環境)。 */
+  sendHrMail?: HrMailSender;
+  /** 予約を担当者へ知らせる in-app 通知 (best-effort)。 */
+  notifyInterviewer?: InterviewerNotifier;
+  /** 日程選択 URL の起点 (env.APP_BASE_URL)。undefined ならメールは保留のまま。 */
+  appBaseUrl?: string;
+  /** 応答のあとも続ける処理 (本番は ExecutionContext.waitUntil)。undefined なら待ってから応答する。 */
+  defer?: (work: Promise<void>) => void;
+  /** 人事の id 採番 (app = 応募者 / hre = 履歴 / hfr = フォームの回答 / hsl = 面談枠 / hin = 招待)。 */
+  newHrId: (prefix: "app" | "hre" | "hfr" | "hsl" | "hin" | "hir") => string;
+  /** スポンサー (member_sponsor_cards) の永続化 (sponsor-repo.ts)。 */
+  sponsorRepo: SponsorRepo;
+  /** 名刺写真の置き場 (本番 R2 SPONSOR_FILES)。undefined なら写真ルートだけ 503。 */
+  sponsorImages?: SponsorImageStore;
+  newSponsorCardId: () => string;
+  /** スポンサー営業進捗 (member_sponsor_leads) の永続化 (sponsor-lead-repo.ts)。 */
+  sponsorLeadRepo: SponsorLeadRepo;
+  newSponsorLeadId: () => string;
+  /** スポンサーのメール連携 (自動更新の履歴) の永続化 (sponsor-mail-repo.ts)。 */
+  sponsorMailRepo: SponsorMailRepo;
+  /** メール連携の履歴の id 採番。 */
+  newSponsorMailId: (prefix: "lact") => string;
+  /** mail-gateway のメール集計 (アドレス登録時の反映・一括補完)。index.ts で SVC_MAIL に結線。
+   *  undefined なら登録だけ保存し、一括補完は 503。 */
+  mailContacts?: MailContactsSource;
+  /** 目標管理 (member_goals) の永続化と、他サービスの実績の取り口 (goal-repo.ts)。 */
+  goalRepo: GoalRepo;
+  goalSources: GoalMetricSources;
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;
+  /** 在籍で紐付いた人の招待中アカウントを有効化 (identity-roster)。index.ts で SVC_IDENTITY に
+   *  結線。undefined なら有効化しない (単体テスト等)。名簿の保存は成否に関わらず成功する。 */
+  identityActivation?: IdentityActivationPort;
   /** Best-effort admin notification fired when a 参加届 is submitted. Wired from
    *  env.SVC_NOTIFICATION in index.ts (buildDeps); undefined in unit tests / a deploy
    *  without the binding, in which case the submission simply skips the notify. Must
@@ -200,4 +246,7 @@ export interface AppDeps {
     ctx: { requestId: string; userId: string },
     participation: member.Participation,
   ) => Promise<void>;
+  /** 情報が足りない本人への催促 (notification-service)。best-effort ではなく、失敗は
+   *  操作した管理者へ返す。undefined なら催促できない (binding の無い環境)。 */
+  sendProfileReminder?: (ctx: { requestId: string; userId: string }, target: ProfileReminderTarget) => Promise<{ deduplicated: boolean }>;
 }

@@ -12,6 +12,7 @@ import {
   parseProposalForm,
   previewProposals,
   proposalsInjection,
+  renderProposalThanksPage,
   renderProposalsPage,
   type ProposalConfig,
   type ProposalsDeps,
@@ -75,7 +76,7 @@ test("previewProposals: on shows a closed call as preview, off hides an open one
 test("parseProposalForm: fixed + configured fields, honeypot = spam", () => {
   const ok = parseProposalForm(VALID, CFG);
   assert.equal(ok.ok, true);
-  if (ok.ok) assert.deepEqual(ok.input.answers, { format: "LT（5分）", affiliation: "", bio: "" });
+  if (ok.ok) assert.deepEqual(ok.input.answers, { format: "LT（5分）", topics: "", affiliation: "", bio: "", unavailable: "", phone: "" });
 
   const bad = parseProposalForm(new URLSearchParams({ email: "x", f_format: "基調講演" }), CFG);
   assert.equal(bad.ok, false);
@@ -205,4 +206,76 @@ test("proposalsPreview / proposalsCookie mirror the tickets preview, independent
   const live = new URL("https://lp.example/?version=live");
   assert.equal(proposalsPreview(live, "lp_proposals=on"), null);
   assert.match(proposalsCookie(live)!, /Max-Age=0/);
+});
+
+const FORM_BUILDER_CONFIG: ProposalConfig = {
+  enabled: true,
+  preview: false,
+  fields: [
+    { id: "format", label: "発表形式", type: "radio", required: true, options: ["セッション", "LT"] },
+    { id: "topics", label: "テーマ", description: "複数可", type: "multiselect", required: true, options: ["Web", "AI"] },
+    { id: "day", label: "希望日", type: "date", required: false, options: [] },
+    { id: "tel", label: "電話番号", type: "phone", required: false, options: [] },
+    { id: "mail", label: "連絡先", type: "email", required: false, options: [] },
+  ],
+};
+const FIXED = "title=t&abstract=a&name=n&email=a%40b.co";
+
+test("parseProposalForm: 複数選択はチェックした分をまとめて送る", () => {
+  const form = new URLSearchParams(`${FIXED}&f_format=LT&f_topics=Web&f_topics=AI&f_day=2027-09-13&f_tel=076-123-4567&f_mail=x%40y.jp`);
+  const r = parseProposalForm(form, FORM_BUILDER_CONFIG);
+  assert.ok(r.ok);
+  if (r.ok) assert.equal(r.input.answers.topics, "Web\nAI");
+});
+
+test("parseProposalForm: 選択肢外・形式違い・未選択を弾く", () => {
+  const form = new URLSearchParams(`${FIXED}&f_format=X&f_day=2027-02-30&f_tel=abc&f_mail=nope`);
+  const r = parseProposalForm(form, FORM_BUILDER_CONFIG);
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.deepEqual(Object.keys(r.errors).sort(), ["f_day", "f_format", "f_mail", "f_tel", "f_topics"]);
+    assert.match(r.errors.f_topics, /テーマを選んで/);
+  }
+});
+
+test("parseProposalForm: 存在しない月の日付でも例外にならず弾く", () => {
+  const form = new URLSearchParams(`${FIXED}&f_format=LT&f_topics=Web&f_day=2027-13-45`);
+  const r = parseProposalForm(form, FORM_BUILDER_CONFIG);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.errors.f_day, /日付/);
+});
+
+test("renderProposalsPage: 新しい形式の描画と、エラー時の選択の保持", () => {
+  const html = renderProposalsPage({ config: FORM_BUILDER_CONFIG, values: { f_format: "LT", f_topics: "Web\nAI" } });
+  assert.ok(html.includes('type="radio" name="f_format" value="LT" checked'));
+  assert.ok(html.includes('type="checkbox" name="f_topics" value="Web" checked'));
+  assert.ok(html.includes('type="checkbox" name="f_topics" value="AI" checked'));
+  assert.ok(html.includes('type="date"'));
+  assert.ok(html.includes('type="tel"'));
+  assert.ok(html.includes('<p class="hint">複数可</p>'));
+});
+
+test("parseProposalConfig: 新しい形式と補足説明を保ち、未知の形式は text に丸める", () => {
+  const c = parseProposalConfig({
+    enabled: true,
+    fields: [
+      { id: "a", label: "A", description: "説明", type: "multiselect", required: true, options: ["x"] },
+      { id: "b", label: "B", type: "unknown", required: false, options: [] },
+    ],
+  });
+  assert.equal(c?.fields[0]?.type, "multiselect");
+  assert.equal(c?.fields[0]?.description, "説明");
+  assert.equal(c?.fields[1]?.type, "text");
+});
+
+test("renderProposalThanksPage: 共有ダイアログを出す", () => {
+  const html = renderProposalThanksPage({ origin: "https://example.com" });
+  assert.ok(html.includes("data-lp-share"));
+  assert.ok(html.includes("data-share-open"));
+  assert.ok(html.includes(encodeURIComponent("登壇応募しました")));
+});
+
+test("renderProposalsPage: プレビュー中は再送しても閉じないよう POST 先に指定を残す", () => {
+  assert.ok(renderProposalsPage({ config: { ...CFG, preview: true } }).includes('action="/proposals/submit?proposals=on"'));
+  assert.ok(renderProposalsPage({ config: CFG }).includes('action="/proposals/submit"'));
 });

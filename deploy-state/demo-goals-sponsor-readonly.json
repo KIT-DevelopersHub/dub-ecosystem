@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "goals-sponsor-readonly",
+  "worker": "dub-demo-goals-sponsor-readonly",
+  "url": "https://dub-demo-goals-sponsor-readonly.developershub-site.workers.dev",
+  "deployedSha": "53bed71a",
+  "branch": "commander/task-ctask_01M6RPZSNYBNR5K62Q80D2VFRA",
+  "actor": "ko-tarou",
+  "markers": ["スポンサーアプリの目標タブにも表示されます"],
+  "live": true,
+  "verifiedAt": "2026-11-06T15:31:09Z",
+  "updatedAt": "2026-11-06T15:31:09Z",
+  "note": "目標は目標管理で設定・スポンサータブは閲覧専用"
+}

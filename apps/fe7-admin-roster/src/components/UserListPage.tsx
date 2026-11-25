@@ -25,6 +25,7 @@ import { InlineRoleEditor } from "./InlineRoleEditor";
 import { InviteUserDialog } from "./InviteUserDialog";
 import { NewEmailAddressDialog } from "./NewEmailAddressDialog";
 import { IssuedAddressesDialog } from "./IssuedAddressesDialog";
+import { TeamMailingListsDialog } from "./TeamMailingListsDialog";
 import { SyncPreviewDialog } from "./SyncPreviewDialog";
 import { MemberLinkDialog } from "./MemberLinkDialog";
 import { AccountMailPrompt, accountMailTargetOf, type AccountMailTarget } from "./AccountMailPrompt";
@@ -37,7 +38,7 @@ import {
   useMembersOverview,
   useUnlinkMemberIdentity,
 } from "../hooks/useRosterApi";
-import { usePermissions, useCanAdminEdit } from "../hooks/usePermissions";
+import { usePermissions, useCanMailRosterEdit } from "../hooks/usePermissions";
 import { useRosterContext } from "../providers/RosterProvider";
 import { DEFAULT_USER_FILTERS, type UserListFilters, type UserStatusFilter } from "../lib/listUsersQuery";
 import { displayError } from "../lib/errorDisplay";
@@ -56,6 +57,8 @@ const STATUS_OPTIONS: SelectOption<UserStatusFilter>[] = [
   { value: "disabled", label: "停止" },
   { value: "rejected", label: "却下" },
 ];
+
+const ALL_ROLES = "all";
 
 const toolbarStyle: React.CSSProperties = { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" };
 const actionsStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" };
@@ -116,24 +119,27 @@ export function UserListPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const [manageAddressesOpen, setManageAddressesOpen] = useState(false);
+  const [teamListsOpen, setTeamListsOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkAccount, setLinkAccount] = useState<RosterUser | null>(null);
   // アカウント発行メール: asked right after a link when the member has a Gmail.
   const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
   const { can } = usePermissions();
-  const canAdminEdit = useCanAdminEdit();
+  const canEditRoster = useCanMailRosterEdit();
   const { me } = useRosterContext();
-  // Free-text search filters in memory (below); only status goes to the server, so typing
-  // never refetches the whole roster.
-  const query = useUsers({ ...filters, search: "" });
+  // Free-text search and role filter in memory (below); only status goes to the server, so
+  // typing never refetches the whole roster and a role edit shows up in the filter at once.
+  const query = useUsers({ ...filters, search: "", roleKey: null });
   // ⑤ Unfiltered total for the「X件中Y件」summary (cached; same query when not narrowed).
   const totalQuery = useUsers(DEFAULT_USER_FILTERS);
-  const { results: items } = useClientFilter(query.data?.items ?? NO_USERS, filters.search, userSearchText);
+  const { results: searched } = useClientFilter(query.data?.items ?? NO_USERS, filters.search, userSearchText);
+  const { roleKey } = filters;
+  const items = useMemo(() => (roleKey ? searched.filter((u) => u.roleIds.includes(roleKey)) : searched), [searched, roleKey]);
 
   // ⑧ Mirror the active filter + sort into the URL query (replace, not push).
   useEffect(() => {
-    writeRosterViewToUrl({ filters: { search: filters.search, status: filters.status }, sort });
-  }, [filters.search, filters.status, sort]);
+    writeRosterViewToUrl({ filters: { search: filters.search, status: filters.status, roleKey: filters.roleKey }, sort });
+  }, [filters.search, filters.status, filters.roleKey, sort]);
   const rolesQuery = useRoles();
   const sync = useSyncEmailRouting();
   const preview = usePreviewEmailRouting();
@@ -143,10 +149,11 @@ export function UserListPage() {
 
   const currentUserId = me?.user.id ?? "";
   // 管理アプリが「編集」でなければ書き込み UI は出さない(サーバの requireAdminEdit と同条件)。
-  const canInvite = canAdminEdit;
-  const canManageRoles = canAdminEdit; // grant/revoke org-wide roles inline
-  const canLinkMembers = canAdminEdit; // link/unlink 運営メンバー from the メール名簿 side
+  const canInvite = canEditRoster;
+  const canManageRoles = canEditRoster; // grant/revoke org-wide roles inline
+  const canLinkMembers = canEditRoster; // link/unlink 運営メンバー from the メール名簿 side
   const roles = rolesQuery.data?.items ?? [];
+  const roleOptions: SelectOption<string>[] = [{ value: ALL_ROLES, label: "すべて" }, ...roles.map((r) => ({ value: r.id, label: r.name }))];
   // identity userId -> the 運営メンバー linked to it (1:1). Drives the「運営メンバー」列.
   const memberByIdentity = new Map(
     (membersOverview.data?.members ?? [])
@@ -178,14 +185,14 @@ export function UserListPage() {
   // ⑤ Count summary: total (unfiltered) vs. currently shown (filtered) rows.
   const shownCount = items.length;
   const totalCount = totalQuery.data?.items.length ?? shownCount;
-  const isNarrowed = filters.search.trim() !== "" || filters.status !== "all";
+  const isNarrowed = filters.search.trim() !== "" || filters.status !== "all" || roleKey !== null;
   const pageRange =
     totalPages > 1 ? `（${(currentPage - 1) * PAGE_SIZE + 1}〜${(currentPage - 1) * PAGE_SIZE + pageItems.length}件目）` : "";
   const countSummary = (isNarrowed ? `${totalCount}件中 ${shownCount}件を表示` : `全 ${totalCount}件`) + pageRange;
   // Selection acts on the currently-loaded rows; drop keys that left the filter.
   const visibleIds = new Set(items.map((u) => u.id));
   const effectiveSelected = selectedIds.filter((id) => visibleIds.has(id));
-  const canBulk = canAdminEdit;
+  const canBulk = canEditRoster;
   // Resolve the selection against the freshest list so the pane reflects saved edits
   // and closes itself if the selected user drops out of the current filter.
   const selectedUser = items.find((u) => u.id === selectedId) ?? null;
@@ -293,6 +300,11 @@ export function UserListPage() {
                 発行済みアドレス
               </Button>
             ) : null}
+            {canManageRouting ? (
+              <Button variant="secondary" onClick={() => setTeamListsOpen(true)} testId="fe7-users-team-lists">
+                メーリングリスト
+              </Button>
+            ) : null}
             {canInvite ? (
               <Button variant="secondary" onClick={() => setInviteOpen(true)} testId="fe7-users-invite">
                 ユーザーを招待
@@ -341,6 +353,19 @@ export function UserListPage() {
               setFilters((f) => ({ ...f, status: v }));
             }}
             testId="fe7-users-status-filter"
+          />
+        </FormField>
+        <FormField label="ロール" htmlFor="fe7-users-role-filter">
+          <Select
+            id="fe7-users-role-filter"
+            value={roleKey ?? ALL_ROLES}
+            options={roleOptions}
+            onChange={(v) => {
+              setPage(1);
+              setSelectedIds([]);
+              setFilters((f) => ({ ...f, roleKey: v === ALL_ROLES ? null : v }));
+            }}
+            testId="fe7-users-role-filter"
           />
         </FormField>
       </div>
@@ -418,13 +443,7 @@ export function UserListPage() {
                 />
               </Card>
             </div>
-          ) : (
-            <div style={paneColStyle}>
-              <Card testId="fe7-user-pane-empty">
-                <EmptyState title="ユーザーを選択してください" description="一覧から名前をクリックすると、ここで編集できます。" />
-              </Card>
-            </div>
-          )}
+          ) : null}
         </div>
       )}
 
@@ -435,6 +454,7 @@ export function UserListPage() {
         onCreated={openPreview}
       />
       <IssuedAddressesDialog open={manageAddressesOpen} onClose={() => setManageAddressesOpen(false)} />
+      <TeamMailingListsDialog open={teamListsOpen} onClose={() => setTeamListsOpen(false)} />
       <SyncPreviewDialog
         open={previewOpen}
         preview={preview.data ?? null}

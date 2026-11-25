@@ -25,10 +25,47 @@ v3 `permissions.list/create/update/delete` and `files.list`.
 | PATCH | `/driveshare/files/:id/permissions/:permId` | `drive:write` | change a role |
 | DELETE | `/driveshare/files/:id/permissions/:permId` | `drive:write` | revoke |
 | PUT | `/driveshare/files/:id/link` | `drive:write` | link sharing on/off (`anyone`) |
+| GET | `/driveshare/files/:id/drift` | `drive:read` | actual sharing vs the file's role grants: shares outside the roles (incl. link; with no grant, every direct share), stronger / weaker role than granted, members without access |
 
 `drive:read` / `drive:write` are not yet in the frozen `PERMISSION_CATALOG` (same as
 drive-proxy); they are opaque wire strings passed to identity `/authz/check`. Roles must
 grant these keys for real (non-mock) use — see below.
+
+**Role sharing address**: a role's members are shared at their 名簿 Gmail (member-service
+`POST /members/internal/google-emails`, binding `SVC_MEMBER`), else their Dub login address — the
+same rule as meeting invitations. A login address without a Google account (e.g. an Email-Routing
+alias) is refused by Drive (`cannotInviteNonGoogleUser`); such members are reported as skipped with
+"register their Gmail in 名簿". `reapply` moves a member from the login address to the Gmail once
+it is registered (our old share is removed). The drift view compares against the same addresses.
+
+**Large roles**: api-gateway cuts a request off at 15 s, Drive takes a second or more per share,
+and concurrent permission calls on one file are not safe. So apply / reapply stop at their budget
+(8 s or 25 Drive writes) and answer with `nextCursor` + `remaining`; `POST .../reapply?cursor=`
+continues (the SPA does this automatically). The ledger is written member by member, with the row
+going in before the Drive call, so a request cut off mid-way never turns our share into an
+"individual" one that 解除 would leave behind. Departed members are removed last.
+
+**Automatic follow**: the third phase of the `MeetingSyncDO` hourly alarm (after the meeting sync
+and the Meet ingest; `role_share_sync_alarm` in the logs) shares every role-granted file with
+members who joined the role. It is additive and only uses a 名簿 Gmail: it never removes access
+(「再適用」 does, and the drift card lists who left) and never tries a login address, where a
+failure could still mail an invite that cannot be recalled. A grant whose Gmail members are all in
+the ledger costs no Drive call. The first role grant arms the alarm.
+
+**Usage on the 無料枠 dashboard**: every Calendar / Meet call adds to
+`driveshare_google_api_usage` (one row per API per UTC minute, best-effort). usage-meter shows the
+busiest minute of the last 24 hours. Drive calls are not counted.
+
+**Google Calendar limits**: a usage limit from Calendar (`GOOGLE_QUOTA_EXCEEDED`, api `calendar`)
+ends the sync on the spot and pauses it for 6 hours (`QUOTA_PAUSE_MS`, `calendarPausedUntil` in
+`MeetingSyncDO` storage; log `meeting_sync_quota_paused`, once per pause). While paused the sync
+makes no Calendar call and `POST /meetings/sync` answers with the limit message; meeting writes
+still try Google. The Meet steps and the Drive共有 follow keep running: they are other APIs with
+other quotas. The sync also spends less (constants at the top of `meetings-service.ts`): an
+unchanged calendar costs no `listAcl` (one full check a day), a refused share waits 24 hours, a
+meeting leaves the sync 24 hours after its last occurrence and its attendees freeze when it ends
+(Google would mail any change), and share writes run at most 10 per 15 minutes. Those batches run
+between the hourly cycles (`aclShares` phase), so the ingest and the Drive共有 follow never wait.
 
 ## Getting the real Hackit refresh token (one-time, done by the operator)
 
@@ -113,11 +150,18 @@ to the system admin role only.
   Switching the shared account creates new calendars on the new account; meetings made on the
   old account can only be deleted (Dub row only) — recreate them.
 - **Invite address**: the member's 名簿 Gmail (member-service `POST /members/internal/google-emails`,
-  binding `SVC_MEMBER`), else their Dub login address. Without the binding everyone gets the
-  Dub address. Members without a Gmail are reported in `POST /meetings/sync` → `withoutGoogleAccount`.
-- **Calendar sharing**: every target calendar is shared read-only (ACL `reader`) with every
-  active member; Google mails them an "add this calendar" link so they can show it in their own
-  list. Attendees see their own meetings on their main calendar regardless.
+  binding `SVC_MEMBER`). Members without one, and the shared group / bot addresses
+  (`member@` / `maintainer@` / `commander-bot@developershub.jp`), are neither invited nor shared
+  with (no Google account: mail to them bounced). Members without a Gmail are reported in
+  `POST /meetings/sync` → `withoutGoogleAccount`.
+- **Calendar sharing**: a role calendar is shared read-only (ACL `reader`) with that role's
+  members only; the 全体 calendar with every active member. Shares are made with
+  `sendNotifications=false`: Google sends **no** share mail (it used to mail every member once per
+  calendar). Instead `GET /meetings/targets` returns `calendarId` on the caller's own calendars and
+  カレンダー > ミーティング shows 「Googleカレンダーに追加」 beside each (Google's
+  `calendar.google.com/calendar/u/0/r?cid=<base64 id>` link). Someone who leaves a role loses that
+  share on the next sync (no mail). Attendees see their own meetings on their main calendar
+  regardless, and still get Google's meeting invitations (`sendUpdates=all`).
 - **Recurrence**: RRULE in `Asia/Tokyo` — weekly / biweekly / monthly_weekday (第N X曜日 of the
   first occurrence; a 5th weekday means the last one, `-1`), optional `until` (inclusive JST date).
 - **Automatic follow**: `MeetingSyncDO` (SQLite Durable Object **alarm**, no cron slot) runs the
@@ -125,7 +169,10 @@ to the system admin role only.
   new role members, removes ONLY attendees / calendar shares that Dub added (ledgers
   `driveshare_meeting_invites` / `driveshare_meeting_calendar_acl`) — guests and shares added by
   hand in Google Calendar are never touched — and patches an event (`sendUpdates=all`) only when
-  its attendee list changed. Google calls run against a per-invocation budget; a run cut short
+  its attendee list changed. A role calendar whose role has 0 members keeps its shares (likelier a
+  roster glitch), unless the role is gone from a role list read that succeeded (non-empty): a
+  deleted role's calendar then loses every share in the ledger (`meeting_calendar_target_deleted_revoking`
+  with `count`); hand-added shares stay. A failed role read keeps the shares. Google calls run against a per-invocation budget; a run cut short
   continues 2 minutes later.
 - **Mock**: when Drive is mocked (`DRIVESHARE_MOCK=1` or no account / secret), an in-memory
   calendar is used too (per isolate).

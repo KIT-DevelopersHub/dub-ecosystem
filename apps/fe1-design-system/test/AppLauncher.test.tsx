@@ -81,6 +81,12 @@ describe("AppLauncher (waffle app switcher 凍結案 1-4-3)", () => {
     expect(screen.getByText(/一致するアプリはありません/)).toBeInTheDocument();
   });
 
+  it("shows a no-apps state (not a search miss) when the viewer has no apps", async () => {
+    render(<AppLauncher items={[]} testId="launcher" />);
+    await userEvent.click(screen.getByTestId("launcher-trigger"));
+    expect(screen.getByText("利用できるアプリはありません")).toBeInTheDocument();
+  });
+
   // A full 3×2 grid (matches the CSS `repeat(3, …)`; jsdom uses the 3-column fallback).
   //   row0:  a(0)  b(1)  c(2)
   //   row1:  d(3)  e(4)  f(5)

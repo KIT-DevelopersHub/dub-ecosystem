@@ -87,11 +87,11 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(screen.getByTestId("fe7-app-state-events").textContent).toBe("無効");
   });
 
-  it("selecting 編集 emits BOTH graded keys (edit ⇒ view)", async () => {
+  it("selecting 編集 emits BOTH graded keys (edit ⇒ view) plus the app's required key", async () => {
     const user = userEvent.setup();
     const { onChange } = setup([]);
     await user.click(screen.getByTestId("fe7-app-level-mail-edit"));
-    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:mail:edit", "app:mail:view"]);
+    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:mail:edit", "app:mail:view", "mail:read"]);
   });
 
   it("selecting 無効 clears the app's graded keys but keeps its detail keys", async () => {
@@ -146,7 +146,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     const { onChange } = setup([]);
     await user.click(screen.getByTestId("fe7-app-name-chat"));
     await user.click(screen.getByTestId("fe7-app-dialog-level-view"));
-    expect(onChange.mock.calls[0]?.[0]).toEqual(["app:chat:view"]);
+    expect(onChange.mock.calls[0]?.[0]).toEqual(appRegistry.withRequiredAppDomainKeys(["app:chat:view"]));
   });
 
   // メッセージ削除ポリシーはロール管理から撤去（ロールの権限ではなくチャット側の設定）。
@@ -197,11 +197,13 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     // 「閲覧」にすると、同じトグルがそのまま操作できるようになる
     await user.click(within(dialog).getByTestId("fe7-app-dialog-level-view"));
     expect(within(dialog).queryByTestId("fe7-app-dialog-detail-locked")).not.toBeInTheDocument();
-    const toggle = within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement;
+    const toggle = within(dialog).getByTestId("fe7-app-dialog-toggle-mail:send") as HTMLInputElement;
     expect(toggle.disabled).toBe(false);
     await user.click(toggle);
-    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("1 / 5");
+    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:send") as HTMLInputElement).checked).toBe(true);
+    // mail:read はアプリに必須なので有効化と同時に入り、固定表示になる
+    expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("2 / 5");
   });
 
   // その他側と対称の到達性テスト: アプリが宣言した細かい権限は必ずそのダイアログに出る
@@ -243,9 +245,9 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(screen.getByTestId("fe7-other-count").textContent).toContain(`1 / ${policy.otherPermissions().length}`);
     expect(screen.getByTestId("fe7-other-granted-infra").textContent).toBe("1 / 4");
 
-    // 「その他」に残るのは どのアプリにも属さない 4 分類だけ。アプリに引き取られた分類
+    // 「その他」に残るのは どのアプリにも属さない 5 分類だけ（代理表示 = identity:impersonate を含む）。アプリに引き取られた分類
     //（identity → 運営メンバー / file → Drive共有）はここに出ない。
-    expect(groups.map((g) => g.domain)).toEqual(["infra", "audit", "github", "webhook"]);
+    expect(groups.map((g) => g.domain)).toEqual(["infra", "audit", "github", "webhook", "impersonation"]);
     expect(within(other).queryByTestId("fe7-other-name-identity")).not.toBeInTheDocument();
     expect(within(other).queryByTestId("fe7-other-name-file")).not.toBeInTheDocument();
     expect(within(other).queryByTestId("fe7-other-name-drive")).not.toBeInTheDocument();
@@ -293,6 +295,24 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(within(dialog).getByText("Drive共有の設定の閲覧")).toBeInTheDocument();
     await user.click(within(dialog).getByTestId("fe7-app-dialog-toggle-drive:settings_edit"));
     expect(onChange.mock.calls.at(-1)?.[0]).toContain("drive:settings_edit");
+  });
+
+  // ユーザー要望: 通知の細かい権限は「誰に届くか」を決める項目だけにする（意味のない項目は出さない）。
+  it("通知の詳細は 受け取る通知 + 管理の 2 つだけで、受信箱/通知設定/送信は出ない", async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup(["app:notifications:view", "notif:inbox:self", "notif:prefs:self"]);
+    await user.click(screen.getByTestId("fe7-app-name-notifications"));
+    const dialog = screen.getByTestId("fe7-app-dialog");
+    expect(within(dialog).getByText("全体への通知を受け取る")).toBeInTheDocument();
+    expect(within(dialog).getByText("管理者向け通知を受け取る")).toBeInTheDocument();
+    for (const hidden of ["notif:inbox:self", "notif:prefs:self", "notif:send"]) {
+      expect(within(dialog).queryByTestId(`fe7-app-dialog-toggle-${hidden}`)).not.toBeInTheDocument();
+    }
+    await user.click(within(dialog).getByTestId("fe7-app-dialog-toggle-notif:receive_admin"));
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain("notif:receive_admin");
+    await user.click(within(dialog).getByTestId("fe7-app-dialog-close"));
+    // その他 にも落ちてこない
+    expect(within(screen.getByTestId("fe7-other-permissions")).queryByText(/通知/)).not.toBeInTheDocument();
   });
 });
 

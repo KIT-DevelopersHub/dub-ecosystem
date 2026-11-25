@@ -1,5 +1,5 @@
-// 人事の共通部品: 権限フラグ・ステータスバッジ/プルダウン・採用の確認ダイアログ・新規登録モーダル・
-// 応募者詳細ドロワー・押した値を即座に重ねる usePendingOverlay。
+// 人事の共通部品: 権限フラグ・ステータスバッジ・応募者詳細ドロワー・押した値を即座に重ねる usePendingOverlay。
+// ステータスは手で変えない (面談の予約で 面談確定、面談結果の登録で 採用 / 不採用)。
 import { useCallback, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -9,25 +9,24 @@ import {
   Drawer,
   ErrorState,
   FormField,
-  Modal,
+  IconButton,
   Select,
   SkeletonLoader,
-  TextField,
   Textarea,
   type BadgeTone,
 } from "@dub/ui";
-import { hr } from "@dub/types";
+import { hr, hrResult } from "@dub/types";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import {
   useAddNote,
   useApplicantDetail,
-  useCreateApplicant,
   useHrTeams,
   useJoinApplicant,
   useMoveStage,
   useRemoveApplicant,
   useUpdateApplicant,
 } from "./hrHooks.ts";
+import { ApplicantFormAnswers, ParticipationLinkButton } from "./ApplicantFormAnswers.tsx";
 import styles from "./hr.module.css";
 
 export const STAGE_LABELS = hr.APPLICANT_STAGE_LABELS;
@@ -52,10 +51,12 @@ export function StageBadge({ stage }: { stage: hr.ApplicantStage }): JSX.Element
 }
 
 /** 人事アプリでの操作可否。表 (member-service policy-table) と同じ組み合わせ。 */
-export function useHrCapability(): { canWrite: boolean; canAdmin: boolean } {
+export function useHrCapability(): { canWrite: boolean; canAdmin: boolean; canRegister: boolean } {
   const { canEdit } = useAppCapability("hr");
   const { can } = usePermissions();
-  return { canWrite: canEdit && can("hr:write"), canAdmin: canEdit && can("hr:admin") };
+  const canWrite = canEdit && can("hr:write");
+  // 面談結果の登録 (gateway): hr:write + 合格のアカウント発行の鍵 members:onboard_mail。
+  return { canWrite, canAdmin: canEdit && can("hr:admin"), canRegister: canWrite && can("members:onboard_mail") };
 }
 
 /**
@@ -106,195 +107,6 @@ function toLocalInput(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/**
- * 採用の確認待ち。名簿にいない人を 採用 / オンボーディング調整 / オンボーディング完了 にしようと
- * したときに開き、確定で POST /join (名簿に追加)。採用より先のステータスを選んでいたら続けて動かす。
- */
-export interface JoinRequest {
-  applicant: hr.Applicant;
-  target: hr.ApplicantStage;
-}
-
-export function JoinConfirmDialog({ request, onDone }: { request: JoinRequest | null; onDone: () => void }): JSX.Element {
-  const join = useJoinApplicant();
-  const move = useMoveStage();
-  const teams = useHrTeams();
-  const a = request?.applicant;
-  const team = teams.data?.teams.find((t) => t.id === a?.desiredTeamId);
-  return (
-    <ConfirmDialog
-      testId="fe2-hr-join-confirm"
-      open={request !== null}
-      title="採用して名簿に追加しますか？"
-      message={
-        a
-          ? `${a.name} さんを「採用」にし、在籍メンバーとして運営メンバー・名簿に追加します。${team ? `希望チーム（${team.name}）にも所属します。` : ""}`
-          : ""
-      }
-      confirmLabel="採用して名簿に追加"
-      onCancel={onDone}
-      onConfirm={async () => {
-        if (!request) return;
-        try {
-          const res = await join.mutateAsync({ applicant: request.applicant });
-          if (request.target !== "hired") {
-            await move.mutateAsync({ applicant: res.applicant, stage: request.target });
-          }
-        } catch {
-          // トーストは hooks 側で出す。
-        }
-        onDone();
-      }}
-    />
-  );
-}
-
-/**
- * ステータスのプルダウン (表の行・詳細ドロワー共通)。楽観的に変わり、失敗で戻る。名簿にいない人の
- * 採用系は onRequestJoin (確認ダイアログ) に回す。
- */
-export function StatusSelect({
-  applicant,
-  onRequestJoin,
-  testId,
-}: {
-  applicant: hr.Applicant;
-  onRequestJoin: (req: JoinRequest) => void;
-  testId?: string;
-}): JSX.Element {
-  const move = useMoveStage();
-  const { canAdmin } = useHrCapability();
-  const overlay = usePendingOverlay<hr.ApplicantStage>();
-  const hasMember = applicant.memberId !== null;
-  const shown = overlay.get(applicant.id) ?? applicant.stage;
-  return (
-    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <Select<hr.ApplicantStage>
-        id={`hr-status-${applicant.id}`}
-        testId={testId}
-        value={shown}
-        options={hr.APPLICANT_STAGES.map((s) => ({
-          value: s,
-          label: hr.requiresJoin(s, hasMember) ? `${STAGE_LABELS[s]}（名簿に追加）` : STAGE_LABELS[s],
-          // 名簿への追加 (採用) は hr:admin のみ。
-          disabled: hr.requiresJoin(s, hasMember) && !canAdmin,
-        }))}
-        onChange={(stage) => {
-          if (stage === applicant.stage) return;
-          if (hr.requiresJoin(stage, hasMember)) {
-            onRequestJoin({ applicant, target: stage });
-            return;
-          }
-          overlay.set(applicant.id, stage);
-          move.mutate({ applicant, stage }, { onSettled: () => overlay.clear(applicant.id) });
-        }}
-      />
-    </span>
-  );
-}
-
-const EMPTY_FORM = {
-  name: "", nameKana: "", email: "", department: "", grade: "", desiredTeamId: "", source: "", interviewAt: "", motivation: "",
-};
-
-export function NewApplicantModal({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [touched, setTouched] = useState(false);
-  const create = useCreateApplicant();
-  const teams = useHrTeams();
-  const set = (k: keyof typeof EMPTY_FORM) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const nameError = touched && form.name.trim() === "" ? "氏名を入力してください" : undefined;
-
-  const submit = () => {
-    setTouched(true);
-    if (form.name.trim() === "") return;
-    create.mutate(
-      {
-        name: form.name,
-        nameKana: form.nameKana || null,
-        email: form.email || null,
-        department: form.department || null,
-        grade: form.grade || null,
-        desiredTeamId: form.desiredTeamId || null,
-        source: form.source || null,
-        interviewAt: form.interviewAt ? new Date(form.interviewAt).toISOString() : null,
-        motivation: form.motivation || null,
-      },
-      {
-        onSuccess: () => {
-          setForm(EMPTY_FORM);
-          setTouched(false);
-          onClose();
-        },
-      },
-    );
-  };
-
-  return (
-    <Modal
-      testId="fe2-hr-new-modal"
-      open={open}
-      onClose={onClose}
-      title="応募者を登録"
-      size="lg"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            キャンセル
-          </Button>
-          <Button testId="fe2-hr-new-submit" loading={create.isPending} onClick={submit}>
-            登録する
-          </Button>
-        </>
-      }
-    >
-      <div className={styles.formGrid}>
-        <FormField label="氏名" htmlFor="hr-name" required error={nameError}>
-          <TextField id="hr-name" testId="fe2-hr-new-name" value={form.name} onChange={set("name")} invalid={!!nameError} />
-        </FormField>
-        <FormField label="フリガナ" htmlFor="hr-kana">
-          <TextField id="hr-kana" value={form.nameKana} onChange={set("nameKana")} />
-        </FormField>
-        <FormField label="メールアドレス" htmlFor="hr-email">
-          <TextField id="hr-email" type="email" value={form.email} onChange={set("email")} />
-        </FormField>
-        <FormField label="学科" htmlFor="hr-dept">
-          <TextField id="hr-dept" value={form.department} onChange={set("department")} />
-        </FormField>
-        <FormField label="学年" htmlFor="hr-grade">
-          <TextField id="hr-grade" value={form.grade} onChange={set("grade")} placeholder="例: 2年" />
-        </FormField>
-        <FormField label="希望チーム" htmlFor="hr-team">
-          <Select
-            id="hr-team"
-            value={form.desiredTeamId || null}
-            onChange={set("desiredTeamId")}
-            placeholder="未定"
-            options={(teams.data?.teams ?? []).map((t) => ({ value: t.id, label: t.name }))}
-          />
-        </FormField>
-        <FormField label="応募経路" htmlFor="hr-source">
-          <TextField id="hr-source" value={form.source} onChange={set("source")} placeholder="例: 公開フォーム / 紹介" />
-        </FormField>
-        <FormField label="面談日（決まっていれば）" htmlFor="hr-interview">
-          <input
-            id="hr-interview"
-            type="datetime-local"
-            className={styles.dateInput}
-            value={form.interviewAt}
-            onChange={(e) => set("interviewAt")(e.target.value)}
-          />
-        </FormField>
-      </div>
-      <div style={{ marginTop: "var(--dub-space-4)" }}>
-        <FormField label="志望動機・メモ" htmlFor="hr-motivation">
-          <Textarea id="hr-motivation" rows={3} value={form.motivation} onChange={set("motivation")} />
-        </FormField>
-      </div>
-    </Modal>
-  );
-}
-
 function eventLabel(e: hr.ApplicantEvent): string {
   switch (e.kind) {
     case "created":
@@ -305,26 +117,103 @@ function eventLabel(e: hr.ApplicantEvent): string {
       return "採用（名簿に追加）";
     case "note":
       return "メモ";
+    case "deleted":
+      return "応募を削除";
   }
+}
+
+/** 削除できるか: hr:admin で、採用〜オンボーディング完了でない人だけ (サーバも同じ判定で 409)。 */
+export function canRemoveApplicant(a: hr.Applicant, canAdmin: boolean): boolean {
+  return canAdmin && !hr.blocksRemoval(a.stage, a.memberId !== null);
+}
+
+/**
+ * 応募の削除の確認。確定した瞬間にダイアログを閉じて一覧から消し (楽観的)、失敗したら戻る。
+ * 履歴とフォーム回答はサーバに残る (論理削除)。
+ */
+export function RemoveApplicantDialog({
+  applicant,
+  onClose,
+  onConfirmed,
+}: {
+  applicant: hr.Applicant | null;
+  onClose: () => void;
+  /** 確定の直後 (送信前) に呼ぶ。ドロワーを閉じるなど。 */
+  onConfirmed?: () => void;
+}): JSX.Element {
+  const remove = useRemoveApplicant();
+  return (
+    <ConfirmDialog
+      testId="fe2-hr-remove-confirm"
+      open={applicant !== null}
+      danger
+      title="応募を削除しますか？"
+      message={
+        applicant
+          ? `${applicant.name} さんの応募を一覧から削除します。面談の履歴と申し込みフォームの回答は記録として残ります。${
+              applicant.memberId !== null ? "名簿の登録は解除されません。" : ""
+            }`
+          : ""
+      }
+      confirmLabel="削除する"
+      onCancel={onClose}
+      onConfirm={() => {
+        if (!applicant) return;
+        remove.mutate(applicant);
+        onConfirmed?.();
+        onClose();
+      }}
+    />
+  );
+}
+
+/** 表の行の削除ボタン。行クリック (詳細を開く) には伝えない。 */
+export function RemoveApplicantButton({
+  applicant,
+  onRequest,
+}: {
+  applicant: hr.Applicant;
+  onRequest: (a: hr.Applicant) => void;
+}): JSX.Element {
+  const { canAdmin } = useHrCapability();
+  const allowed = canRemoveApplicant(applicant, canAdmin);
+  const label = !canAdmin
+    ? "応募の削除は人事の管理者のみできます"
+    : hr.blocksRemoval(applicant.stage, applicant.memberId !== null)
+      ? "採用済み（名簿に追加済み）の人は削除できません"
+      : `${applicant.name} さんの応募を削除`;
+  return (
+    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <IconButton
+        name="trash"
+        size="sm"
+        variant="ghost"
+        aria-label={label}
+        disabled={!allowed}
+        testId={`fe2-hr-row-${applicant.id}-remove`}
+        onClick={() => onRequest(applicant)}
+      />
+    </span>
+  );
 }
 
 /** 応募者の詳細 + ステータス + 面談日 + メモ + 履歴。 */
 export function ApplicantDrawer({
   applicantId,
   onClose,
-  onRequestJoin,
+  onRequestResult,
 }: {
   applicantId: string | null;
   onClose: () => void;
-  onRequestJoin: (req: JoinRequest) => void;
+  /** 面談確定・面談済みの人の「面談結果を登録」。 */
+  onRequestResult?: (a: hr.Applicant) => void;
 }): JSX.Element {
   const detail = useApplicantDetail(applicantId);
   const navigate = useNavigate();
   const teams = useHrTeams();
-  const { canWrite, canAdmin } = useHrCapability();
+  const { canWrite, canAdmin, canRegister } = useHrCapability();
   const addNote = useAddNote();
   const update = useUpdateApplicant();
-  const remove = useRemoveApplicant();
   const [note, setNote] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
 
@@ -344,13 +233,15 @@ export function ApplicantDrawer({
     const team = teams.data?.teams.find((t) => t.id === a.desiredTeamId);
     body = (
       <div className={styles.detail} data-testid="fe2-hr-detail">
-        {canWrite ? (
-          <FormField label="ステータス" htmlFor={`hr-status-${a.id}`}>
-            <StatusSelect applicant={a} onRequestJoin={onRequestJoin} testId="fe2-hr-detail-status" />
-          </FormField>
-        ) : (
+        {/* ステータスは手で変えない: 予約で 面談確定、結果の登録で 採用 / 不採用 に進む。 */}
+        <div className={styles.stageCell} data-testid="fe2-hr-detail-status">
           <StageBadge stage={a.stage} />
-        )}
+          {canRegister && onRequestResult && hrResult.RESULT_STAGES.includes(a.stage) ? (
+            <Button size="sm" variant="primary" testId="fe2-hr-detail-result" onClick={() => onRequestResult(a)}>
+              面談結果を登録
+            </Button>
+          ) : null}
+        </div>
         {canWrite ? (
           <FormField label="面談日" htmlFor="hr-detail-interview">
             <input
@@ -398,6 +289,10 @@ export function ApplicantDrawer({
           ) : null}
         </dl>
 
+        <ApplicantFormAnswers applicantId={a.id} />
+
+        <ParticipationLinkButton applicant={a} />
+
         {canWrite ? (
           <div>
             <FormField label="メモを追加" htmlFor="hr-note" help="面談の所感・連絡の記録など。履歴に残り、一覧の「メモ」列にも出ます。">
@@ -431,7 +326,7 @@ export function ApplicantDrawer({
           </ol>
         </div>
 
-        {canAdmin && a.memberId === null ? (
+        {canRemoveApplicant(a, canAdmin) ? (
           <div>
             <Button variant="danger" size="sm" testId="fe2-hr-remove" onClick={() => setConfirmRemove(true)}>
               応募を削除
@@ -439,18 +334,10 @@ export function ApplicantDrawer({
           </div>
         ) : null}
 
-        <ConfirmDialog
-          testId="fe2-hr-remove-confirm"
-          open={confirmRemove}
-          danger
-          title="応募を削除しますか？"
-          message={`${a.name} さんの応募を一覧から削除します。`}
-          confirmLabel="削除する"
-          onCancel={() => setConfirmRemove(false)}
-          onConfirm={async () => {
-            await remove.mutateAsync(a).then(onClose).catch(() => undefined);
-            setConfirmRemove(false);
-          }}
+        <RemoveApplicantDialog
+          applicant={confirmRemove ? a : null}
+          onClose={() => setConfirmRemove(false)}
+          onConfirmed={onClose}
         />
       </div>
     );

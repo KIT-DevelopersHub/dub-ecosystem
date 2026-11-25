@@ -1,7 +1,9 @@
 // Run: node --test worker/tickets.test.ts (Node >= 22.18 strips TS types natively).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
+  internalFetch,
   DEMO_CONFIG,
   escapeHtml,
   formatPrice,
@@ -254,7 +256,7 @@ test("mapCheckoutError maps 400 details (items / items.<id>) and statuses", () =
   assert.match(so.qty_student, /売り切れ/);
   assert.ok(so._form);
   assert.ok(mapCheckoutError(409, null, CFG).items);
-  assert.match(mapCheckoutError(429, null, CFG)._form, /集中/);
+  assert.match(mapCheckoutError(429, null, CFG)._form, /サーバーにアクセスが集中.*時間をおいて/);
   assert.match(mapCheckoutError(503, null, CFG)._form, /準備中/);
 });
 
@@ -953,4 +955,52 @@ test("preview with nothing selectable explains why (public just sees 受付準�
   assert.match(empty, /有効）の券種がありません/);
   const pub = renderTicketsPage({ config: { ...CFG, paymentReady: false, types: [CFG.types[0]] } });
   assert.doesNotMatch(pub, /data-lp-tk-preview-reason/);
+});
+
+test("renderThanksPage: 共有ダイアログは購入確定 (paid / free) のときだけ", () => {
+  const origin = "https://example.com";
+  assert.ok(renderThanksPage({ status: "paid", origin }).includes("data-lp-share"));
+  assert.ok(renderThanksPage({ status: "free", origin }).includes("data-lp-share"));
+  for (const status of ["pending", "expired", "unknown"] as const) {
+    assert.ok(!renderThanksPage({ status, origin }).includes("data-lp-share"), status);
+  }
+});
+
+test("internalFetch: sends the s2s marker to the given host; null without a binding or in the demo", async () => {
+  const seen: { url: string; internal: string | null; type: string | null }[] = [];
+  const binding = {
+    fetch: async (url: string, init?: RequestInit) => {
+      const h = new Headers(init?.headers);
+      seen.push({ url, internal: h.get("x-dub-internal"), type: h.get("content-type") });
+      return new Response("{}");
+    },
+  };
+  const call = internalFetch(binding, "lp-tickets", false);
+  assert.ok(call);
+  await call("/lp/internal/tickets/checkout", { method: "POST", headers: { "content-type": "application/json" } });
+  assert.deepEqual(seen, [{ url: "https://lp-tickets/lp/internal/tickets/checkout", internal: "1", type: "application/json" }]);
+  assert.equal(internalFetch(undefined, "lp-tickets", false), null);
+  assert.equal(internalFetch(binding, "lp-tickets", true), null);
+});
+
+test("worker wiring: tickets use LP_TICKETS with no LP_FLAG fallback; proposals stay on LP_FLAG", () => {
+  const src = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const fn = (name: string) => src.slice(src.indexOf(`function ${name}(`), src.indexOf("\n}\n", src.indexOf(`function ${name}(`)));
+  assert.match(fn("ticketConfig"), /env\.LP_TICKETS/);
+  assert.doesNotMatch(fn("ticketConfig"), /LP_FLAG/);
+  assert.match(fn("ticketsInternal"), /env\.LP_TICKETS/);
+  assert.doesNotMatch(fn("ticketsInternal"), /LP_FLAG/);
+  assert.match(fn("proposalsInternal"), /env\.LP_FLAG/);
+  assert.match(src.slice(src.indexOf("handleProposals(req"), src.indexOf("if (ticketsPath)")), /internal: proposalsInternal\(env\)/);
+});
+
+test("thanks: shows the order number from confirm, escaped, only for a paid order", async () => {
+  const mk = (b: Record<string, unknown>) => deps({ internal: async () => Response.json(b) });
+  const url = "https://lp.example/tickets/thanks?session_id=cs_1";
+  const paid = await (await handleTickets(new Request(url), mk({ status: "paid", summary: "一般 ×1", orderNumber: "AB<CD" })))!.text();
+  assert.ok(paid.includes("注文番号 AB&lt;CD"));
+  const pending = await (await handleTickets(new Request(url), mk({ status: "pending", orderNumber: "ABCD" })))!.text();
+  assert.ok(!pending.includes("注文番号"));
+  const paidNoNumber = await (await handleTickets(new Request(url), mk({ status: "paid" })))!.text();
+  assert.ok(!paidNoNumber.includes("注文番号"));
 });

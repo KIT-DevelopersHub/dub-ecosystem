@@ -26,13 +26,16 @@ import { policyGate, sharedAuthzGranter } from "@dub/policy-gate";
 import { HEADERS, consoleSink } from "@dub/observability";
 import { publishAudit } from "@dub/events";
 import { nowIso } from "@dub/db";
-import { common, mail, type identity } from "@dub/types";
+import { common, mail, type identity, type sponsor } from "@dub/types";
+import { parseContactsQuery, querySponsorContacts } from "./sponsor-sync";
 import type { AppBindings } from "./env";
 import { POLICY_TABLE } from "./policy-table";
 import { DEFAULT_ARCHIVE_CC_ADDRESS, DEFAULT_OUTBOUND_PROVIDER, SERVICE_NAME } from "./config";
 import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
-import { registerEmailRoutingAdmin } from "./email-routing-routes";
+import { registerEmailRoutingAdmin, registerEmailRoutingInternal } from "./email-routing-routes";
+import { registerTeamListAdmin } from "./team-list-routes";
+import { registerDrafts } from "./drafts";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
 import { handleResendWebhook } from "./resend-webhook";
 import { buildAuditEnv, buildBlobs, buildDb, buildSendDeps } from "./deps";
@@ -40,9 +43,9 @@ import { attachmentsFor, parkScheduledAttachments, releaseScheduledAttachments }
 import { isCompanyAddress, resolveReplyFromAddress, resolveUserFromAddress } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
-import { parseListMessagesQuery, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
-import { countFolders, listInboundFolder } from "./folders";
+import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, setInboundReadState, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
+import { parseBulkRequest, parseListMessagesQuery, parseReadStateRequest, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
+import { applyBulkAction, countFolders, listInboundFolder } from "./folders";
 import { assertTargetAllowed, getForwardSetting, parseForwardPatch, parseRegisterRequest, registerForwardTarget, removeForwardSetting, setForwardEnabled } from "./user-forward";
 import { addBlock, assertBlockAllowed, listBlocks, loadMatcher, markBlocked, normalizeBlockValue, parseBlockRequest, removeBlock } from "./blocks";
 
@@ -65,6 +68,16 @@ export function createApp() {
 
   const ctxOf = (c: Context<AppBindings>): RequestContext => c.get("dubCtx");
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, ctxOf(c).requestId);
+  const sendStatus = async (c: Context<AppBindings>): Promise<Response> => {
+    const cooldownSec = parseCooldownSec(c.env.MAIL_RATE_LIMIT_COOLDOWN_SEC);
+    const latest = await latestFailedSend(dbOf(c));
+    const rateLimit = deriveRateLimitStatus(latest, Date.now(), cooldownSec);
+    return c.json({
+      service: SERVICE_NAME,
+      provider: (c.env.MAIL_OUTBOUND_PROVIDER ?? DEFAULT_OUTBOUND_PROVIDER).toLowerCase(),
+      rateLimit,
+    });
+  };
   // Same expression as buildSendDeps' archiveCc, so the hidden address is exactly the one
   // auto-CC'd on send (empty string = archive CC disabled = nothing hidden).
   const archiveOf = (c: Context<AppBindings>): string | null =>
@@ -254,6 +267,7 @@ export function createApp() {
         limit: q.limit,
         ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
         ...(q.q !== undefined ? { q: q.q } : {}),
+        ...(q.withTotal === false ? { withTotal: false } : {}),
       });
       for (const m of folderPage.items) hideArchiveCc(m, archiveOf(c));
       markBlocked(folderPage.items, await loadMatcher(dbOf(c), viewer));
@@ -288,6 +302,22 @@ export function createApp() {
   // Mark a message read (opened in the inbox). Idempotent: re-opening is a no-op.
   // メール閲覧 + mail:read is sufficient. Only the caller's own mail is flipped; another
   // account's (read_all / role sharing) is view-only and answers 200 unchanged.
+  // Gmail's 既読にする / 未読にする over a whole selection. Only the caller's own copies change,
+  // and an id they have no copy of is skipped, so this needs no per-message scope check.
+  ext.post("/read-state", async (c) => {
+    const { ids, read } = parseReadStateRequest(await c.req.json().catch(() => null));
+    await setInboundReadState(dbOf(c), ids, ownerOf(c), read);
+    return c.json({ updated: ids.length, read });
+  });
+
+  // 全件選択: one action over a whole view, loaded by the client or not. Everything it changes
+  // is the caller's own (their read stamps, their flags), so 閲覧 is the right tier here too.
+  ext.post("/bulk", async (c) => {
+    const { folder, action } = parseBulkRequest(await c.req.json().catch(() => null));
+    const updated = await applyBulkAction(dbOf(c), await inboundScopeOf(c), ownerOf(c), folder, action);
+    return c.json({ updated });
+  });
+
   ext.post("/messages/:id/read", async (c) => {
     const { found } = await markInboundRead(dbOf(c), c.req.param("id"), await inboundScopeOf(c), ownerOf(c));
     if (!found) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
@@ -301,6 +331,7 @@ export function createApp() {
     const page = await listSent(dbOf(c), {
       ownerUserId: await scopeOf(c),
       viewer: ownerOf(c),
+      inboundScope: await inboundScopeOf(c),
       limit: q.limit,
       ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
       ...(q.q !== undefined ? { q: q.q } : {}),
@@ -583,6 +614,12 @@ export function createApp() {
   // admin console. Every one of its 12 routes is listed individually in POLICY_TABLE, so a
   // route added in that file without a table line is denied and turns coverage red.
   registerEmailRoutingAdmin(ext);
+  registerTeamListAdmin(ext);
+  registerDrafts(ext);
+
+  // Send-health for the admin shell's rate-limit banner (GET /api/v1/mail/status, mail:admin in
+  // the table): the same secret-free report as /internal/status.
+  ext.get("/status", (c) => sendStatus(c));
 
   // ---- production canary results (read-only; `mail:admin` in the table). Recent synthetic
   // mail probes, newest first, plus the effective config (null = disabled).
@@ -594,20 +631,20 @@ export function createApp() {
   });
 
   app.route("/mail", ext);
+  registerEmailRoutingInternal(app);
 
   // ---- status: live send-health self-report (INTERNAL in the table). Derives "directly
   // rate-limited" from the send-log so an operator dashboard (fe7 admin) can surface it. The
   // provider's own 429 already carries the exact Retry-After to the caller; this endpoint
   // reports whether we are still inside the cooldown window plus an ETA estimate.
-  app.get("/internal/status", async (c) => {
-    const cooldownSec = parseCooldownSec(c.env.MAIL_RATE_LIMIT_COOLDOWN_SEC);
-    const latest = await latestFailedSend(dbOf(c));
-    const rateLimit = deriveRateLimitStatus(latest, Date.now(), cooldownSec);
-    return c.json({
-      service: SERVICE_NAME,
-      provider: (c.env.MAIL_OUTBOUND_PROVIDER ?? DEFAULT_OUTBOUND_PROVIDER).toLowerCase(),
-      rateLimit,
-    });
+  app.get("/internal/status", (c) => sendStatus(c));
+
+  // スポンサーのメール連携 (member-service → ここ, s2s のみ)。登録アドレスとのメールの集計。
+  app.post("/internal/sponsor/contacts", async (c) => {
+    const q = parseContactsQuery(await c.req.json().catch(() => null));
+    if (!q) throw errors.validationFailed([{ field: "addresses", reason: "invalid" }]);
+    const contacts = await querySponsorContacts(dbOf(c), q);
+    return c.json({ contacts } satisfies sponsor.MailContactsResponse);
   });
 
   // ---- ops: quota/health self-report (INTERNAL in the table, minimal in the CF-routing

@@ -121,8 +121,9 @@ describe("FreeqDrainDO.alarm (periodic retention prune)", () => {
     const audit = fakeSvc(200);
     seedTerminal(core.raw, "old-done", "done", OLD);
     seedTerminal(core.raw, "old-failed", "failed", "2001-01-01T00:00:00.000Z");
-    // A pending row must NEVER be pruned, regardless of age.
-    seed(core.raw, "old-pending", "evt.notification", { id: "n" }, OLD);
+    // A pending row must NEVER be pruned, regardless of age. (evt.task: no TTL and no
+    // SVC_TASK bound, so it defers and stays pending; a TTL topic would be expired instead.)
+    seed(core.raw, "old-pending", "evt.task", { id: "n" }, OLD);
     // A freshly-created done row is within the retention window -> kept.
     seedTerminal(core.raw, "fresh-done", "done", new Date().toISOString());
     const env = { DB_CORE: core.d1, SVC_AUDIT_LOG: audit.svc } as unknown as Env;

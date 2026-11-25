@@ -107,6 +107,77 @@ function parseAttachments(v: unknown, fe: FieldError[]): mail.MailAttachmentInpu
   return out.length > 0 ? out : undefined;
 }
 
+/** Validate POST /mail/read-state. */
+export function parseReadStateRequest(body: unknown): mail.MailReadStateRequest {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  const { ids, read } = body;
+  const fe: FieldError[] = [];
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > mail.MAIL_READ_STATE_LIMIT || ids.some((id) => typeof id !== "string" || id.length === 0)) {
+    fe.push({ field: "ids", reason: "invalid", message: `1..${mail.MAIL_READ_STATE_LIMIT} message ids` });
+  }
+  if (typeof read !== "boolean") fe.push({ field: "read", reason: "invalid_type" });
+  if (fe.length > 0) throw mailInvalid(fe);
+  return { ids: ids as string[], read: read as boolean };
+}
+
+/** Validate POST /mail/bulk. */
+export function parseBulkRequest(body: unknown): mail.MailBulkRequest {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  const { folder, action } = body;
+  const fe: FieldError[] = [];
+  if (typeof folder !== "string" || !(mail.MAIL_FOLDER_VIEWS as readonly string[]).includes(folder)) {
+    fe.push({ field: "folder", reason: "invalid_enum", message: mail.MAIL_FOLDER_VIEWS.join("|") });
+  }
+  if (typeof action !== "string" || !(mail.MAIL_BULK_ACTIONS as readonly string[]).includes(action)) {
+    fe.push({ field: "action", reason: "invalid_enum", message: mail.MAIL_BULK_ACTIONS.join("|") });
+  }
+  if (fe.length > 0) throw mailInvalid(fe);
+  return { folder: folder as mail.MailFolderView, action: action as mail.MailBulkAction };
+}
+
+const DRAFT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const DRAFT_MODES: readonly string[] = ["new", "reply", "replyAll", "forward"];
+const DRAFT_ADDRESS_MAX = 10_000;
+const DRAFT_BODY_MAX = 200_000;
+
+export function assertDraftId(id: string): void {
+  if (!DRAFT_ID_RE.test(id)) throw mailInvalid([{ field: "id", reason: "invalid" }]);
+}
+
+/** Validate PUT /mail/drafts/:id. Lengths only: a draft may not be sendable yet. */
+export function parseDraftInput(body: unknown): mail.MailDraftInput {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  const fe: FieldError[] = [];
+  const text = (field: string, max: number): string => {
+    const v = body[field] ?? "";
+    if (typeof v !== "string" || v.length > max) {
+      fe.push({ field, reason: "invalid_length", message: `<= ${max}` });
+      return "";
+    }
+    return v;
+  };
+  const out: mail.MailDraftInput = {
+    mode: (DRAFT_MODES.includes(body.mode as string) ? body.mode : "new") as mail.MailDraftMode,
+    to: text("to", DRAFT_ADDRESS_MAX),
+    cc: text("cc", DRAFT_ADDRESS_MAX),
+    bcc: text("bcc", DRAFT_ADDRESS_MAX),
+    subject: text("subject", SUBJECT_MAX),
+    body: text("body", DRAFT_BODY_MAX),
+  };
+  const inReplyTo = text("inReplyTo", SUBJECT_MAX);
+  if (inReplyTo) out.inReplyTo = inReplyTo;
+  if (fe.length > 0) throw mailInvalid(fe);
+  return out;
+}
+
+/** Validate POST /mail/drafts/:id/attachments (one file; the draft's totals are checked by the route). */
+export function parseDraftAttachment(body: unknown): mail.MailAttachmentInput {
+  const fe: FieldError[] = [];
+  const input = parseAttachments([body], fe)?.[0];
+  if (fe.length > 0 || !input) throw mailInvalid(fe.length > 0 ? fe : [{ field: "(root)", reason: "invalid_type" }]);
+  return input;
+}
+
 /** Validate POST /send body (frozen mail.SendMailRequest). */
 export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
   if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
@@ -138,7 +209,8 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
   }
 
   const textBody = b.textBody;
-  if (typeof textBody !== "string" || textBody.length === 0) fe.push({ field: "textBody", reason: "required" });
+  // Empty is allowed (Gmail sends a body-less mail, e.g. attachments only); the client asks first.
+  if (typeof textBody !== "string") fe.push({ field: "textBody", reason: "required" });
 
   let htmlBody: string | undefined;
   if (b.htmlBody !== undefined) {
@@ -249,7 +321,7 @@ export function parseScheduleMailPatch(body: unknown, now: number = Date.now()):
     } else out.subject = b.subject;
   }
   if (b.textBody !== undefined) {
-    if (typeof b.textBody !== "string" || b.textBody.length === 0) fe.push({ field: "textBody", reason: "required" });
+    if (typeof b.textBody !== "string") fe.push({ field: "textBody", reason: "required" });
     else out.textBody = b.textBody;
   }
   if (b.htmlBody !== undefined) {
@@ -274,9 +346,12 @@ export function parseListMessagesQuery(q: Record<string, string | undefined>): {
   limit: number;
   q?: string;
   folder?: mail.MailFolderView;
+  withTotal?: boolean;
 } {
   const fe: FieldError[] = [];
-  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView } = { limit: DEFAULT_QUERY_LIMIT };
+  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView; withTotal?: boolean } = { limit: DEFAULT_QUERY_LIMIT };
+
+  if (q.withTotal === "0" || q.withTotal === "false") out.withTotal = false;
 
   if (q.folder !== undefined && q.folder !== "") {
     if ((mail.MAIL_FOLDER_VIEWS as readonly string[]).includes(q.folder)) out.folder = q.folder as mail.MailFolderView;

@@ -7,6 +7,13 @@ import { policy } from "@dub/types";
 import { createApp } from "../src/app";
 import { InMemoryMemberRepo } from "../src/memory-repo";
 import { InMemoryHrRepo } from "../src/hr-repo";
+import { InMemoryHrFormRepo } from "../src/hr-form-repo";
+import { InMemoryHrInterviewRepo } from "../src/hr-interview-repo";
+import { InMemoryHrResultRepo } from "../src/hr-result-repo";
+import { InMemoryGoalRepo } from "../src/goal-repo";
+import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
+import { InMemorySponsorLeadRepo } from "../src/sponsor-lead-repo";
+import { InMemorySponsorMailRepo } from "../src/sponsor-mail-repo";
 import type { AppDeps } from "../src/types";
 
 /**
@@ -24,6 +31,8 @@ export function fakeAuthz(granted: Set<identity.PermissionKey>): PermissionGrant
  *  automatically instead of drifting from production grants. */
 export function adminGrants(): Set<identity.PermissionKey> {
   return new Set<identity.PermissionKey>([
+    "members:roster_view",
+    "members:roster_edit",
     "identity:read",
     "identity:admin",
     ...policy.keysForAppLevel("members", "edit"),
@@ -32,12 +41,36 @@ export function adminGrants(): Set<identity.PermissionKey> {
     "hr:read",
     "hr:write",
     "hr:admin",
+    ...policy.keysForAppLevel("sponsor", "edit"),
+    ...policy.keysForAppLevel("goals", "edit"),
+    "goals:read",
+    "sponsor:read",
+    "sponsor:write",
+    "sponsor:admin",
   ]);
+}
+
+/** R2 の fake (名刺写真)。objects を覗いて保存・削除を検証できる。failDelete で削除失敗を再現。 */
+export class FakeImageStore implements SponsorImageStore {
+  objects = new Map<string, { body: ArrayBuffer; contentType: string }>();
+  failDelete = false;
+  async put(key: string, bytes: ArrayBuffer, contentType: string): Promise<void> {
+    this.objects.set(key, { body: bytes.slice(0), contentType });
+  }
+  async get(key: string): Promise<{ body: ArrayBuffer; contentType: string | null } | null> {
+    const o = this.objects.get(key);
+    return o ? { body: o.body.slice(0), contentType: o.contentType } : null;
+  }
+  async delete(key: string): Promise<void> {
+    if (this.failDelete) throw new Error("r2 down");
+    this.objects.delete(key);
+  }
 }
 
 let seq = 0;
 export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: InMemoryMemberRepo } {
   const repo = new InMemoryMemberRepo();
+  const leadRepo = new InMemorySponsorLeadRepo();
   const deps: AppDeps = {
     repo,
     authz: fakeAuthz(adminGrants()),
@@ -48,7 +81,19 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newParticipationId: () => `part_${String(seq++).padStart(6, "0")}`,
     newOnboardingItemId: () => `onb_${String(seq++).padStart(6, "0")}`,
     hrRepo: new InMemoryHrRepo(),
+    hrFormRepo: new InMemoryHrFormRepo(),
+    hrInterviewRepo: new InMemoryHrInterviewRepo(),
+    hrResultRepo: new InMemoryHrResultRepo(),
     newHrId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
+    sponsorRepo: new InMemorySponsorRepo(),
+    sponsorImages: new FakeImageStore(),
+    newSponsorCardId: () => `card_${String(seq++).padStart(6, "0")}`,
+    sponsorLeadRepo: leadRepo,
+    newSponsorLeadId: () => `lead_${String(seq++).padStart(6, "0")}`,
+    sponsorMailRepo: new InMemorySponsorMailRepo(leadRepo),
+    newSponsorMailId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
+    goalRepo: new InMemoryGoalRepo(),
+    goalSources: { teamTasks: async () => [], lpVisitors: async () => 0 },
     ...overrides,
   };
   return Object.assign(deps, { repo });

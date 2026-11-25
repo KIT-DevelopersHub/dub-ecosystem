@@ -82,6 +82,44 @@ export interface MembersOverview {
   members: Member[];
 }
 
+/**
+ * 組織図までのロールに返す行。組織図・運営メンバータブに要る項目だけを残し、個人情報を空にする。
+ * 新しい項目を足したら既定で落ちるよう、残す側を列挙する。grade は組織図のチップに出す。
+ */
+export function toOrgChartMember(m: Member): Member {
+  return {
+    id: m.id,
+    orgId: m.orgId,
+    name: m.name,
+    roleTitle: m.roleTitle,
+    position: m.position ?? null,
+    status: m.status,
+    teamIds: m.teamIds,
+    leaderId: m.leaderId ?? null,
+    sortOrder: m.sortOrder,
+    version: m.version,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+    grade: m.grade,
+    identityUserId: null,
+    contact: null,
+    lastName: null,
+    firstName: null,
+    lastNameKana: null,
+    firstNameKana: null,
+    lastNameRomaji: null,
+    firstNameRomaji: null,
+    schoolEmail: null,
+    gmail: null,
+    phone: null,
+    department: null,
+    rosterNumber: null,
+    studentNumber: null,
+    desiredActivity: null,
+    note: null,
+  };
+}
+
 /** Dedicated team-list response (GET /api/v1/members/teams) — the source other apps read. */
 export interface ListTeamsResponse {
   teams: Team[];
@@ -102,6 +140,16 @@ export interface UpdateTeamRequest {
   description?: string | null;
   sortOrder?: number;
 }
+/** 組織図までの編集 (PATCH /members/people/:id/org)。運営での項目だけ。 */
+export interface UpdateMemberOrgRequest {
+  roleTitle?: string | null;
+  position?: MemberPosition | null;
+  status?: MemberStatus;
+  leaderId?: string | null;
+  teamIds?: string[];
+  version: number;
+}
+
 /** 追加。人物プロフィール項目は PersonProfile と共通 (任意・省略は null)。`name` は
  *  姓/名 から合成するので、姓/名 を送るなら省略可。 */
 export interface CreateMemberRequest extends Partial<PersonProfile> {
@@ -237,11 +285,51 @@ export function emptyPersonProfile(): PersonProfile {
   return Object.fromEntries(PERSON_PROFILE_KEYS.map((k) => [k, null])) as unknown as PersonProfile;
 }
 
+/** 運営が揃えておきたい項目 (未入力なら本人へ催促する対象)。任意の 希望する活動・備考 は含めない。 */
+export const PROFILE_REMINDER_KEYS = [
+  "lastName",
+  "firstName",
+  "lastNameKana",
+  "firstNameKana",
+  "lastNameRomaji",
+  "firstNameRomaji",
+  "schoolEmail",
+  "gmail",
+  "phone",
+  "grade",
+  "department",
+  "rosterNumber",
+  "studentNumber",
+] as const satisfies readonly PersonProfileKey[];
+
+/** 未入力の項目 (表示順)。空白だけの値も未入力として扱う。姓名に分かれる前の名簿行は
+ *  表示名 name があれば氏名は分かるので、姓・名を未入力に数えない。 */
+export function missingProfileKeys(p: Partial<PersonProfile> & { name?: string | null }): PersonProfileKey[] {
+  const hasName = !!p.name?.trim();
+  return PROFILE_REMINDER_KEYS.filter((k) => {
+    if (hasName && (k === "lastName" || k === "firstName")) return false;
+    return !(p[k] ?? "").trim();
+  });
+}
+
+/** POST /members/people/:id/profile-reminder の応答。同じ人への催促は 1 日 1 回まで。 */
+export interface SendProfileReminderResponse {
+  deduplicated: boolean;
+  missing: PersonProfileKey[];
+}
+
 /** 表示用の文字列 (学年・希望活動はラベル、未入力は "")。画面・通知で共通。 */
 export function formatPersonProfileValue(key: PersonProfileKey, p: Partial<PersonProfile>): string {
   if (key === "grade") return p.grade ? GRADE_LABEL[p.grade] : "";
   if (key === "desiredActivity") return p.desiredActivity ? ACTIVITY_LABEL[p.desiredActivity] : "";
   return p[key] ?? "";
+}
+
+/** 姓/名 が無いデータ用: 表示名を最初の空白で 姓/名 に分ける (空白が無ければ全体を姓)。 */
+export function splitDisplayName(name: string): { lastName: string; firstName: string } {
+  const t = name.trim();
+  const m = /^(\S+)[\s　]+(.+)$/.exec(t);
+  return m ? { lastName: m[1]!, firstName: m[2]!.trim() } : { lastName: t, firstName: "" };
 }
 
 /** PersonProfile 部分だけを取り出す (Member / Participation から)。 */
@@ -519,6 +607,38 @@ export interface LinkIdentityRequest {
   version: number;
 }
 
+// ---- 参加届からのアカウント発行 (人事向け・members:onboard_mail) ----------------------
+// api-gateway POST /api/v1/admin/participation/:participationId/onboard-account が
+// アドレス発行 → アカウント作成 (一般メンバー固定) → 名簿と紐付け → (任意) 案内メール を
+// 1 回で行う。対象は参加届に紐付いていて、まだアカウントの無い人だけ。
+
+/** member-service GET /members/internal/participation/:id/onboard-target の応答。 */
+export interface OnboardTargetResponse {
+  participation: Participation;
+  member: Member;
+}
+
+/** member-service POST /members/internal/participation/:id/onboard-link の本文。 */
+export interface OnboardLinkRequest {
+  identityUserId: string;
+}
+
+/** ロールは受け取らない (サーバーが一般メンバーに固定する)。 */
+export interface OnboardAccountRequest {
+  /** @developershub.jp の前の部分。 */
+  localPart: string;
+  /** 名簿の Gmail に案内メール (ログイン情報) を送るか。既定 false。 */
+  sendAccountMail?: boolean;
+}
+
+export interface OnboardAccountResponse {
+  address: string;
+  identityUserId: string;
+  member: Member;
+  /** 案内メールの結果。送らなかった時は requested=false。送れなくても発行自体は成功。 */
+  accountMail: { requested: boolean; sent: boolean; to: string | null };
+}
+
 // ---- オンボーディング (新メンバーへの「やってほしいこと」案内) ------------------------
 // 管理者が 運営メンバー・名簿 → オンボーディング タブで項目を並べ、ログイン不要の公開ページ
 // (/onboarding) がそれをそのまま表示する。項目は公開前提の案内文なので全フィールドを
@@ -674,10 +794,22 @@ export function positionRoleName(position: MemberPosition): string {
   return `${POSITION_ROLE_NAME_PREFIX}${POSITION_LABEL[position]}`;
 }
 
-/** POST /api/v1/members/role-sync/backfill — 既存メンバーへの一括付与 (管理者)。 */
+/** backfill 1 ページで identity に出す呼び出しの上限。Workers 無料枠の subrequest 上限 (50) から
+ *  認可チェック・ロール一覧同期 (offset 0 のみ) の分と余裕を引いた値。limit の上限 =
+ *  floor(これ / 1 人あたりの呼び出し数 (付与+有効化 = 2・activateOnly = 1))。 */
+export const ROLE_SYNC_BACKFILL_CALL_BUDGET = 30;
+
+/** POST /api/v1/members/role-sync/backfill — 既存メンバーへの一括付与 (管理者)。
+ *  ページ分け: nextOffset が null になるまで offset を進めて呼び直す。 */
 export interface RoleSyncBackfillRequest {
   /** true なら identity 側に書き込まず、付く/外れる予定だけを返す。 */
   dryRun?: boolean;
+  /** true ならロール付与をせず、在籍で招待中のアカウントの有効化だけ (対象も有効化対象の人だけ)。 */
+  activateOnly?: boolean;
+  /** 対象一覧の何人目から (既定 0)。ロール一覧の同期は 0 のページだけ。 */
+  offset?: number;
+  /** 1 ページの人数 (既定・上限 = 付与 15 / activateOnly 30)。 */
+  limit?: number;
 }
 export interface RoleSyncBackfillPerson {
   memberId: MemberId;
@@ -687,14 +819,27 @@ export interface RoleSyncBackfillPerson {
   roleIds: string[];
   added: string[];
   removed: string[];
+  /** 在籍で紐付いているのにアカウントが招待中だったので有効化した (dryRun なら有効化する予定)。 */
+  activated?: boolean;
   error?: string;
 }
 export interface RoleSyncBackfillResponse {
   dryRun: boolean;
-  /** チーム・役職ロール一覧の同期結果。 */
+  activateOnly: boolean;
+  /** チーム・役職ロール一覧の同期結果 (offset 0 のページだけ・それ以外と activateOnly は空)。 */
   catalog: { created: string[]; renamed: string[]; deleted: string[]; kept: string[] };
+  /** このページの人。 */
   people: RoleSyncBackfillPerson[];
+  /** このページで失敗した人数。 */
   failed: number;
+  /** このページで招待中のまま残っていたアカウントを有効化した人数 (dryRun なら予定人数)。 */
+  activated: number;
+  offset: number;
+  limit: number;
+  /** 全ページ合わせた対象人数。 */
+  total: number;
+  /** 次のページの offset。最後のページなら null。 */
+  nextOffset: number | null;
 }
 
 /** Internal id alias (plain string, like the other common ids). */

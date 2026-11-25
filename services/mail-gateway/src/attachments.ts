@@ -35,6 +35,7 @@ export interface AttachmentBytes {
   filename: string;
   contentType: string;
   bytes: Uint8Array;
+  contentId?: string;
 }
 
 /** Deterministic R2 key: org / kind / owning-message-id / attachment-id. */
@@ -100,8 +101,9 @@ export async function persistAttachments(
         sizeBytes: item.bytes.byteLength,
         r2Key: key,
         createdAt: now,
+        ...(item.contentId ? { contentId: item.contentId } : {}),
       });
-      out.push({ id, filename: item.filename, contentType: item.contentType, sizeBytes: item.bytes.byteLength });
+      out.push({ id, filename: item.filename, contentType: item.contentType, sizeBytes: item.bytes.byteLength, ...(item.contentId ? { contentId: item.contentId } : {}) });
     } catch (err) {
       consoleSink({
         level: "error",
@@ -132,6 +134,7 @@ export function rowToMeta(r: AttachmentRow): mail.MailAttachment {
   // attachment's DTO stays byte-identical to the pre-#2 shape (後方互換). A 'dropped_*'
   // status tells the UI to render a disabled chip + reason instead of a download link.
   if (r.status && r.status !== "stored") meta.status = r.status;
+  if (r.content_id) meta.contentId = r.content_id;
   return meta;
 }
 

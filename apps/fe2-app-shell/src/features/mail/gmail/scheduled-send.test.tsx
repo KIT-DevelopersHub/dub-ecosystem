@@ -27,6 +27,13 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     getScheduled: vi.fn(),
     updateScheduled: vi.fn(),
     cancelScheduled: vi.fn().mockResolvedValue({ id: "sch", status: "canceled" }),
+    setReadState: vi.fn().mockResolvedValue(undefined),
+    bulkAction: vi.fn().mockResolvedValue(undefined),
+    listDrafts: vi.fn().mockResolvedValue([]),
+    saveDraft: vi.fn().mockImplementation((id: string, d: object) => Promise.resolve({ ...d, id, updatedAt: "2026-01-01T00:00:00.000Z", attachments: [] })),
+    deleteDraft: vi.fn().mockResolvedValue(undefined),
+    addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
+    removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
     listBlocks: vi.fn().mockResolvedValue([]),
     addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
     getForward: vi.fn().mockResolvedValue({ target: null, status: "none", enabled: false, active: false, available: true, requestedAt: null, verifiedAt: null, lastResult: null, lastError: null, lastAt: null }),
@@ -112,5 +119,35 @@ describe("予約済み folder", () => {
     await waitFor(() => expect(api.cancelScheduled).toHaveBeenCalledWith("sch_1"));
     // Optimistically removed from the list.
     await waitFor(() => expect(screen.queryByTestId("fe2-mail-scheduled-row")).toBeNull());
+  });
+
+  // Regression (2026-11-24): 編集 cancels the parked row and reopens it prefilled. That
+  // compose counted as "unchanged", so ✕ dropped it without a draft — the mail was then
+  // neither 予約済み nor 下書き. It must land in 下書き like any user-written text.
+  it("編集 then ✕ keeps the mail as a draft (never lost)", async () => {
+    const detail: mail.ScheduledSendDetail = {
+      ...parked,
+      cc: [{ email: "cc@example.com" }],
+      textBody: "予約していた本文",
+    };
+    const api = fakeApi({
+      listScheduled: vi.fn().mockResolvedValueOnce({ items: [parked], nextCursor: null }).mockResolvedValue({ items: [], nextCursor: null }),
+      getScheduled: vi.fn().mockResolvedValue(detail),
+    });
+    render(wrap(<GmailApp />, api));
+    await userEvent.click(await screen.findByTestId("fe2-mail-folder-scheduled"));
+    const row = await screen.findByTestId("fe2-mail-scheduled-row");
+
+    await userEvent.click(within(row).getByTestId("fe2-mail-scheduled-edit"));
+    await waitFor(() => expect(api.cancelScheduled).toHaveBeenCalledWith("sch_1"));
+    await screen.findByTestId("fe2-mail-compose-window");
+
+    // Close right away, without touching the text.
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-close"));
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalled());
+    const saved = (api.saveDraft as unknown as { mock: { calls: [string, mail.MailDraftInput][] } }).mock.calls.at(-1)![1];
+    expect(saved.subject).toBe("予約中のメール");
+    expect(saved.body).toBe("予約していた本文");
+    expect(saved.to).toContain("recipient@example.com");
   });
 });

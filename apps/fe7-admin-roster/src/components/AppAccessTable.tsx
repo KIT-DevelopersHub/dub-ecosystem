@@ -51,6 +51,13 @@ const openHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted,
 const lockHintStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #6f7a90)", fontSize: 11, fontWeight: 600 };
 const detailCellStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8 };
 
+/** 一覧で範囲を見渡すための一言。編集範囲は 3 段階が「編集」のときだけ効くので出す。 */
+function membersScopeSummary(selected: readonly identity.PermissionKey[], level: Level): string {
+  const view = policy.MEMBERS_SCOPE_LABELS[policy.membersScopeOf(selected, "view")];
+  if (level !== policy.AppAccessLevel.Edit) return `閲覧: ${view}`;
+  return `閲覧: ${view} / 編集: ${policy.MEMBERS_SCOPE_LABELS[policy.membersScopeOf(selected, "edit")]}`;
+}
+
 export function AppAccessTable({
   selected,
   disabled,
@@ -135,7 +142,7 @@ export function AppAccessTable({
     {
       key: "detail",
       header: "詳細設定",
-      minWidth: "10rem",
+      minWidth: "22rem",
       noWrap: true,
       hideable: false,
       // 細かい権限を持つアプリだけ 設定 ボタンを出す。無効なアプリは配下の設定が効かないので
@@ -150,6 +157,11 @@ export function AppAccessTable({
             <span style={openHintStyle} data-testid={`${idPrefix}-app-detail-count-${row.id}`}>
               {row.level === policy.AppAccessLevel.None ? "—" : `${row.detail.granted} / ${row.detail.total}`}
             </span>
+            {row.id === "members" && row.level !== policy.AppAccessLevel.None ? (
+              <span style={openHintStyle} data-testid={`${idPrefix}-app-members-scope`}>
+                {membersScopeSummary(selected, row.level)}
+              </span>
+            ) : null}
             {row.level !== policy.AppAccessLevel.None && (extraDetailCount?.[row.id] ?? 0) > 0 ? (
               <Badge tone="info" testId={`${idPrefix}-app-detail-extra-${row.id}`}>
                 別ロール {extraDetailCount![row.id]}

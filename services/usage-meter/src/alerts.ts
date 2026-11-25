@@ -19,10 +19,8 @@ const SERVICE_NAME = "usage-meter";
 const ALERT_TYPE = "usage.threshold_breached";
 const FAILURE_ALERT_TYPE = "usage.collection_failed";
 const DEFAULT_ALERT_EMAIL = "admin@developershub.jp";
-// Default admin fan-out roles (mirrors the feedback -> admin flow: role_sys_admin /
-// role_sys_maintainer). The notification service expands these to inboxes, so in-app
-// alerts reach admins WITHOUT any USAGE_ALERT_ADMIN_USER_IDS config.
-const DEFAULT_ALERT_ROLE_IDS = ["role_sys_admin", "role_sys_maintainer"];
+// Default in-app fan-out: the 管理者向け audience — whoever holds notif:receive_admin in
+// ロール管理 (「管理者向け通知を受け取る」). An explicit USAGE_ALERT_ADMIN_ROLE_IDS still wins.
 
 /** Persistence for per-day alert dedup (implemented over Durable Object storage). */
 export interface DedupStore {
@@ -62,10 +60,9 @@ function parseCsv(csv: string | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** Roles to fan out the in-app alert to: env override, else the default admin/maintainer. */
+/** Roles to fan out the in-app alert to: the env override only (else the admin audience). */
 function alertRoleIds(env: Env): string[] {
-  const configured = parseCsv(env.USAGE_ALERT_ADMIN_ROLE_IDS);
-  return configured.length > 0 ? configured : DEFAULT_ALERT_ROLE_IDS;
+  return parseCsv(env.USAGE_ALERT_ADMIN_ROLE_IDS);
 }
 
 /** One admin alert, rendered for both channels. */
@@ -110,7 +107,7 @@ async function deliverAdminAlert(
   }
 
   // ---- channel 2: in-app EVT_NOTIFICATION (role fan-out, reliable) ----
-  // Roles default to admin/maintainer so this fires WITHOUT any user-id config; an
+  // Defaults to the 管理者向け audience so this fires WITHOUT any user-id config; an
   // explicit USAGE_ALERT_ADMIN_USER_IDS list (if set) is unioned in.
   if (env.SVC_NOTIFICATION) {
     out.inAppAttempted = true;
@@ -128,6 +125,7 @@ async function deliverAdminAlert(
       };
       const roleIds = alertRoleIds(env);
       if (roleIds.length > 0) req.recipientRoles = roleIds;
+      else req.recipientAudiences = ["admin"];
       await client.post<{ notificationId: string; deduplicated: boolean }, notification.NotifyRequest>(ctx, "/notify", req);
     } catch (err) {
       log?.("usage alert in-app notify failed (best-effort)", { error: err instanceof Error ? err.message : String(err) });

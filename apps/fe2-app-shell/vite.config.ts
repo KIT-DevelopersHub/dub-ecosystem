@@ -36,4 +36,8 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  // onnxruntime-web (名刺の OCR) は wasm を自分の位置からの相対で読む。事前バンドルすると位置がずれて dev で読めない。
+  optimizeDeps: {
+    exclude: ["onnxruntime-web"],
+  },
 });

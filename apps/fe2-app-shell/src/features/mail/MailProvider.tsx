@@ -3,6 +3,7 @@
 // screens read a live, session-wired client. Shaped as { api, children } so the
 // shell's providerWrapper() can mount it like every other feature Provider.
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { useOptionalCanEdit } from "../../auth/AuthProvider.tsx";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { createMailApi, type MailApi } from "./mailApi.tsx";
 
@@ -22,6 +23,12 @@ export function useMailApi(): MailApi {
   const ctx = useContext(MailApiCtx);
   if (!ctx) throw new Error("useMailApi must be used within <MailProvider>");
   return ctx;
+}
+
+/** May this viewer write mail? The gateway requires メール編集 + mail:send on every compose
+ *  route, so a read-only viewer must not be offered one. Default true outside the shell. */
+export function useCanCompose(): boolean {
+  return useOptionalCanEdit("mail", "mail:send") ?? true;
 }
 
 /** Like useMailApi, but null outside a provider — for best-effort decorations (sender icons). */

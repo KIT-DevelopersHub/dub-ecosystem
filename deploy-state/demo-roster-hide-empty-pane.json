@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "roster-hide-empty-pane",
+  "worker": "dub-demo-roster-hide-empty-pane",
+  "url": "https://dub-demo-roster-hide-empty-pane.developershub-site.workers.dev",
+  "deployedSha": "92551a2b",
+  "branch": "commander/task-ctask_01M6J3PPCTZTKEGYKVC6JDTVXB",
+  "actor": "ko-tarou",
+  "markers": ["fe7-user-pane"],
+  "live": true,
+  "verifiedAt": "2026-11-04T01:47:57Z",
+  "updatedAt": "2026-11-04T01:47:57Z",
+  "note": "メール名簿: 未選択時の右ペイン非表示"
+}

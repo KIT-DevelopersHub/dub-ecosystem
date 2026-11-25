@@ -4,6 +4,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { IconButton } from "@dub/ui";
 import {
+  HOUR_PX,
+  SNAP_MINUTES as SNAP_MIN,
   WEEKDAYS_JA,
   addMonthsDay,
   dateOfDay,
@@ -23,12 +25,11 @@ import {
   type CalendarItem,
 } from "./calendar-model";
 import { ItemButton, PendingMark, rectOf, useItemTitle, type AnchorRect } from "./CalendarPanels.tsx";
+import { useItemDragContext } from "./useItemDrag.tsx";
 import { itemVisual, statusVisual } from "./taskVisuals";
 import styles from "./calendar.module.css";
 
-const HOUR_PX = 48;
 const ROW_PX = 22;
-const SNAP_MIN = 15;
 
 function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
@@ -234,6 +235,8 @@ export function TimeGrid({
               <div
                 key={d}
                 className={styles.tgAllDayCell}
+                data-cal-slot="allday"
+                data-cal-day={d}
                 onClick={(e) => canCreate && onCreateAllDay(d, rectOf(e.currentTarget))}
                 aria-label={`${dayKeyOf(d)} 終日`}
               />
@@ -243,6 +246,8 @@ export function TimeGrid({
                 key={b.item.task.id}
                 item={b.item}
                 onSelect={onSelectItem}
+                draggable
+                resizable={!b.clipEnd}
                 className={cx(b.clipStart && styles.barClipStart, b.clipEnd && styles.barClipEnd)}
                 style={{
                   top: 2 + b.lane * ROW_PX,
@@ -255,7 +260,7 @@ export function TimeGrid({
         </div>
       </div>
 
-      <div className={styles.tgScroll} ref={scrollRef}>
+      <div className={styles.tgScroll} ref={scrollRef} data-cal-scroll>
         <div className={styles.tgGutter} aria-hidden="true">
           {Array.from({ length: 23 }, (_, i) => i + 1).map((h) => (
             <span key={h} className={styles.tgHourLabel} style={{ top: h * HOUR_PX }}>
@@ -271,6 +276,8 @@ export function TimeGrid({
               role="gridcell"
               aria-label={dayKeyOf(d)}
               data-testid={`calendar-col-${dayKeyOf(d)}`}
+              data-cal-slot="timed"
+              data-cal-day={d}
               onPointerDown={(e) => onDown(e, d)}
               onPointerMove={onMove}
               onPointerUp={onUp}
@@ -329,6 +336,7 @@ function TimedBlock({
   const title = useItemTitle()(it.task);
   const time = `${formatTime(it.start!)}～${formatTime(it.end!)}`;
   const widthPct = 100 / p.columns;
+  const drag = useItemDragContext();
   return (
     <button
       type="button"
@@ -337,6 +345,8 @@ function TimedBlock({
         it.task.status === "cancelled" && styles.cancelled,
         past && styles.past,
         isVacationTask(it.task) && styles.vacation,
+        drag.draggingId === it.task.id && styles.dragging,
+        drag.deniedId === it.task.id && styles.dragDenied,
       )}
       style={{
         top: (p.top / 60) * HOUR_PX,
@@ -346,7 +356,10 @@ function TimedBlock({
         backgroundColor: v.color,
       }}
       title={`${title}（${time}）`}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        drag.begin(e, it);
+      }}
       onClick={(e) => onSelect(it, rectOf(e.currentTarget))}
       data-testid={`calendar-item-${it.task.id}`}
     >
@@ -364,6 +377,7 @@ function TimedBlock({
           <div className={styles.tgEventTime}>{time}</div>
         </>
       )}
+      {drag.canDrag(it) && <span className={styles.resizeBottom} data-cal-resize data-testid={`calendar-resize-${it.task.id}`} />}
     </button>
   );
 }
@@ -497,6 +511,8 @@ function MonthWeek({
             role="gridcell"
             aria-label={dayKeyOf(d)}
             data-testid={`calendar-day-${dayKeyOf(d)}`}
+            data-cal-slot="day"
+            data-cal-day={d}
             onClick={(e) => canCreate && onCreateAllDay(d, rectOf(e.currentTarget))}
           >
             <button
@@ -518,6 +534,8 @@ function MonthWeek({
           key={s.item.task.id}
           item={s.item}
           onSelect={onSelectItem}
+          draggable
+          resizable={!s.clipEnd}
           className={cx(s.clipStart && styles.barClipStart, s.clipEnd && styles.barClipEnd)}
           style={{
             top: 32 + s.lane * ROW_PX,
@@ -541,6 +559,7 @@ function MonthWeek({
                 key={it.task.id}
                 item={it}
                 onSelect={onSelectItem}
+                draggable
                 style={{ top: 32 + (lanesUsed + i) * ROW_PX, left, width }}
               />
             ))}

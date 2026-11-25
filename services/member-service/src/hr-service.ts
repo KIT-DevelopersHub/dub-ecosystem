@@ -21,6 +21,11 @@ const errVersionConflict = (id: string): DubError =>
   new DubError("HR_VERSION_CONFLICT", `Version conflict for ${id}`, { status: 409 });
 const errBadTransition = (from: string, to: string): DubError =>
   new DubError("HR_INVALID_TRANSITION", `Cannot move applicant from ${from} to ${to}`, { status: 409 });
+const errApplicantJoined = (id: string): DubError =>
+  new DubError("HR_APPLICANT_JOINED", `Applicant ${id} has joined the roster; remove the member instead`, { status: 409 });
+/** 応募者が日程を選べる状態ではない (辞退・選考が進んだなど)。 */
+export const errBookingClosed = (): DubError =>
+  new DubError("HR_BOOKING_CLOSED", "This booking link can no longer be used", { status: 409 });
 const errJoinRequired = (id: string): DubError =>
   new DubError("HR_JOIN_REQUIRED", `Applicant ${id} is not on the roster yet; use POST /join (採用) first`, { status: 409 });
 
@@ -61,7 +66,7 @@ function toApplicant(r: ApplicantRow): hr.Applicant {
 
 export interface HrDeps extends Pick<AppDeps, "orgId" | "now" | "repo"> {
   hrRepo: HrRepo;
-  newHrId: (prefix: "app" | "hre") => string;
+  newHrId: AppDeps["newHrId"];
 }
 
 export class HrService {
@@ -182,6 +187,59 @@ export class HrService {
     return this.get(ctx, id);
   }
 
+  /** 応募者が日程を選んだ: 面談確定にして面談日を入れる。人事の同時編集に負けないよう読み直して数回試す。 */
+  async confirmInterview(ctx: ReqCtx, id: string, interviewAt: string, note: string): Promise<void> {
+    for (let i = 0; i < 3; i++) {
+      const cur = await this.load(id);
+      if (cur.stage !== "scheduling") throw errBookingClosed(); // 読み直した間に辞退された場合に上書きしない
+      const next: ApplicantRow = { ...cur, stage: "interview_set", interviewAt, version: cur.version + 1, updatedAt: this.deps.now() };
+      if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) continue;
+      // ここから先は確定済み。履歴だけ書けなくても呼び出し側に枠を解放させない。
+      await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: "interview_set", body: note }).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn(JSON.stringify({ level: "warn", service: "member-service", msg: "hr interview event failed", applicantId: id, requestId: ctx.requestId, error: String(err) }));
+      });
+      return;
+    }
+    throw errVersionConflict(id);
+  }
+
+  /**
+   * 面談結果の登録で進める (面談確定/面談済み → 採用/不採用)。同時編集に負けないよう読み直して数回試す。
+   * 既に to なら何もしない (再試行で冪等)。memberId を渡すと名簿の行も結ぶ。
+   */
+  async applyResult(ctx: ReqCtx, id: string, to: hr.ApplicantStage, note: string, memberId?: string): Promise<hr.Applicant> {
+    for (let i = 0; i < 3; i++) {
+      const cur = await this.load(id);
+      if (cur.stage === to && (memberId === undefined || cur.memberId === memberId)) return toApplicant(cur);
+      const next: ApplicantRow = {
+        ...cur,
+        stage: to,
+        ...(memberId !== undefined ? { memberId } : {}),
+        version: cur.version + 1,
+        updatedAt: this.deps.now(),
+      };
+      if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) continue;
+      await this.event(ctx, id, memberId !== undefined ? "joined" : "stage", { fromStage: cur.stage, toStage: to, body: note });
+      return toApplicant(next);
+    }
+    throw errVersionConflict(id);
+  }
+
+  /** 人事が予約を取り消した: 面談日を消し、面談確定なら面談日程調整中へ戻す (同じ URL で選び直せる)。 */
+  async cancelInterview(ctx: ReqCtx, id: string, note: string): Promise<void> {
+    for (let i = 0; i < 3; i++) {
+      const cur = await this.deps.hrRepo.getApplicant(id);
+      if (!cur || cur.orgId !== this.deps.orgId || cur.archivedAt !== null) return;
+      const stage: hr.ApplicantStage = cur.stage === "interview_set" ? "scheduling" : cur.stage;
+      const next: ApplicantRow = { ...cur, stage, interviewAt: null, version: cur.version + 1, updatedAt: this.deps.now() };
+      if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) continue;
+      await this.event(ctx, id, "stage", { fromStage: cur.stage, toStage: stage, body: note });
+      return;
+    }
+    throw errVersionConflict(id);
+  }
+
   async addNote(ctx: ReqCtx, id: string, body: hr.AddApplicantNoteRequest): Promise<hr.ApplicantDetail> {
     await this.load(id);
     const note = text(body.body, "body");
@@ -209,10 +267,14 @@ export class HrService {
       if (!person || person.orgId !== this.deps.orgId || person.archivedAt !== null) {
         throw errors.validationFailed([{ field: "memberId", reason: "not_found" }]);
       }
+      let joined = person;
       if (person.status === "invited" || person.status === "considering") {
         const promoted = { ...person, status: "added" as const, version: person.version + 1, updatedAt: this.deps.now() };
         if (!(await this.deps.repo.updatePerson(promoted, person.version))) throw errVersionConflict(person.id);
+        joined = promoted;
       }
+      // 既にアカウントに紐付いた人なら、招待中のアカウントを有効化 (best-effort)。
+      await this.members.activateLinkedIdentity(ctx, joined, "hr.join");
       memberId = person.id;
     } else {
       const grade = cur.grade ? member.normalizeGrade(cur.grade) : null;
@@ -233,12 +295,18 @@ export class HrService {
     return { applicant: toApplicant(next), memberId };
   }
 
-  /** 論理削除 (履歴は残す)。 */
+  /**
+   * 論理削除 (archived_at)。一覧・詳細・フォーム回答の氏名から消えるが、履歴 (member_hr_events) と
+   * フォーム回答 (member_hr_form_responses) は FK で応募者行にぶら下がったまま残す (物理削除しない)。
+   * 採用〜オンボーディング完了の人はオンボーディングの進捗がこの行を読むので 409 (名簿側で外す)。
+   * 辞退などに動かした人は memberId が残っていても消せる。名簿の行には触らない。
+   */
   async remove(ctx: ReqCtx, id: string): Promise<void> {
     const cur = await this.load(id);
+    if (hr.blocksRemoval(cur.stage, cur.memberId !== null)) throw errApplicantJoined(id);
     const next: ApplicantRow = { ...cur, archivedAt: this.deps.now(), version: cur.version + 1, updatedAt: this.deps.now() };
     if (!(await this.deps.hrRepo.updateApplicant(next, cur.version))) throw errVersionConflict(id);
-    void ctx;
+    await this.event(ctx, id, "deleted", { fromStage: cur.stage });
   }
 
   /** 採用済み (採用 / オンボーディング調整 / オンボーディング完了) の人ごとのオンボーディング進捗。 */

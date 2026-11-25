@@ -31,7 +31,7 @@ export function buildBroadcastInput(
 ): IngestInput {
   return {
     type: MEMBER_BROADCAST_TYPE,
-    recipients: { all: true },
+    recipients: { audiences: ["all"] },
     title: source.title,
     body: source.body,
     priority: "normal",

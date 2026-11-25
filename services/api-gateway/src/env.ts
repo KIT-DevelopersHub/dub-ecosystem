@@ -29,6 +29,7 @@ export interface GatewayEnv {
   // test env builders still satisfy the interface; missing -> upstreamUnavailable on /commander.
   SVC_COMMANDER_RELAY?: Fetcher;
   SVC_LP_ANALYTICS: Fetcher; // lp-analytics (LP管理: 流入URL + LP 訪問ログ)
+  SVC_LP_TICKETS: Fetcher; // lp-tickets (LP チケット販売: /lp/tickets*)
 
   // ---- Queue producer (the one publish exception) ----
   EVT_NOTIFICATION?: Queue<DubEventEnvelope>;
@@ -43,6 +44,7 @@ export interface GatewayEnv {
   ALLOWED_ORIGINS?: string;
   DEFAULT_MAX_BODY_BYTES?: string;
   FILES_MAX_BODY_BYTES?: string;
+  MAIL_MAX_BODY_BYTES?: string;
   TURNSTILE_SECRET?: string;
   // Origins whose LP pageview beacons are recorded (comma-separated). Default = the
   // production conference LP (handlers/public-lp-visit.ts DEFAULT_LP_ORIGINS).

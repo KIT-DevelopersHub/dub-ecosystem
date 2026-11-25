@@ -1,0 +1,25 @@
+{
+  "name": "@dub/lp-tickets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevHub (Dub) lp-tickets — LP チケット販売 (Stripe Checkout・券種・注文・クーポン). Cloudflare Worker + Hono + 専用 D1 dub-tickets.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dub/db": "workspace:*",
+    "@dub/errors": "workspace:*",
+    "@dub/http": "workspace:*",
+    "@dub/observability": "workspace:*",
+    "@dub/policy-gate": "workspace:*",
+    "@dub/types": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}

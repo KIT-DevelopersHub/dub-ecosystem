@@ -21,7 +21,16 @@ import type { AppDeps } from "./types";
 import { POLICY_TABLE } from "./policy-table";
 import { MemberService, type ReqCtx } from "./service";
 import { HrService } from "./hr-service";
-import type { hr } from "@dub/types";
+import { HrFormService } from "./hr-form-service";
+import { registerHrInterviewFormRoutes } from "./hr-form-routes";
+import { HrInterviewService } from "./hr-interview-service";
+import { registerHrInterviewRoutes } from "./hr-interview-routes";
+import { HrResultService } from "./hr-result-service";
+import type { goal, hr, hrResult, sponsor } from "@dub/types";
+import { GoalService } from "./goal-service";
+import { SponsorService } from "./sponsor-service";
+import { SponsorLeadService } from "./sponsor-lead-service";
+import { SponsorMailService } from "./sponsor-mail-service";
 
 // Actor stamped on a 参加届 that arrives through the public (unauthenticated) path.
 // The gateway forwards it as a genuine service-to-service call (x-dub-internal), but
@@ -67,6 +76,10 @@ async function readJson<T>(c: Context): Promise<T> {
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const svc = new MemberService(deps);
   const hrSvc = new HrService(deps, svc);
+  const sponsorSvc = new SponsorService(deps);
+  const sponsorLeadSvc = new SponsorLeadService(deps);
+  const sponsorMailSvc = new SponsorMailService(deps);
+  const goalSvc = new GoalService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "member-service" }));
@@ -101,7 +114,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.get("/members/internal/team-members", async (c) => {
     const raw = c.req.query("teamIds") ?? "";
     const teamIds = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-    return c.json(await svc.listTeamIdentityUserIds(teamIds));
+    // excludeDeclined: a team mailing list delivers mail bodies, so someone who left must not
+    // keep receiving them. Mentions omit it and keep notifying the whole roster as before.
+    return c.json(await svc.listTeamIdentityUserIds(teamIds, { excludeDeclined: c.req.query("excludeDeclined") === "1" }));
   });
 
   // 名簿の Gmail 逆引き (drive-share-service → member-service, s2s のみ). カレンダー > ミーティングの
@@ -115,6 +130,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   // 公開オンボーディング案内 (gateway GET /api/v1/public/onboarding → ここ, s2s のみ)。
   // 未ログインの新メンバーが見るページの中身。案内項目は公開前提なので応答は管理画面と同じ。
+  // スポンサーのメール連携 (mail-gateway → member-service, s2s のみ・ユーザーなし)。
+  app.post("/members/internal/sponsor/mail-activity", async (c) => {
+    const body = await readJson<sponsor.MailActivityNotice>(c);
+    return c.json(await sponsorMailSvc.recordMailActivity(body));
+  });
+
   app.get("/members/internal/onboarding", async (c) => {
     return c.json(await svc.getOnboardingGuide());
   });
@@ -136,9 +157,24 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.updateSelfParticipation(ctx, ctx.userId, body));
   });
 
+  // 参加届からのアカウント発行 (api-gateway onboard-account only)。対象 = 参加届に紐付いた
+  // 追加済の名簿行でアカウントがまだ無い人。呼び出し元の鍵は gateway の表が検査済み。
+  app.get("/members/internal/participation/:id/onboard-target", async (c) => {
+    return c.json(await svc.onboardTarget(c.req.param("id")));
+  });
+  app.post("/members/internal/participation/:id/onboard-link", async (c) => {
+    const body = await readJson<member.OnboardLinkRequest>(c);
+    return c.json(await svc.onboardLink(reqCtx(c), c.req.param("id"), body));
+  });
+
   // ---- overview (all three views) ----
   app.get("/members/overview", async (c) => {
     return c.json(await svc.getOverview(reqCtx(c)));
+  });
+
+  // 組織図までのロール向け。形は overview と同じで、個人情報の項目は空。
+  app.get("/members/org-overview", async (c) => {
+    return c.json(await svc.getOrgOverview(reqCtx(c)));
   });
 
   // チーム単位メンション用の自分視点のチーム情報 (AUTHENTICATED in the table: signed-in なら
@@ -184,9 +220,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const body = await readJson<member.LinkIdentityRequest>(c);
     return c.json(await svc.linkIdentity(reqCtx(c), c.req.param("id"), body));
   });
+  app.post("/members/people/:id/profile-reminder", async (c) => {
+    return c.json(await svc.sendProfileReminder(reqCtx(c), c.req.param("id")));
+  });
   app.patch("/members/people/:id", async (c) => {
     const body = await readJson<member.UpdateMemberRequest>(c);
     return c.json(await svc.updateMember(reqCtx(c), c.req.param("id"), body));
+  });
+  app.patch("/members/people/:id/org", async (c) => {
+    const body = await readJson<member.UpdateMemberOrgRequest>(c);
+    return c.json(await svc.updateMemberOrg(reqCtx(c), c.req.param("id"), body));
   });
   app.delete("/members/people/:id", async (c) => {
     await svc.deleteMember(reqCtx(c), c.req.param("id"));
@@ -249,6 +292,27 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ ok: true });
   });
 
+  // ---- 人事: 面談申し込みフォーム (定義の編集・回答・公開ページの s2s 受付)。ルートは hr-form-routes.ts ----
+  const hrInterviewSvc = new HrInterviewService(deps, hrSvc, svc);
+  registerHrInterviewFormRoutes(app, new HrFormService(deps, hrSvc, (ctx, id) => hrInterviewSvc.onApplied(ctx, id)));
+  registerHrInterviewRoutes(app, hrInterviewSvc);
+  // 面談結果の登録 (api-gateway interview-result だけが呼ぶ。INTERNAL)。
+  const hrResultSvc = new HrResultService(deps, hrSvc, svc);
+  app.post("/members/internal/hr/applicants/:id/interview-result/claim", async (c) => {
+    const body = await readJson<hrResult.ClaimInterviewResultRequest>(c);
+    return c.json(await hrResultSvc.claim(reqCtx(c), c.req.param("id"), body));
+  });
+  app.post("/members/internal/hr/applicants/:id/interview-result/link", async (c) => {
+    const body = await readJson<hrResult.LinkInterviewResultRequest>(c);
+    return c.json(await hrResultSvc.link(reqCtx(c), c.req.param("id"), body));
+  });
+  app.post("/members/internal/hr/applicants/:id/interview-result/complete", async (c) => {
+    return c.json(await hrResultSvc.complete(reqCtx(c), c.req.param("id")));
+  });
+  app.post("/members/internal/hr/applicants/:id/interview-result/release", async (c) => {
+    return c.json(await hrResultSvc.release(c.req.param("id")));
+  });
+
   // ---- 人事 (面談 → 採用 → オンボーディング) ----
   // 認可は表 (人事アプリの 閲覧/編集 + hr:read / hr:write / hr:admin)。採用 (join) は名簿に行を
   // 足すので hr:admin。どの名簿行に結ぶか・ステータス遷移の妥当性・楽観ロックはハンドラ (hr-service)。
@@ -282,6 +346,80 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.put("/members/hr/onboarding/:memberId/items/:itemId", async (c) => {
     const body = await readJson<hr.SetOnboardingCheckRequest>(c);
     return c.json(await hrSvc.setOnboardingCheck(reqCtx(c), c.req.param("memberId"), c.req.param("itemId"), body));
+  });
+
+  // ---- スポンサー (フェーズ1 = 名刺の共有) ----
+  // 目標管理。認可は表、入力の検証と楽観ロックは goal-service。
+  app.get("/members/goals", async (c) => c.json(await goalSvc.list(reqCtx(c), c.req.query("month"))));
+  app.put("/members/goals/:teamId/:month", async (c) => {
+    const body = await readJson<goal.PutGoalRequest>(c);
+    return c.json(await goalSvc.put(reqCtx(c), c.req.param("teamId"), c.req.param("month"), body));
+  });
+  app.delete("/members/goals/:teamId/:month", async (c) => {
+    await goalSvc.remove(c.req.param("teamId"), c.req.param("month"));
+    return c.body(null, 204);
+  });
+
+  // 認可は表 (スポンサーアプリの 閲覧/編集 + sponsor:read / sponsor:write / sponsor:admin)。
+  // 写真は JSON ではなく生のバイト列 (Content-Type = 形式)。形式・サイズ・楽観ロックはハンドラ (sponsor-service)。
+  app.get("/members/sponsor/leads", async (c) => c.json(await sponsorLeadSvc.list(reqCtx(c))));
+  // メール連携 (sponsor-mail-service)。一括補完は :id より先に登録する。
+  app.post("/members/sponsor/leads/mail-backfill", async (c) => {
+    const body = await readJson<sponsor.MailBackfillRequest>(c);
+    return c.json(await sponsorMailSvc.backfill(reqCtx(c), body));
+  });
+  app.post("/members/sponsor/leads/:id/contact-emails", async (c) => {
+    const body = await readJson<sponsor.RegisterContactEmailRequest>(c);
+    return c.json(await sponsorMailSvc.registerContactEmail(reqCtx(c), c.req.param("id"), body));
+  });
+  app.get("/members/sponsor/leads/:id/activity", async (c) => c.json(await sponsorMailSvc.listActivity(reqCtx(c), c.req.param("id"))));
+  app.post("/members/sponsor/leads", async (c) => {
+    const body = await readJson<sponsor.CreateLeadRequest>(c);
+    return c.json(await sponsorLeadSvc.create(reqCtx(c), body), 201);
+  });
+  app.post("/members/sponsor/leads/import", async (c) => {
+    const body = await readJson<sponsor.ImportLeadsRequest>(c);
+    return c.json(await sponsorLeadSvc.importLeads(reqCtx(c), body), 201);
+  });
+  app.get("/members/sponsor/leads/:id", async (c) => c.json(await sponsorLeadSvc.get(reqCtx(c), c.req.param("id"))));
+  app.patch("/members/sponsor/leads/:id", async (c) => {
+    const body = await readJson<sponsor.UpdateLeadRequest>(c);
+    return c.json(await sponsorLeadSvc.update(reqCtx(c), c.req.param("id"), body));
+  });
+  app.delete("/members/sponsor/leads/:id", async (c) => {
+    await sponsorLeadSvc.remove(reqCtx(c), c.req.param("id"));
+    return c.body(null, 204);
+  });
+  // 目標値は目標管理アプリの KPI が正で、ここは読むだけ。
+  app.get("/members/sponsor/goals", async (c) => c.json(await goalSvc.sponsorGoals()));
+  app.get("/members/sponsor/cards", async (c) => c.json(await sponsorSvc.list(reqCtx(c))));
+  app.post("/members/sponsor/cards", async (c) => {
+    const body = await readJson<sponsor.CreateCardRequest>(c);
+    return c.json(await sponsorSvc.create(reqCtx(c), body), 201);
+  });
+  app.get("/members/sponsor/cards/:id", async (c) => c.json(await sponsorSvc.get(reqCtx(c), c.req.param("id"))));
+  app.patch("/members/sponsor/cards/:id", async (c) => {
+    const body = await readJson<sponsor.UpdateCardRequest>(c);
+    return c.json(await sponsorSvc.update(reqCtx(c), c.req.param("id"), body));
+  });
+  app.delete("/members/sponsor/cards/:id", async (c) => {
+    await sponsorSvc.remove(reqCtx(c), c.req.param("id"));
+    return c.body(null, 204);
+  });
+  app.put("/members/sponsor/cards/:id/image", async (c) => {
+    const len = Number(c.req.header("content-length"));
+    const card = await sponsorSvc.putImage(
+      reqCtx(c),
+      c.req.param("id"),
+      c.req.header("content-type"),
+      () => c.req.arrayBuffer(),
+      Number.isFinite(len) && len > 0 ? len : undefined,
+    );
+    return c.json(card);
+  });
+  app.get("/members/sponsor/cards/:id/image", async (c) => {
+    const img = await sponsorSvc.getImage(reqCtx(c), c.req.param("id"));
+    return c.body(img.body, 200, { "content-type": img.contentType, "cache-control": "private, max-age=300" });
   });
 
   return app;

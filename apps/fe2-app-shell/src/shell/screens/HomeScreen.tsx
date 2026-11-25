@@ -25,6 +25,7 @@ import { useRecentVisits } from "../useVisitTracker.tsx";
 import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
+import { RegularMeetingsCard } from "./dashboard/RegularMeetingsCard.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
   CONFERENCE,
@@ -67,6 +68,8 @@ const APP_TILES: AppTile[] = [
   // LP管理 はランチャーシート経由でしか開けず「どこにあるか分からない」状態だったのでタイルを出す。
   { id: "lp", label: "LP管理", desc: "LPの版・流入URL・流入ログ", icon: "megaphone", path: "/lp" },
   { id: "hr", label: "人事", desc: "面談・採用・オンボーディング", icon: "user", path: "/hr" },
+  { id: "sponsor", label: "スポンサー", desc: "名刺と営業の進捗・目標をチームで共有", icon: "folder", path: "/sponsor" },
+  { id: "goals", label: "目標管理", desc: "チームの月間目標と KPI の進捗", icon: "flag", path: "/goals" },
 ];
 
 /** One clickable app tile. Renders as an anchor (real href for accessibility /
@@ -467,6 +470,8 @@ export function HomeScreen({
         <aside className="fe2-home-side">
           {/* 最近開いた (P3-1): client-side jump-back, above the live panels. */}
           <RecentOpenedCard {...(onNavigate ? { onNavigate } : {})} />
+          {/* 定例に参加: Dub から Meet を開くと出席が記録される (対象の定例がある人にだけ出る)。 */}
+          <RegularMeetingsCard api={api} />
           <Card
             testId="fe2-home-events"
             header={

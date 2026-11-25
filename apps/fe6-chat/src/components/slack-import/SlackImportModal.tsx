@@ -68,7 +68,7 @@ function SlackImportModalBody({ onClose, onImported, onOpenChannel }: Omit<Slack
           <Icon name="info" size="sm" />
           <ul>
             <li>Slack 無料プランのため、取り込めるのは直近 90 日分のメッセージとファイルです。</li>
-            <li>非公開チャンネルは、Slack で LMB を招待すると一覧に表示されます。</li>
+            <li>Private チャンネルは、Slack で LMB を招待すると一覧に表示されます。</li>
             <li>同じ名前の新しいチャンネルとして作成されます。何度取り込んでも重複しません。</li>
           </ul>
         </div>

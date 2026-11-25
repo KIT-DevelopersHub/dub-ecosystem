@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "lp-form-share",
+  "worker": "dub-demo-lp-form-share",
+  "url": "https://dub-demo-lp-form-share.developershub-site.workers.dev",
+  "deployedSha": "b7238a52",
+  "branch": "feat/lp-form-builder-share",
+  "actor": "ko-tarou",
+  "markers": ["補足説明（任意）","チェックボックス（複数選ぶ）"],
+  "live": true,
+  "verifiedAt": "2026-11-05T19:49:34Z",
+  "updatedAt": "2026-11-05T19:49:34Z",
+  "note": "LP管理 入力項目の形式追加 + LP demo: https://lp-form-share-demo.developershub-site.workers.dev/proposals?proposals=on (teardown: wrangler delete --name lp-form-share-demo)"
+}

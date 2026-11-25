@@ -31,14 +31,14 @@ function setup(api = new MockChatClient(demoSeed())) {
 }
 
 describe("SlackImportModal", () => {
-  it("shows skeletons, then the picker with 公開/非公開 and the already-imported badge", async () => {
+  it("shows skeletons, then the picker with Public/Private and the already-imported badge", async () => {
     setup();
     expect(screen.getByTestId("fe6-slack-import-channels-loading")).toBeInTheDocument();
     const rows = await screen.findAllByTestId("fe6-slack-import-channel");
     const design = rows.find((r) => r.dataset.channelName === "design-review")!;
     expect(within(design).getByText("取り込み済み")).toBeInTheDocument();
     const core = rows.find((r) => r.dataset.channelName === "conference-core")!;
-    expect(within(core).getByText("非公開")).toBeInTheDocument();
+    expect(within(core).getByText("Private")).toBeInTheDocument();
     expect(screen.getByText(/直近 90 日分/)).toBeInTheDocument();
     expect(screen.getByText(/LMB を招待すると一覧に表示/)).toBeInTheDocument();
   });

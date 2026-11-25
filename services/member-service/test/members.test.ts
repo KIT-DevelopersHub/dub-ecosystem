@@ -29,7 +29,7 @@ describe("member-service HTTP surface", () => {
 
   it("write requires 運営メンバー=編集 (閲覧 + the domain read key is not enough)", async () => {
     const app = createApp(
-      makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read", "app:members:view"])) }),
+      makeDeps({ authz: fakeAuthz(new Set<identity.PermissionKey>(["identity:read", "app:members:view", "members:roster_view"])) }),
     );
     const res = await call(app, "POST", "/members/teams", { body: { name: "会場" } });
     expect(res.status).toBe(403);
@@ -37,7 +37,7 @@ describe("member-service HTTP surface", () => {
 
   // ── policy layer: the 運営メンバー app's 3 段階 gates writes server-side ─────────────
   it("403s a write when ロール管理 set 運営メンバー to 閲覧 (even with identity:admin)", async () => {
-    const viewer = new Set<identity.PermissionKey>(["identity:read", "identity:admin", "app:members:view"]);
+    const viewer = new Set<identity.PermissionKey>(["identity:read", "identity:admin", "app:members:view", "members:roster_view"]);
     const app = createApp(makeDeps({ authz: fakeAuthz(viewer) }));
     expect((await call(app, "GET", "/members/overview")).status).toBe(200); // 閲覧 still reads
     expect((await call(app, "POST", "/members/teams", { body: { name: "会場" } })).status).toBe(403);

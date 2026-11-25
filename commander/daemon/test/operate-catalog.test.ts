@@ -21,14 +21,11 @@ const tables = new Map<string, PolicyRoute[]>();
 function tableOf(service: string): PolicyRoute[] {
   let t = tables.get(service);
   if (!t) {
-    // lp-analytics has no policy-table.ts yet; its gate is requireAppAccess in app.ts.
     // commander-service is gated by its own protection-table.ts (OPERATOR / OPEN).
     t =
-      service === "lp-analytics"
-        ? extractAppGuardRoutes(readFileSync(`${repoRoot}services/${service}/src/app.ts`, "utf8"))
-        : service === "commander-service"
-          ? extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/protection-table.ts`, "utf8"))
-          : extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/policy-table.ts`, "utf8"));
+      service === "commander-service"
+        ? extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/protection-table.ts`, "utf8"))
+        : extractPolicyRoutes(readFileSync(`${repoRoot}services/${service}/src/policy-table.ts`, "utf8"));
     tables.set(service, t);
   }
   return t;

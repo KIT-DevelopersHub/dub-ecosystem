@@ -1,12 +1,14 @@
-import { useState } from "react";
-import type { identity } from "@dub/types";
-import { PageHeader, Badge, Button, ConfirmDialog, EmptyState, ErrorState, SegmentedControl, SkeletonList } from "@dub/ui";
+import { useMemo, useState } from "react";
+import { PageHeader, Badge, Button, ConfirmDialog, EmptyState, ErrorState, Icon, SegmentedControl, SkeletonList, TextField } from "@dub/ui";
 import type { SegmentedOption } from "@dub/ui";
 import { useRoles, useDeleteRole } from "../hooks/useRosterApi";
 import { useCanAdminEdit } from "../hooks/usePermissions";
 import { useToast } from "../hooks/useToast";
 import { RolePermissionsEditor } from "./RolePermissionsEditor";
+import type { RoleView } from "../contracts/pending";
 import { errorMessage, displayError } from "../lib/errorDisplay";
+import { groupRoles, matchesRoleQuery, roleDeleteMessage, roleDisplayName, ROLE_GROUPS } from "../lib/roleGroups";
+import type { RoleGroupId } from "../lib/roleGroups";
 import styles from "./RoleListPage.module.css";
 
 // Single-screen role management. Roles are switched with the shared @dub/ui
@@ -20,6 +22,30 @@ import styles from "./RoleListPage.module.css";
 // never empty: the user lands on a populated matrix and reads the strip as "pick
 // a role" rather than an inert header. The pill slide + panel enter animation are
 // owned by the core component (see SegmentedControl) and RoleListPage.module.css.
+//
+// Roles are grouped by genre (システム / 運営ロール / チーム / 役職 / その他, see
+// lib/roleGroups) into collapsible sections, each with its own SegmentedControl;
+// the selection is still a single role across all sections. Open/closed state is
+// remembered per viewer in localStorage; a name filter spans every group.
+const OPEN_KEY = "fe7.roles.groupOpen";
+
+function readOpenState(): Partial<Record<RoleGroupId, boolean>> {
+  try {
+    const raw = globalThis.localStorage?.getItem(OPEN_KEY);
+    return raw ? (JSON.parse(raw) as Partial<Record<RoleGroupId, boolean>>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOpenState(state: Partial<Record<RoleGroupId, boolean>>) {
+  try {
+    globalThis.localStorage?.setItem(OPEN_KEY, JSON.stringify(state));
+  } catch {
+    /* storage unavailable (private mode etc.) — state just isn't remembered */
+  }
+}
+
 const nameStyle: React.CSSProperties = { fontWeight: 600 };
 const metaStyle: React.CSSProperties = { color: "var(--dub-color-text-muted, #57606a)", fontSize: 13 };
 const skeletonStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 8 };
@@ -36,7 +62,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
   const del = useDeleteRole();
   const canAdminEdit = useCanAdminEdit();
   const { toast } = useToast();
-  const [pendingDelete, setPendingDelete] = useState<identity.Role | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<RoleView | null>(null);
   // Explicit user pick. When null we fall back to the first role (effectiveId
   // below) so the panel is never empty on load and after a delete.
   // Deep link: ?role=<id>&app=<appId> opens that role with the app's 詳細設定 dialog, so a
@@ -47,6 +73,8 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
   });
   const [activeId, setActiveId] = useState<string | null>(() => deepLink.role);
   const canAdmin = canAdminEdit;
+  const [query, setQuery] = useState("");
+  const [openState, setOpenState] = useState(readOpenState);
 
   function confirmDelete() {
     if (!pendingDelete) return;
@@ -58,34 +86,56 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
 
   const items = roles.data?.items ?? [];
   // Default to the first role until the user picks another; if the current pick
-  // was deleted, it falls back to the first remaining role.
-  const effectiveId = (activeId && items.some((r) => r.id === activeId) ? activeId : items[0]?.id) ?? null;
+  // was deleted, it falls back to the first remaining role (see effectiveId below).
+
+  const groups = useMemo(() => groupRoles(items), [items]);
+  // The default is the first role of the first section (not raw API order, which may
+  // start with a collapsed auto group).
+  const effectiveId = (activeId && items.some((r) => r.id === activeId) ? activeId : groups[0]?.roles[0]?.id) ?? null;
   const active = items.find((r) => r.id === effectiveId) ?? null;
+  const filtering = query.trim() !== "";
+  const visibleGroups = groups
+    .map((g) => ({ ...g, roles: g.roles.filter((r) => matchesRoleQuery(r, query)) }))
+    .filter((g) => g.roles.length > 0);
+  // A deep-linked role opens its section on first render even if it defaults closed.
+  const deepLinkGroup = deepLink.role ? groups.find((g) => g.roles.some((r) => r.id === deepLink.role))?.id : undefined;
+  const isOpen = (id: RoleGroupId) =>
+    filtering || (openState[id] ?? (id === deepLinkGroup || ROLE_GROUPS.find((g) => g.id === id)!.defaultOpen));
+  function toggleGroup(id: RoleGroupId) {
+    const next = { ...openState, [id]: !isOpen(id) };
+    setOpenState(next);
+    writeOpenState(next);
+  }
 
   // One segment per role. `controls` wires each tab to its permission panel
   // (aria-controls + aria-expanded); the count/badge live in the segment label.
-  const roleOptions: SegmentedOption<string>[] = items.map((r) => ({
-    value: r.id,
-    testId: `fe7-roles-open-${r.id}`,
-    controls: `fe7-role-inline-${r.id}`,
-    label: (
-      <>
-        <span style={nameStyle}>{r.name}</span>
-        {r.isSystem ? (
-          <Badge tone="neutral" testId={`fe7-roles-system-${r.id}`}>システム</Badge>
-        ) : (
-          <Badge tone="success">カスタム</Badge>
-        )}
-        <span style={metaStyle}>{r.permissions.length} 権限</span>
-      </>
-    ),
-  }));
+  const toOption = (r: RoleView, group: RoleGroupId): SegmentedOption<string> => {
+    const label = roleDisplayName(r, group);
+    return {
+      value: r.id,
+      testId: `fe7-roles-open-${r.id}`,
+      controls: `fe7-role-inline-${r.id}`,
+      label: (
+        <>
+          <span style={nameStyle} title={label !== r.name ? r.name : undefined}>{label}</span>
+          {group === "system" || group === "ops" ? (
+            r.isSystem ? (
+              <Badge tone="neutral" testId={`fe7-roles-system-${r.id}`}>システム</Badge>
+            ) : (
+              <Badge tone="success">カスタム</Badge>
+            )
+          ) : null}
+          <span style={metaStyle}>{r.permissions.length} 権限</span>
+        </>
+      ),
+    };
+  };
 
   return (
     <div>
       <PageHeader
         title="ロール管理"
-        description="上のタブでロールを切り替え、アプリごとに「無効 / 閲覧 / 編集」を選びます。"
+        description={`上のタブでロールを切り替え、アプリごとに「無効 / 閲覧 / 編集」を選びます。${canAdmin ? "ロールの削除は、選択したロールのパネル右上から行えます。" : ""}`}
         testId="fe7-roles-header"
         actions={canAdmin ? <Button variant="primary" onClick={onNew} testId="fe7-roles-new">ロールを作成</Button> : null}
       />
@@ -101,15 +151,60 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
         <EmptyState title="ロールがありません" testId="fe7-roles-empty" />
       ) : (
         <>
-          <SegmentedControl
-            testId="fe7-roles-list"
-            aria-label="ロール"
-            caption="ロールを選択"
-            captionTestId="fe7-roles-caption"
-            value={effectiveId}
-            onChange={setActiveId}
-            options={roleOptions}
-          />
+          <div className={styles.toolbar}>
+            <span className={styles.caption} data-testid="fe7-roles-caption">ロールを選択</span>
+            <label htmlFor="fe7-roles-filter" className={styles.srOnly}>ロールを絞り込み</label>
+            <div className={styles.filter}>
+              <TextField
+                id="fe7-roles-filter"
+                value={query}
+                onChange={setQuery}
+                placeholder="ロール名で絞り込み"
+                size="sm"
+                testId="fe7-roles-filter"
+              />
+            </div>
+          </div>
+          <div className={styles.groups} data-testid="fe7-roles-list">
+            {visibleGroups.length === 0 ? (
+              <p className={styles.noMatch} data-testid="fe7-roles-no-match">「{query.trim()}」に一致するロールはありません</p>
+            ) : null}
+            {visibleGroups.map((g) => {
+              const open = isOpen(g.id);
+              const bodyId = `fe7-roles-group-body-${g.id}`;
+              const total = groups.find((x) => x.id === g.id)?.roles.length ?? g.roles.length;
+              return (
+                <section key={g.id} className={styles.group} data-testid={`fe7-roles-group-${g.id}`} data-open={open}>
+                  <button
+                    type="button"
+                    className={styles.groupHeader}
+                    aria-expanded={open}
+                    aria-controls={bodyId}
+                    disabled={filtering}
+                    onClick={() => toggleGroup(g.id)}
+                    data-testid={`fe7-roles-group-toggle-${g.id}`}
+                  >
+                    <Icon name={open ? "chevron-down" : "chevron-right"} size="sm" />
+                    <span className={styles.groupTitle}>{g.label}</span>
+                    <span className={styles.groupCount} data-testid={`fe7-roles-group-count-${g.id}`}>
+                      {filtering ? `${g.roles.length} / ${total}` : total}
+                    </span>
+                  </button>
+                  {open ? (
+                    <div id={bodyId} className={styles.groupBody}>
+                      <SegmentedControl
+                        testId={`fe7-roles-group-list-${g.id}`}
+                        aria-label={`ロール: ${g.label}`}
+                        value={g.roles.some((r) => r.id === effectiveId) ? effectiveId : null}
+                        onChange={setActiveId}
+                        options={g.roles.map((r) => toOption(r, g.id))}
+                      />
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
 
           {active ? (
             // key on role id forces a fresh editor per role AND replays the panel
@@ -126,11 +221,13 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
                 <span style={nameStyle}>{active.name}</span>
                 {active.isSystem ? <Badge tone="neutral">システム</Badge> : <Badge tone="success">カスタム</Badge>}
                 <span style={{ flex: 1 }} />
-                {canAdmin && !active.isSystem ? (
+                {!canAdmin ? null : active.isSystem ? (
+                  <span style={metaStyle} data-testid="fe7-roles-delete-unavailable">削除できるのはシステム以外のロールです</span>
+                ) : (
                   <Button variant="danger" onClick={() => setPendingDelete(active)} testId={`fe7-roles-delete-${active.id}`}>
                     削除
                   </Button>
-                ) : null}
+                )}
               </div>
               {/* RolePermissionsEditor seeds its name/permissions from useState(role...)
                   at mount only; the changing key above also guarantees a fresh editor
@@ -142,7 +239,7 @@ export function RoleListPage({ onNew }: { onNew?: () => void }) {
       )}
       <ConfirmDialog
         title="ロールを削除"
-        message={`「${pendingDelete?.name}」を削除します。よろしいですか？`}
+        message={pendingDelete ? roleDeleteMessage(pendingDelete) : ""}
         open={pendingDelete !== null}
         danger
         confirmLabel="削除する"

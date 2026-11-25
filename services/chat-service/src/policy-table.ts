@@ -94,8 +94,9 @@ export const POLICY_TABLE = definePolicyTable({
 
   // ---- writes needing a 詳細 key on top of 編集 ----
   // `chat:create` — creating a channel is the one write that is not scoped to an existing
-  // channel, so there is no handler-side instance check to pair with: this rule is the WHOLE
-  // decision for it.
+  // channel. This rule decides public channels and DMs; a PRIVATE channel additionally needs
+  // `chat:create_private`, which createChannel asserts because the visibility is in the request
+  // body and the gate does not read bodies.
   "POST /chat/channels": appLevel("chat", "edit", "chat:create"),
   // `chat:moderate` (dangerous key) — the org-wide delete policy decides whether anyone's
   // message is erased physically or tombstoned, so it is admin/maintainer territory, not
@@ -105,6 +106,11 @@ export const POLICY_TABLE = definePolicyTable({
   // messages. Its own toggle in ロール管理 so it can be granted apart from moderate. This rule
   // is the whole authority (no channel-admin fallback); the handler only runs loadReadable.
   "DELETE /chat/channels/:id": appLevel("chat", "edit", "chat:delete_channel"),
+  // `chat:change_visibility` (dangerous key) — public <-> private. Going private hides the
+  // channel from every non-member; going public exposes its whole history org-wide. Like
+  // delete, this rule is the whole authority (no channel-admin fallback); the handler only
+  // runs loadReadable (so a private channel cannot be flipped by someone who cannot see it).
+  "PUT /chat/channels/:id/visibility": appLevel("chat", "edit", "chat:change_visibility"),
 
   // ---- Slack channel import: 編集 + chat:slack_import (dangerous key) ----
   // It creates a channel AND writes org-wide data outside a caller's own scope (disabled

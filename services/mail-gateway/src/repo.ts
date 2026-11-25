@@ -73,6 +73,7 @@ export interface AttachmentRow {
   r2_key: string;
   created_at: string;
   status: "stored" | "dropped_too_large" | "dropped_truncated"; // 0007: 'stored' default
+  content_id?: string | null; // 0025: Content-ID of an inbound part
 }
 
 // ---- opaque cursor codec (base64url of the row id; D3) ----
@@ -285,10 +286,14 @@ export function inboundOwnerClause(scope: InboundScope): { sql: string; binds: s
  *  three times ('' when unknown, which matches no delivery). */
 export function inboundSelect(viewer: string | undefined): { sql: string; binds: string[] } {
   const v = viewer ?? "";
+  // A list copy has no personal address: showing it as deliveredTo would make the UI treat
+  // the list as "own" and drop it from 全員に返信. Excluded by prefix, not by reading
+  // mail_team_list, so the inbox never depends on that migration being applied.
+  const ownEnvelope = `CASE WHEN vd.envelope_to LIKE '${LIST_ENVELOPE_PREFIX}%' THEN NULL ELSE vd.envelope_to END`;
   const sub = (expr: string) =>
     `(SELECT ${expr} FROM mail_inbound_delivery vd WHERE vd.inbound_id = mail_inbound.id AND vd.owner_user_id = ?)`;
   return {
-    sql: `SELECT mail_inbound.*, ${sub("COUNT(*)")} AS viewer_deliveries, ${sub("MAX(vd.read_at)")} AS viewer_read_at, ${sub("MIN(vd.envelope_to)")} AS viewer_envelope FROM mail_inbound`,
+    sql: `SELECT mail_inbound.*, ${sub("COUNT(*)")} AS viewer_deliveries, ${sub("MAX(vd.read_at)")} AS viewer_read_at, ${sub(`MIN(${ownEnvelope})`)} AS viewer_envelope FROM mail_inbound`,
     binds: [v, v, v],
   };
 }
@@ -331,7 +336,15 @@ export function inboundSearchClause(q: string): { sql: string; binds: string[] }
  *  listInbound); ULID ids sort in creation order so the id cursor tracks created_at. */
 export async function listSent(
   db: DbClient,
-  q: { ownerUserId: MailScope; viewer?: string; cursor?: string; limit: number; q?: string },
+  q: {
+    ownerUserId: MailScope;
+    viewer?: string;
+    cursor?: string;
+    limit: number;
+    q?: string;
+    /** The viewer's inbound scope: when given, each row gets its conversation summary. */
+    inboundScope?: InboundScope;
+  },
 ): Promise<common.Paginated<mail.MailSentListItem>> {
   // Fail-closed account scope: only the signed-in user's own delivered sends. A NULL
   // owner_user_id (system send / legacy row) never matches `= ?`, so it is invisible.
@@ -361,8 +374,10 @@ export async function listSent(
   const hasMore = rows.length > q.limit;
   const page = hasMore ? rows.slice(0, q.limit) : rows;
   const last = page[page.length - 1];
+  const items = page.map((r) => sendRowToListItem(r, q.viewer));
+  if (q.inboundScope !== undefined) await attachSentConversations(db, page, items, { sent: q.ownerUserId, inbound: q.inboundScope });
   return {
-    items: page.map((r) => sendRowToListItem(r, q.viewer)),
+    items,
     nextCursor: hasMore && last ? encodeCursor(last.id) : null,
   };
 }
@@ -381,6 +396,109 @@ export async function getSentDetail(db: DbClient, id: string, scope: MailScope, 
   }
   const row = await db.first<SendLogRow>(sql, ...binds);
   return row ? sendRowToDetail(row, viewer) : null;
+}
+
+/** RFC Message-Id of one of our sends (`<send-log id>@<From domain>`). Shared with the send
+ *  core so the id we put on the wire and the thread key we look up here never drift. */
+export function rfcMessageIdOf(logId: string, fromAddress: string): string {
+  return `${logId}@${fromAddress.split("@")[1] ?? "developershub.jp"}`;
+}
+
+/** Thread key of a sent row: a reply carries its conversation's thread id; a send that
+ *  opened a conversation is keyed by its own RFC Message-Id, which is exactly what the
+ *  replies to it are threaded under (resolveThreadId). null = legacy row without a From. */
+export function sentThreadKey(r: Pick<SendLogRow, "id" | "thread_id" | "from_address">): string | null {
+  if (r.thread_id) return r.thread_id;
+  return r.from_address ? rfcMessageIdOf(r.id, r.from_address) : null;
+}
+
+/** Local part of a message id (`maillog_x@d` -> `maillog_x`). */
+function localPart(id: string): string {
+  return id.split("@")[0] ?? id;
+}
+
+/**
+ * Attach the Gmail-style conversation summary to Sent list rows: for each row's thread,
+ * count what the viewer can see — received messages in their INBOUND scope plus their own
+ * sends (Sent scope) — and name who replied. Without it a send that got answered read as a
+ * lone message in 送信済み and the replies were unreachable from there. Two queries per
+ * page (thread_id is indexed on both tables); rows whose thread holds only themselves get
+ * nothing. A received copy of one of our own sends (sent to a Dub mailbox) is the same
+ * message and is not counted twice.
+ */
+export async function attachSentConversations(
+  db: DbClient,
+  rows: Pick<SendLogRow, "id" | "thread_id" | "from_address">[],
+  items: mail.MailSentListItem[],
+  scope: { sent: MailScope; inbound: InboundScope },
+): Promise<void> {
+  const keys = [...new Set(rows.map(sentThreadKey).filter((k): k is string => k !== null))];
+  if (keys.length === 0) return;
+  const keysJson = JSON.stringify(keys);
+  const inWhere = ["thread_id IN (SELECT value FROM json_each(?))"];
+  const inBinds: unknown[] = [keysJson];
+  const owner = inboundOwnerClause(scope.inbound);
+  if (owner) {
+    inWhere.push(owner.sql);
+    inBinds.push(...owner.binds);
+  }
+  const inbound = await db.all<{ message_id: string; thread_id: string; from_json: string; received_at: string }>(
+    `SELECT message_id, thread_id, from_json, received_at FROM mail_inbound WHERE ${inWhere.join(" AND ")} ORDER BY received_at ASC, id ASC`,
+    ...inBinds,
+  );
+  // Our sends in those threads: replies (thread_id) and the roots themselves (by id).
+  const sentWhere = ["status = 'sent'", "(thread_id IN (SELECT value FROM json_each(?)) OR id IN (SELECT value FROM json_each(?)))"];
+  const sentBinds: unknown[] = [keysJson, JSON.stringify(keys.map(localPart))];
+  if (!isReadAll(scope.sent)) {
+    sentWhere.push("owner_user_id = ?");
+    sentBinds.push(scope.sent);
+  }
+  const sent = await db.all<{ id: string; thread_id: string | null; from_address: string | null; updated_at: string }>(
+    `SELECT id, thread_id, from_address, updated_at FROM mail_send_log WHERE ${sentWhere.join(" AND ")}`,
+    ...sentBinds,
+  );
+
+  const byKey = new Map<string, { sentIds: Set<string>; latestAt: string; inbound: typeof inbound }>();
+  const conv = (k: string) => {
+    let c = byKey.get(k);
+    if (!c) byKey.set(k, (c = { sentIds: new Set(), latestAt: "", inbound: [] }));
+    return c;
+  };
+  for (const s of sent) {
+    const k = sentThreadKey(s);
+    if (k === null || !keys.includes(k)) continue;
+    const c = conv(k);
+    c.sentIds.add(s.id);
+    if (s.updated_at > c.latestAt) c.latestAt = s.updated_at;
+  }
+  for (const m of inbound) conv(m.thread_id).inbound.push(m);
+
+  rows.forEach((r, i) => {
+    const k = sentThreadKey(r);
+    const c = k === null ? undefined : byKey.get(k);
+    const item = items[i];
+    if (!c || !item || k === null) return;
+    c.sentIds.add(r.id); // the row itself always counts (read_all may list another owner's send)
+    const received = c.inbound.filter((m) => !c.sentIds.has(localPart(m.message_id)));
+    const messageCount = c.sentIds.size + received.length;
+    if (messageCount < 2) return;
+    const repliedBy: mail.MailAddress[] = [];
+    let latestAt = c.latestAt;
+    for (const m of received) {
+      if (m.received_at > latestAt) latestAt = m.received_at;
+      let from: mail.MailAddress;
+      try {
+        from = JSON.parse(m.from_json) as mail.MailAddress;
+      } catch {
+        continue;
+      }
+      const email = (from.email ?? "").toLowerCase();
+      const at = repliedBy.findIndex((p) => p.email.toLowerCase() === email);
+      if (at >= 0) repliedBy.splice(at, 1); // re-append so the newest replier ends up last
+      repliedBy.push(from);
+    }
+    item.conversation = { id: k, messageCount, latestAt: latestAt || item.sentAt, repliedBy };
+  });
 }
 
 // ---- inbound ----
@@ -404,6 +522,40 @@ export async function insertDelivery(
     now,
   );
   return res.meta.changes;
+}
+
+/** envelope_to prefix of a delivery made by a team list (`list:design@developershub.jp`):
+ *  the member never had that address as an envelope of their own. */
+export const LIST_ENVELOPE_PREFIX = "list:";
+
+/** One delivery per team member, in a single statement: the ids ride as ONE JSON bind (D1
+ *  caps bound parameters at 100) and one statement keeps a big team within the Worker's
+ *  subrequest budget. A redelivered list copy is an INSERT OR IGNORE no-op per member. */
+export async function insertListDeliveries(db: DbClient, inboundId: string, listAddress: string, userIds: readonly string[]): Promise<void> {
+  if (userIds.length === 0) return;
+  const now = nowIso();
+  const rows = JSON.stringify(userIds.map((owner) => ({ id: newDeliveryId(), owner })));
+  await db.run(
+    `INSERT OR IGNORE INTO mail_inbound_delivery
+       (id, inbound_id, owner_user_id, envelope_to, read_at, created_at, updated_at)
+     SELECT json_extract(value, '$.id'), ?, json_extract(value, '$.owner'), ?, NULL, ?, ?
+       FROM json_each(?)`,
+    inboundId,
+    `${LIST_ENVELOPE_PREFIX}${listAddress}`,
+    now,
+    now,
+    rows,
+  );
+}
+
+/** Did a team list at `address` deliver this message? */
+export async function wasDeliveredByList(db: DbClient, inboundId: string, address: string): Promise<boolean> {
+  const row = await db.first<{ id: string }>(
+    `SELECT id FROM mail_inbound_delivery WHERE inbound_id = ? AND envelope_to = ? LIMIT 1`,
+    inboundId,
+    `${LIST_ENVELOPE_PREFIX}${address.trim().toLowerCase()}`,
+  );
+  return !!row;
 }
 
 /** Fill the legacy single owner column when the first copy was ownerless (e.g. archive@
@@ -551,7 +703,12 @@ function rowToDetail(r: InboundRow, viewer?: string): mail.MailMessageDetail {
   const meta = parseHeaderMeta(r.header_meta_json);
   // deliveredTo on the body row is whichever copy arrived first: show the viewer's own.
   if (r.viewer_envelope) detail.headerMeta = { ...(meta ?? {}), deliveredTo: r.viewer_envelope };
-  else if (meta) detail.headerMeta = meta;
+  else if (meta && (r.viewer_deliveries ?? 0) > 0) {
+    // Reached the viewer through a list only: the stored value is someone else's envelope,
+    // which could be a Bcc recipient, and the UI would treat it as the viewer's own address.
+    const { deliveredTo: _firstCopyEnvelope, ...rest } = meta;
+    detail.headerMeta = rest;
+  } else if (meta) detail.headerMeta = meta;
   return detail;
 }
 
@@ -620,6 +777,31 @@ export async function markInboundRead(db: DbClient, id: string, scope: InboundSc
   // Legacy primary-owner stamp (what read_all / role-sharing viewers see as "read").
   await db.run(`UPDATE mail_inbound SET read_at = ? WHERE id = ? AND owner_user_id = ? AND read_at IS NULL`, now, id, self);
   return { found: true };
+}
+
+/** Set the signed-in user's OWN read state on these messages (POST /mail/read-state). Both
+ *  statements match on `self`, so a message seen only through oversight or role sharing is
+ *  never stamped. Idempotent, and a re-read keeps the first read_at. */
+export async function setInboundReadState(db: DbClient, ids: string[], self: string, read: boolean): Promise<void> {
+  const now = nowIso();
+  const list = JSON.stringify(ids);
+  const stamp = read ? "read_at = ?" : "read_at = NULL";
+  const stillDiffers = read ? "read_at IS NULL" : "read_at IS NOT NULL";
+  const stampBind = read ? [now] : [];
+  await db.run(
+    `UPDATE mail_inbound_delivery SET ${stamp}, updated_at = ? WHERE owner_user_id = ? AND ${stillDiffers} AND inbound_id IN (SELECT value FROM json_each(?))`,
+    ...stampBind,
+    now,
+    self,
+    list,
+  );
+  // Legacy primary-owner stamp (what read_all / role-sharing viewers see as "read").
+  await db.run(
+    `UPDATE mail_inbound SET ${stamp} WHERE owner_user_id = ? AND ${stillDiffers} AND id IN (SELECT value FROM json_each(?))`,
+    ...stampBind,
+    self,
+    list,
+  );
 }
 
 export async function listInbound(
@@ -703,12 +885,14 @@ export async function insertAttachment(
     // carries r2Key='' and records an attachment we could NOT persist so the UI can
     // surface it instead of the file vanishing silently (改善#2).
     status?: AttachmentRow["status"];
+    contentId?: string;
   },
 ): Promise<void> {
+  // content_id only when there is one, so plain attachments never depend on migration 0025.
   await db.run(
     `INSERT OR IGNORE INTO mail_attachments
-       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, message_kind, message_id, filename, mime_type, size_bytes, r2_key, created_at, status${row.contentId ? ", content_id" : ""})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?${row.contentId ? ", ?" : ""})`,
     row.id,
     row.messageKind,
     row.messageId,
@@ -718,6 +902,7 @@ export async function insertAttachment(
     row.r2Key,
     row.createdAt,
     row.status ?? "stored",
+    ...(row.contentId ? [row.contentId] : []),
   );
 }
 
@@ -766,6 +951,22 @@ function rowToFlags(r: UserFlagRow): mail.MailThreadFlags {
 export async function listUserFlags(db: DbClient, ownerUserId: string): Promise<mail.MailThreadFlags[]> {
   const rows = await db.all<UserFlagRow>(`SELECT * FROM mail_user_flags WHERE owner_user_id = ?`, ownerUserId);
   return rows.map(rowToFlags);
+}
+
+/** Raise one flag on many threads at once for a user (POST /mail/bulk). Same result as
+ *  upsertUserFlags per thread, without its read-modify-write round trips: missing rows are
+ *  created with the defaults, then only this flag moves. */
+export async function setThreadsFlag(db: DbClient, ownerUserId: string, threadIds: string[], flag: "archived" | "trashed"): Promise<void> {
+  const now = nowIso();
+  const list = JSON.stringify(threadIds);
+  await db.run(
+    `INSERT OR IGNORE INTO mail_user_flags (owner_user_id, thread_id, created_at, updated_at) SELECT ?, value, ?, ? FROM json_each(?)`,
+    ownerUserId,
+    now,
+    now,
+    list,
+  );
+  await db.run(`UPDATE mail_user_flags SET ${flag} = 1, updated_at = ? WHERE owner_user_id = ? AND thread_id IN (SELECT value FROM json_each(?))`, now, ownerUserId, list);
 }
 
 /** Upsert one thread's flags for a user (PATCH semantics: only provided flags change; a

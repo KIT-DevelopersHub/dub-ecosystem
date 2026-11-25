@@ -32,4 +32,13 @@ export function collectMigrations(migrationsDir: string = MIGRATIONS_DIR): Migra
   return out;
 }
 
+/** One directory of *.sql as migrations: the schema of a D1 a single service owns alone. */
+export function collectSqlDir(dir: string, namespace: Namespace): Migration[] {
+  return listSql(dir).map((file) => ({
+    namespace,
+    id: file.replace(/\.sql$/, ""),
+    up: readFileSync(join(dir, file), "utf8").trim(),
+  }));
+}
+
 export { MIGRATIONS_DIR };

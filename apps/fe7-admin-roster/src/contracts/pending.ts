@@ -28,7 +28,7 @@ export interface UpdateRoleRequest {
 
 // identity-roster's role DTO: the frozen identity.Role plus the cross-role mail visibility
 // set. Optional here so an older backend (field absent) reads as "none".
-export type RoleView = identity.Role & { mailVisibleRoleIds?: common.RoleId[] };
+export type RoleView = identity.Role & { mailVisibleRoleIds?: common.RoleId[]; memberCount?: number };
 
 // P0: org-wide (no resource fields) or event-scoped. Fields are OMITTED, not null,
 // for org-wide (design test "ScopePicker": undefined, not null).

@@ -6,7 +6,7 @@
 // so a feature's routes render inside a fully-wired runtime context. They read
 // live shell state via hooks (auth, toast, router) rather than props, so a
 // single wrapper instance stays correct as the session/route changes.
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import type { gateway } from "@dub/types";
 import {
@@ -21,7 +21,7 @@ import {
   createWsUnreadConnector,
   type NotificationDeps,
 } from "@dub/fe5-notification-inbox";
-import { NavigationProvider, RosterProvider } from "@dub/admin-roster";
+import { forwardToasts, NavigationProvider, RosterProvider } from "@dub/admin-roster";
 // FE4/FE6 deep-import surface via the single boundary (featureEntries.tsx).
 import { TaskApiClientProvider, TaskRouteProvider, ChatRuntimeProvider, WsChatClient, type ChatRuntime, type TaskRouteContextValue } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
@@ -159,6 +159,8 @@ export function RosterProviders({ api, children }: { api: ApiClient; children: R
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as Record<string, string>;
   const client = useMemo(() => createGatewayResourceClient(api), [api]);
+  const { show } = useToast();
+  useEffect(() => forwardToasts(show), [show]);
   // FE7 route components read navigation (params + navigate) via its own context;
   // feed it from the shell router so /admin/users/:userId etc. resolve.
   const navigation = useMemo(

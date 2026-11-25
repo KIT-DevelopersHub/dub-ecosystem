@@ -3,7 +3,7 @@ import { CommonErrorCodes } from "@dub/errors";
 import { createApp } from "../src/app";
 import { createDriveShareService } from "../src/service";
 import { createMockDriveShareClient } from "../src/mock-client";
-import { memAuthzHolding, allowAll, DRIVE_READER, AUTHED, fakeRoster, buildRoleGrants, stubGoogleAccount, buildMeetings } from "./helpers";
+import { memAuthzHolding, allowAll, DRIVE_READER, AUTHED, fakeRoster, buildRoleGrants, stubGoogleAccount, buildMeetings, buildAttendance, buildGoogleLink } from "./helpers";
 
 function app(authz = allowAll) {
   const client = createMockDriveShareClient();
@@ -12,7 +12,7 @@ function app(authz = allowAll) {
     drive: client,
     roster: fakeRoster({ role_sys_member: ["staff-a@example.com"] }, { role_sys_member: "member" }),
   });
-  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service });
+  return createApp({ service, roleGrants, authz, googleAccount: stubGoogleAccount(), meetings: async () => buildMeetings().service, attendance: () => buildAttendance().service, googleLink: () => buildGoogleLink().service });
 }
 
 const JSON_HDR = { ...AUTHED, "content-type": "application/json" };
@@ -146,6 +146,22 @@ describe("role-grants endpoints", () => {
 
     const after = await a.request("/driveshare/files/fil_budget/role-grants", { headers: AUTHED });
     expect(((await after.json()) as any).items).toHaveLength(0);
+  });
+
+  it("GET drift reports shares outside the role grants, readable with drive:read", async () => {
+    const a = app();
+    await a.request("/driveshare/files/fil_budget/role-grants", {
+      method: "POST",
+      headers: JSON_HDR,
+      body: JSON.stringify({ roleId: "role_sys_member", driveRole: "reader" }),
+    });
+    const res = await a.request("/driveshare/files/fil_budget/drift", { headers: AUTHED });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body).toMatchObject({ fileId: "fil_budget", grantCount: 1, expectedCount: 1, matchedCount: 1 });
+    expect(body.items).toEqual([expect.objectContaining({ kind: "unexpected", email: "sponsor@example.com" })]);
+
+    expect((await app(DRIVE_READER).request("/driveshare/files/fil_budget/drift", { headers: AUTHED })).status).toBe(200);
   });
 
   it("read-only caller cannot grant a role (403)", async () => {

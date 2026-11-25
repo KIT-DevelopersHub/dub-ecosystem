@@ -20,5 +20,6 @@ export const queryKeys = {
   events: () => [ADMIN_QK, "events", "scope-options"] as const,
   mailStatus: () => [ADMIN_QK, "mail", "status"] as const,
   emailAddresses: () => [ADMIN_QK, "email-routing", "list"] as const,
+  teamLists: () => [ADMIN_QK, "mail", "team-lists"] as const,
   membersOverview: () => [ADMIN_QK, "members", "overview"] as const,
 } as const;

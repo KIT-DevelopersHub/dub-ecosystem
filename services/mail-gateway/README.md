@@ -267,6 +267,24 @@ personal address (typically Gmail) — メール → 右上の歯車 → 「Gmai
   "利用できません" and `PUT` answers 503. Apply migration `0023_user_forward.sql`.
 - **Kill switch**: `MAIL_USER_FORWARD = "off"` stops forwarding and new registrations.
 
+## 3.4c Team mailing lists (メーリングリスト, `src/team-list.ts`, migration 0024)
+
+- **What it does**: a `design@developershub.jp` address delivers to the team's Dub inboxes. A
+  mail arriving there gets one `mail_inbound_delivery` row per member, so read state is
+  per person. Nothing is sent back out: no provider quota, no loop.
+- **Membership**: the team roster (`GET /members/internal/team-members`), read when the mail
+  arrives. Only members with a linked Dub account receive it, and reading it still needs
+  `app:mail:view` + `mail:read` on their role.
+- **Admin**: `GET|POST /mail/admin/lists`, `DELETE /mail/admin/lists/:id` (`mail:admin`), from
+  メール名簿 > メーリングリスト. A list is an Email Routing rule named `dub-list:<local>`; that
+  prefix keeps it out of the roster sync and 発行済みアドレス.
+- **Replies**: `envelope_to` of a list delivery is `list:<address>`. Reads hide it, so 全員に返信
+  keeps the list, and a reply goes out from the member's own address.
+- **Not covered**: personal auto-forward stays envelope-scoped, so list mail is not forwarded
+  to Gmail. Anyone on the internet can mail a list address.
+- **Rollout**: apply `0024_team_list.sql` before creating a list. Until then the admin
+  routes fail, while ordinary mail and the inbox are unaffected.
+
 ## 3.5 Archive forward (`MAIL_ARCHIVE_FORWARD_TO`)
 
 Independent of §3.4: when `MAIL_ARCHIVE_FORWARD_TO` is set (prod: `dub.developershub@gmail.com`

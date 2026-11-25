@@ -23,6 +23,7 @@ import { assembleFeatureModules } from "./composition/index.tsx";
 import { AppRoot } from "./shell/AppRoot.tsx";
 import { createShellRouter } from "./shell/router.tsx";
 import { reloadForStaleChunk } from "./lib/chunkReload.ts";
+import { hrForm, hrInterview } from "@dub/types";
 
 // Recover from a stale hashed chunk after a deploy at the earliest point: Vite
 // dispatches `vite:preloadError` when a dynamic import / modulepreload 404s
@@ -61,6 +62,8 @@ const api = createApiClient({
     // The public 参加届 form is anonymous by design: a 401 there (e.g. the global /me
     // probe, or the optional teams lookup) must NOT bounce the visitor to /login.
     if (globalThis.location.pathname.startsWith("/participate")) return;
+    if (globalThis.location.pathname.startsWith(hrForm.PUBLIC_INTERVIEW_FORM_PATH)) return;
+    if (globalThis.location.pathname.startsWith(hrInterview.PUBLIC_INTERVIEW_BOOKING_PATH)) return;
     redirectAfterLogin = globalThis.location.pathname + globalThis.location.search;
     router.navigate({ to: "/login" });
   },
@@ -97,7 +100,7 @@ if (useDemo && typeof document !== "undefined") {
   banner.setAttribute("role", "note");
   // Just under Modal so it never covers a dialog footer (full-height sheet on mobile).
   banner.style.cssText =
-    "position:fixed;left:0;right:0;bottom:0;z-index:calc(var(--dub-zIndex-modal, 1300) - 1);padding:6px 12px;font-size:12px;text-align:center;background:#7c2d12;color:#fff;font-family:system-ui,sans-serif";
+    "position:fixed;left:0;right:0;bottom:0;z-index:calc(var(--dub-zIndex-modal, 1300) - 1);padding:6px 12px;font-size:12px;text-align:center;background:#7c2d12;color:#fff;font-family:system-ui,sans-serif;pointer-events:none";
   document.body.appendChild(banner);
 }
 

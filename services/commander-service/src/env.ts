@@ -21,6 +21,18 @@ export interface Env {
    * origins only, which is what local dev needs. See `origins.ts`.
    */
   COMMANDER_ALLOWED_ORIGINS?: string;
+  /**
+   * GitHub token for the PR CI badge and the 「確認」 button (needs Pull requests: read,
+   * Checks/Commit statuses: read, Issues or Pull requests: write for the label). Local
+   * secret; `dev-up.sh` reads it from the vault or `gh auth token`. Never logged/echoed.
+   */
+  COMMANDER_GITHUB_TOKEN?: string;
+  /** `owner/name` the PR routes serve (allow-list of one). Default KIT-DevelopersHub/dub-ecosystem. */
+  COMMANDER_GITHUB_REPO?: string;
+  /** "1" switches on POST /prs/:number/confirm (adds 確認した). Anything else => 403. */
+  COMMANDER_PR_CONFIRM_ENABLED?: string;
+  /** "block" (default): refuse while a required check is not green. "warn": allow with a warning. */
+  COMMANDER_CONFIRM_CHECKS_POLICY?: string;
 }
 
 export type AppBindings = { Bindings: Env };

@@ -20,6 +20,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
+import { isImeComposing } from "@dub/ui";
 import { BlockPalette } from "./BlockPalette";
 import { SortableBlockCard } from "./SortableBlockCard";
 import { createBlock, emptyDoc, loadDoc, saveDoc } from "./storage";
@@ -40,6 +41,13 @@ export interface BlockEditorProps {
   initialDoc?: BlockDoc;
   /** Notified after every change so the caller can mirror to a backend (D1). */
   onDocChange?: (doc: BlockDoc) => void;
+}
+
+// Typing in a field keeps the browser's native text undo (block undo would wipe it).
+function isEditableTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return true;
+  return t.isContentEditable || t.closest("[contenteditable]:not([contenteditable='false'])") !== null;
 }
 
 export function BlockEditor({ storageKey, canWrite, seed, initialDoc, onDocChange }: BlockEditorProps) {
@@ -90,6 +98,7 @@ export function BlockEditor({ storageKey, canWrite, seed, initialDoc, onDocChang
         setEditingId(null);
         return;
       }
+      if (isImeComposing(e) || isEditableTarget(e.target)) return;
       const meta = e.metaKey || e.ctrlKey;
       if (meta && e.key.toLowerCase() === "z") {
         e.preventDefault();

@@ -17,8 +17,8 @@ import {
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useAppCapability } from "../../auth/AuthProvider.tsx";
-import { AppReadOnlyNotice } from "../../auth/AppReadOnlyNotice.tsx";
+import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
+import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
 import { TeamsView } from "./TeamsView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
@@ -28,6 +28,9 @@ import styles from "./members.module.css";
 
 export function MembersPage(): JSX.Element {
   const { canEdit } = useAppCapability("members");
+  const { can } = usePermissions();
+  // 閲覧のみでも書き込みボタンは押せる。押したら権限不足ダイアログ(申請ボタン付き)を出す。
+  const gate = usePermissionGate({ appId: "members", locked: !canEdit });
   const overview = useMembersOverview();
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
@@ -58,7 +61,7 @@ export function MembersPage(): JSX.Element {
     setConfirm(null);
   };
 
-  if (overview.isLoading) return <SkeletonLoader testId="members-loading" />;
+  if (overview.isPending) return <SkeletonLoader testId="members-loading" />;
   if (overview.isError) {
     const display = ApiError.isApiError(overview.error)
       ? toDisplayableError(overview.error)
@@ -69,16 +72,15 @@ export function MembersPage(): JSX.Element {
   return (
     <div data-testid="members-page">
       <div className={styles.noPrint}>
-        <AppReadOnlyNotice appId="members" testId="members-readonly-notice" />
         <PageHeader
           title="運営メンバー"
           description="運営メンバーの招待状況と所属チームを管理します"
           actions={
             <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "var(--dub-space-2)" }}>
-              <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} disabled={!canEdit} onClick={openAddTeam} testId="members-add-team">
+              <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} onClick={gate.guard(openAddTeam)} testId="members-add-team">
                 チームを追加
               </Button>
-              <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} disabled={!canEdit} onClick={openAddMember} testId="members-add-member">
+              <Button variant="primary" iconLeft={<span aria-hidden>＋</span>} onClick={gate.guard(openAddMember)} testId="members-add-member">
                 メンバーを追加
               </Button>
             </span>
@@ -89,12 +91,13 @@ export function MembersPage(): JSX.Element {
       <TeamsView
         teams={teams}
         members={rosterMembers}
-        readOnly={!canEdit}
-        onEditMember={openEditMember}
-        onDeleteMember={(m) => setConfirm({ kind: "member", target: m })}
-        onEditTeam={openEditTeam}
-        onDeleteTeam={(t) => setConfirm({ kind: "team", target: t })}
+        readOnly={false}
+        onEditMember={gate.guard(openEditMember)}
+        onDeleteMember={gate.guard((m: OrgMember) => setConfirm({ kind: "member", target: m }))}
+        onEditTeam={gate.guard(openEditTeam)}
+        onDeleteTeam={gate.guard((t: MemberTeam) => setConfirm({ kind: "team", target: t }))}
       />
+      {gate.dialog}
 
       <MemberFormDialog
         open={memberDialog.open}
@@ -102,6 +105,7 @@ export function MembersPage(): JSX.Element {
         teams={teams}
         editing={memberDialog.editing}
         members={members}
+        orgOnly={!can("members:roster_edit")}
       />
       <TeamFormDialog
         open={teamDialog.open}

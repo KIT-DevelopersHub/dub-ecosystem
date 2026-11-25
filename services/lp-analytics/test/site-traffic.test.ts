@@ -42,6 +42,21 @@ describe("GET /lp/site-traffic", () => {
     ]);
   });
 
+  it("referrer narrows totals/byDay to that label (hosts merged) and keeps every option", async () => {
+    let calls = 0;
+    const { app } = await makeApp("memory", "view", 5000, { fetchDays: async () => (calls++, ROWS) });
+    const q = encodeURIComponent("Facebook");
+    const res = await app.fetch(get(`/lp/site-traffic?from=2026-10-01&to=2026-10-02&referrer=${q}`));
+    const body = (await res.json()) as LpSiteTraffic;
+    expect(calls).toBe(1);
+    expect(body.totals).toEqual({ pageViews: 14, visits: 14 });
+    expect(body.byDay).toEqual([
+      { date: "2026-10-01", pageViews: 14, visits: 14 },
+      { date: "2026-10-02", pageViews: 0, visits: 0 },
+    ]);
+    expect(body.byReferrer).toHaveLength(4);
+  });
+
   it("reports configured=false (not an error) when Cloudflare is not set up", async () => {
     const { app } = await makeApp("memory", "view");
     const body = (await (await app.fetch(get("/lp/site-traffic?from=2026-10-01&to=2026-10-02"))).json()) as LpSiteTraffic;

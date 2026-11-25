@@ -623,6 +623,9 @@ export interface Harness {
   /** login via POST /api/v1/auth/test-login and return a bearer token. */
   login(user: TestUserKey): Promise<string>;
   users: typeof TEST_USERS;
+  /** the REAL identity-roster binding, for s2s callers not mounted behind the gateway
+   *  (e.g. member-service's activation port). */
+  identity: Fetcher;
 }
 
 export interface GwResult {
@@ -723,5 +726,5 @@ export async function createHarness(opts: HarnessOptions = {}): Promise<Harness>
     return res.json<{ token: string }>().token;
   };
 
-  return { stores, gw, login, users: TEST_USERS };
+  return { stores, gw, login, users: TEST_USERS, identity };
 }

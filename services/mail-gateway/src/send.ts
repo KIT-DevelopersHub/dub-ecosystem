@@ -19,10 +19,12 @@ import {
   markSendSent,
   newSendLogId,
   resolveThreadId,
+  rfcMessageIdOf,
   type SendLogRow,
 } from "./repo";
 import type { OutboundMail } from "./provider";
 import type { SendDeps } from "./types";
+import { notifySponsorContact } from "./sponsor-sync";
 
 /** FNV-1a 32-bit hex over the canonical request (same key + different body -> 409). */
 export function hashRequest(req: mail.SendMailRequest): string {
@@ -46,10 +48,6 @@ export function hashRequest(req: mail.SendMailRequest): string {
     h = Math.imul(h, 0x01000193);
   }
   return (h >>> 0).toString(16).padStart(8, "0");
-}
-
-function domainOf(fromAddress: string): string {
-  return fromAddress.split("@")[1] ?? "developershub.jp";
 }
 
 /** Auto-CC the fixed archive address on every send (compliance archive). Returns a new
@@ -119,7 +117,7 @@ export async function buildReferences(
 /** Stable RFC Message-Id reconstructed from the send-log id, so a replay reproduces
  *  the exact same messageId the first attempt returned. */
 function rfcMessageId(logId: string, fromAddress: string): string {
-  return `${logId}@${domainOf(fromAddress)}`;
+  return rfcMessageIdOf(logId, fromAddress);
 }
 
 function duplicateResponse(row: SendLogRow, fromAddress: string): mail.SendMailResponse {
@@ -257,6 +255,15 @@ export async function sendMail(
         ownedId,
         req.attachments.map(decodeInputAttachment),
       );
+    }
+    // スポンサーのメール連携: 人が送ったメールだけ (best-effort・throw しない)。相手 = To + Cc (Bcc は除く)。
+    if (deps.ownerUserId) {
+      await notifySponsorContact(deps.sponsor, deps.ctx, {
+        direction: "sent",
+        at: nowIso(),
+        counterparts: [...req.to, ...(req.cc ?? [])].map((a) => a.email),
+        mailbox: fromAddress,
+      });
     }
     await publishSent(deps, messageId, requester);
     await audit(deps, "success", messageId, requester, null);

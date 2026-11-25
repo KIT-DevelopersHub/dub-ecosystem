@@ -71,6 +71,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     createTicketType: unused,
     updateTicketType: unused,
     listTicketOrders: unused,
+    exportTicketOrders: async () => new Blob(["x"]),
     approveTicketOrder: unused,
     listTicketCoupons: unused,
     createTicketCoupon: unused,
@@ -110,7 +111,7 @@ describe("demo transport (proposals)", () => {
     const s = await api.getProposals();
     expect(s.enabled).toBe(false);
     expect(s.publicUrl).toMatch(/\/proposals$/);
-    expect(s.fields.map((f) => f.id)).toEqual(["format", "affiliation", "bio"]);
+    expect(s.fields.map((f) => f.id)).toEqual(["format", "topics", "affiliation", "bio", "unavailable"]);
     expect((await api.setProposalsEnabled({ enabled: true })).enabled).toBe(true);
 
     await expect(

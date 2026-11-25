@@ -28,12 +28,16 @@ export interface Env {
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain skips audit
   SVC_MEMBER?: Fetcher; // member-service: userId -> 名簿 Gmail (Gmail safety-net forward); absent => no forward
   SVC_NOTIFICATION?: Fetcher; // notification POST /notify: in-app admin alert for Resend delivery problems; absent => audit + log only
+  SVC_FREEQ_DRAIN?: Fetcher; // freeq-drain POST /internal/drain/kick: cron backstop that re-arms the drain alarm (freeq-kick.ts)
 
   // --- Gmail safety-net forward (gmail-forward.ts) ---
   // "on" forwards each inbound copy to the envelope recipient's linked 名簿 Gmail. Anything
   // else (default: unset) = OFF. Each Gmail must first be a VERIFIED Email Routing
   // destination address, or forward() fails (recorded, never blocks ingest).
   MAIL_GMAIL_FORWARD?: string;
+  // スポンサーのメール連携 (sponsor-sync.ts): 人が送った / 受け取ったメールを SVC_MEMBER に知らせる。
+  // 既定 on。"off" で止める (メールの送受信には影響しない)。
+  MAIL_SPONSOR_SYNC?: string;
   // Every inbound mail is also forwarded (once per Message-ID) to this single address.
   // Unset/empty = off. Independent of MAIL_GMAIL_FORWARD. Must be a VERIFIED Email Routing
   // destination, or forward() fails (logged + audited, storage unaffected).
