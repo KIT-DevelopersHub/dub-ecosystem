@@ -7,6 +7,7 @@ export {
   drain,
   ensureOutbox,
   pruneOutbox,
+  EXPIRED_ERROR_PREFIX,
   nowIso,
   type OutboxStatus,
   type OutboxRow,

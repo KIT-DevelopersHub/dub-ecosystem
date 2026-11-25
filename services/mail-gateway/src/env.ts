@@ -28,6 +28,7 @@ export interface Env {
   SVC_AUDIT?: Fetcher; // audit-log (free-tier outbox drain delivery target); absent => drain skips audit
   SVC_MEMBER?: Fetcher; // member-service: userId -> 名簿 Gmail (Gmail safety-net forward); absent => no forward
   SVC_NOTIFICATION?: Fetcher; // notification POST /notify: in-app admin alert for Resend delivery problems; absent => audit + log only
+  SVC_FREEQ_DRAIN?: Fetcher; // freeq-drain POST /internal/drain/kick: cron backstop that re-arms the drain alarm (freeq-kick.ts)
 
   // --- Gmail safety-net forward (gmail-forward.ts) ---
   // "on" forwards each inbound copy to the envelope recipient's linked 名簿 Gmail. Anything

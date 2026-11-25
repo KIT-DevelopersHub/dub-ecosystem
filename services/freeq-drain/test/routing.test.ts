@@ -224,7 +224,7 @@ describe("drainAll (multi-DB, best-effort)", () => {
 
     expect(out.DB_CORE).toMatchObject({ ok: true, claimed: 2, delivered: 2 });
     expect(out.DB_AUTH).toMatchObject({ ok: true, claimed: 1, delivered: 1 });
-    expect(out.DB_DRIVE).toBeUndefined(); // unbound -> skipped
+    expect(Object.keys(out)).not.toContain("DB_DRIVE"); // alias of dub-core -> never drained separately
     expect(readRow(core.raw, "c1")).toMatchObject({ status: "done" });
     expect(readRow(core.raw, "c2")).toMatchObject({ status: "done" });
     expect(readRow(authDb.raw, "a1")).toMatchObject({ status: "done" });

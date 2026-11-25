@@ -15,7 +15,8 @@ workers_dev = false
 enabled = true
 
 # --- The alarm-loop Durable Object (SQLite-backed = FREE plan) that drives the drain.
-#     Bootstrapped once after deploy via POST /internal/drain/kick, then self-reschedules. ---
+#     Bootstrapped via POST /internal/drain/kick, then self-reschedules. BACKSTOP: the
+#     mail-gateway */5 cron calls the kick every tick (re-arms a dropped/wedged alarm). ---
 [[durable_objects.bindings]]
 name = "DRAIN_DO"
 class_name = "FreeqDrainDO"
@@ -27,8 +28,9 @@ new_sqlite_classes = ["FreeqDrainDO"]   # SQLite-backed DO is available on the W
 # --- freeq outbox D1s (one drain pass each). Only TWO physical D1s exist in the account:
 #     dub-core (shared) and auth-outbox. drive-proxy and mo3-mobile-bff write their outbox
 #     rows to the SHARED dub-core DB (there is no dub-drive-proxy-watch / mobile outbox DB),
-#     so DB_DRIVE and DB_MOBILE both resolve to dub-core. Re-draining the same table in one
-#     tick is harmless/idempotent (drain claims rows atomically). ---
+#     so DB_DRIVE and DB_MOBILE both resolve to dub-core. They are kept bound for reference
+#     but are NOT drained (src/env.ts OUTBOX_DB_BINDINGS = DB_CORE + DB_AUTH): re-draining the
+#     same table 3x per tick blew the Free plan's 50-subrequest cap. ---
 [[d1_databases]]
 binding = "DB_CORE"
 database_name = "dub-core"

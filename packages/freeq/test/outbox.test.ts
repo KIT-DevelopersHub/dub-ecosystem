@@ -182,3 +182,22 @@ describe("backoffMs", () => {
     expect(backoffMs(0)).toBe(1_000); // clamped to attempt 1
   });
 });
+
+describe("drain expire gate (stale messages are retired, never delivered)", () => {
+  it("retires an expired row as failed with an 'expired:' reason and does not call deliver", async () => {
+    const { d1, raw } = makeD1();
+    const stale = await enqueue(d1, "evt.notification", { n: 1 }, { now: clock(T0) });
+    const fresh = await enqueue(d1, "evt.notification", { n: 2 }, { now: clock(T0 + 1) });
+    const seen: string[] = [];
+
+    const res = await drain(d1, async (m) => void seen.push(m.id), {
+      now: clock(T0 + 10),
+      expire: (row) => (row.id === stale ? "too old" : null),
+    });
+
+    expect(res).toEqual({ claimed: 2, delivered: 1, retried: 0, failed: 1 });
+    expect(seen).toEqual([fresh]); // the stale row never reached the consumer
+    expect(rowById(raw, stale)).toMatchObject({ status: "failed", last_error: "expired: too old" });
+    expect(rowById(raw, fresh).status).toBe("done");
+  });
+});
