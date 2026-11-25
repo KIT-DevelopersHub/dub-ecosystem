@@ -90,6 +90,10 @@ service = "dub-mail-automation"    # POST /internal/events-async (evt.mail-autom
 
 [vars]
 ENVIRONMENT = "production"
+# #841: max outbox rows the drain claims per UTC day (D1 free tier = 100k rows written/day,
+# reset 09:00 JST). Normal traffic ~100-300/day; a backlog beyond this stays pending and
+# drains on later days. "0" pauses delivery.
+FREEQ_DAILY_ROW_CAP = "3000"
 
 [env.preview.vars]
 ENVIRONMENT = "preview"
