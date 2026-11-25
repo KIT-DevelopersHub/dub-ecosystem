@@ -34,7 +34,8 @@ const SHARE_NOTE = [
   "同行者の方には、その方の分の URL だけを転送してください。SNS などには公開しないでください。",
 ];
 
-export function renderBuyerMail(order: TicketOrderRow, passes: readonly TicketPass[]): RenderedMail {
+/** receiptUrl: 有料注文だけ（無料・未設定は null でリンクを出さない）。 */
+export function renderBuyerMail(order: TicketOrderRow, passes: readonly TicketPass[], receiptUrl: string | null = null): RenderedMail {
   const number = orderNumber(order.id);
   const items = order.items.map((i) => `${ticketName(i)} × ${i.quantity} 枚（${yen(i.unitPriceJpy)}）`);
   const test = isTestOrder(order);
@@ -49,6 +50,7 @@ export function renderBuyerMail(order: TicketOrderRow, passes: readonly TicketPa
     "ご注文内容:",
     ...items.map((i) => `  ${i}`),
     `合計: ${yen(order.amountJpy)}`,
+    ...(receiptUrl ? [`領収書（宛名を入れて印刷できます）: ${receiptUrl}`] : []),
     "",
     "チケット:",
     ...passes.map((p, i) => `  ${i + 1}. ${ticketName(p.ticket)}: ${p.url}`),
@@ -64,7 +66,9 @@ export function renderBuyerMail(order: TicketOrderRow, passes: readonly TicketPa
     (test ? `<p><strong>${testNote}</strong></p>` : "") +
     `<p>注文番号: <strong>${esc(number)}</strong><br>` +
     items.map((i) => `${esc(i)}<br>`).join("") +
-    `合計: ${esc(yen(order.amountJpy))}</p>` +
+    `合計: ${esc(yen(order.amountJpy))}` +
+    (receiptUrl ? `<br><a href="${esc(receiptUrl)}">領収書を表示する</a>（宛名を入れて印刷できます）` : "") +
+    "</p>" +
     passes
       .map(
         (p, i) =>

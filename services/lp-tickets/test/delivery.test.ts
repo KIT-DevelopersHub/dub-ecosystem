@@ -815,6 +815,7 @@ describe("CSV", () => {
       buyerEmail: "a@example.com",
       status: "paid",
       preview: false,
+      receiptName: null,
       stripeSessionId: null,
       quantity: 1,
       amountJpy: 1,

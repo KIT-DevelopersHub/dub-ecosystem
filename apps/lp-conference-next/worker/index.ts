@@ -36,6 +36,7 @@ import {
   type ProposalConfig,
 } from "./proposals.ts";
 import { handlePass, matchPassRoute } from "./ticket-pass.ts";
+import { handleReceipt, matchReceiptRoute } from "./ticket-receipt.ts";
 import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supportsSiteConfig } from "./site-config.ts";
 import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
 import { contentInjections, contentSelector } from "./lp-content.ts";
@@ -181,6 +182,8 @@ export default {
     // Before everything: tickets stay usable with sales off, and no cookie or version logic touches them.
     const pass = matchPassRoute(url.pathname);
     if (pass) return handlePass(req, pass, { demo: env.TICKETS_DEMO === "1", internal: ticketsInternal(env) });
+    const receipt = matchReceiptRoute(url.pathname);
+    if (receipt) return handleReceipt(req, receipt, { demo: env.TICKETS_DEMO === "1", internal: ticketsInternal(env) });
     const ticketsPath = isTicketsPath(url.pathname);
     // LP管理「プレビュー」タブの ?tickets=on|off はこの閲覧者にだけ効く（公開中の LP は不変）。
     const mode = ticketsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));

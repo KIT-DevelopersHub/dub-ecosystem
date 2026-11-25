@@ -143,3 +143,49 @@ export interface LpTicketCouponInput {
   /** ISO・未来 */
   expiresAt?: string;
 }
+
+// ---- 領収書（公開 LP の /receipt/<token>。トークンは注文ごとの HMAC 署名で、チケット URL とは別） ----
+
+/** 宛名の上限文字数（LP のフォームと lp-tickets の検証で共有）。 */
+export const LP_TICKET_RECEIPT_NAME_MAX = 60;
+
+/** issued = 有効な領収書 / refunded = 返金済みで無効（表示はするが「無効」と明記）。 */
+export type LpTicketReceiptStatus = "issued" | "refunded";
+
+/** 発行者。未設定の項目は null（LP は「未設定」と明示して出す。勝手に埋めない）。 */
+export interface LpTicketReceiptIssuer {
+  name: string;
+  event: string;
+  email: string;
+  url: string;
+  /** 所在地。null = 未設定。 */
+  address: string | null;
+  /** 適格請求書発行事業者の登録番号（T + 13 桁）。null = 登録なし（消費税額の内訳も出さない）。 */
+  invoiceRegistrationNo: string | null;
+}
+
+/** GET/POST /lp/internal/tickets/receipt/:token（LP Worker が HTML にする）。有料で支払い済み・返金済みの注文だけ。 */
+export interface LpTicketReceipt {
+  orderNumber: string;
+  status: LpTicketReceiptStatus;
+  /** null = 宛名なし（LP で 1 回だけ入れられる）。 */
+  receiptName: string | null;
+  items: LpTicketOrderItem[];
+  /** 合計（税込）。 */
+  amountJpy: number;
+  /** うち消費税（10%）。登録番号が無い時は null。 */
+  taxJpy: number | null;
+  /** 支払日時（ISO）。 */
+  paidAt: string;
+  /** Stripe の決済手段（"card" / "paypay" など）。不明は null。 */
+  paymentMethod: string | null;
+  /** テスト注文（実際の請求なし）。領収書としては無効。 */
+  test: boolean;
+  issuer: LpTicketReceiptIssuer;
+}
+
+/** POST /lp/internal/tickets/receipt/:token — 宛名が未設定の時だけ 1 回入れられる（2 回目は 409）。 */
+export interface LpTicketReceiptNameInput {
+  /** 1..LP_TICKET_RECEIPT_NAME_MAX 字 */
+  receiptName: string;
+}

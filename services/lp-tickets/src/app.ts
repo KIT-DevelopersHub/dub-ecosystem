@@ -49,6 +49,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/lp/internal/tickets/preview", async (c) => c.json(await tickets.checkPreview(await readJson(c))));
   app.post("/lp/internal/tickets/confirm", async (c) => c.json(await tickets.confirm(await readJson(c))));
   app.get("/lp/internal/tickets/pass/:token", async (c) => c.json(await tickets.pass(c.req.param("token"))));
+  // 領収書（注文ごとの署名トークン）。宛名は空の時だけ 1 回入れられる。
+  app.get("/lp/internal/tickets/receipt/:token", async (c) => c.json(await tickets.receipt(c.req.param("token"))));
+  app.post("/lp/internal/tickets/receipt/:token", async (c) =>
+    c.json(await tickets.setReceiptName(c.req.param("token"), await readJson(c))),
+  );
   app.post("/lp/internal/tickets/stripe-webhook", async (c) => {
     const raw = await c.req.text();
     return c.json(await tickets.webhook(raw, c.req.header("stripe-signature")));

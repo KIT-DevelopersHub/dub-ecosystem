@@ -8,6 +8,8 @@ import { issuePreviewToken, verifyPreviewToken } from "./preview-token";
 import { stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
 import { ordersCsv } from "./ticket-csv";
 import { isTestOrder, orderNumber } from "./ticket-mail";
+import { checkReceiptName, parseReceiptNameInput, receiptOf } from "./ticket-receipt";
+import { verifyReceiptToken } from "./ticket-token";
 import type {
   AppDeps,
   LpTicketAnswer,
@@ -18,6 +20,7 @@ import type {
   LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketOrdersPage,
+  LpTicketReceipt,
   LpTicketPaymentMethod,
   LpTicketsState,
   LpTicketType,
@@ -191,6 +194,8 @@ export interface CheckoutInput {
   clientKey: string | null;
   /** Normalized coupon code; null = none entered. */
   couponCode: string | null;
+  /** 領収書の宛名（任意）。null = 入力なし。 */
+  receiptName: string | null;
 }
 
 /** "abcde-12345 " -> "ABCDE12345"; null when it can not be a code. */
@@ -285,9 +290,12 @@ export function parseCheckout(body: unknown, fields: LpTicketField[]): CheckoutI
   if ((hasCoupon && typeof b.couponCode !== "string") || (rawCoupon && !couponCode)) {
     bad.push({ field: "couponCode", reason: "invalid" });
   }
+  const receipt = checkReceiptName(b.receiptName);
+  if ("reason" in receipt) bad.push({ field: "receiptName", reason: receipt.reason });
   if (bad.length > 0) throw errors.validationFailed(bad);
   const clientKey = typeof b.clientKey === "string" && lp.LP_CLIENT_KEY_RE.test(b.clientKey) ? b.clientKey : null;
-  return { items, name, email, answers, origin, clientKey, couponCode };
+  const receiptName = "name" in receipt ? receipt.name : null;
+  return { items, name, email, answers, origin, clientKey, couponCode, receiptName };
 }
 
 export function statsFor(t: Pick<LpTicketType, "capacity">, agg: TicketTypeAgg | undefined): LpTicketTypeStats {
@@ -318,6 +326,7 @@ const toOrder = (row: TicketOrderRow): LpTicketOrder => {
     resolvedBy: _rb,
     resolvedAt: _rt,
     clientKey: _ck,
+    receiptName: _rn,
     ...o
   } = row;
   return { ...o, test: isTestOrder(row) };
@@ -634,6 +643,7 @@ export class TicketService {
       couponId: coupon?.id ?? null,
       paymentMethod: null,
       preview,
+      receiptName: input.receiptName,
     };
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
     const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
@@ -968,6 +978,29 @@ export class TicketService {
     const pass = await this.delivery.pass(token);
     if (!pass) throw errors.notFound("lp_ticket");
     return pass;
+  }
+
+  /** LP Worker: the receipt behind a receipt URL. Same 404 for a bad token and for an order with no receipt. */
+  async receipt(token: string): Promise<LpTicketReceipt> {
+    const order = await this.receiptOrder(token);
+    return receiptOf(order)!;
+  }
+
+  /** LP Worker: the buyer sets the 宛名 once (only while it is empty; 409 afterwards — a receipt is not re-addressed). */
+  async setReceiptName(token: string, body: unknown): Promise<LpTicketReceipt> {
+    const order = await this.receiptOrder(token);
+    const name = parseReceiptNameInput(body);
+    if (!(await this.repo.setReceiptName(order.id, name))) {
+      throw new DubError("LP_TICKET_RECEIPT_NAME_SET", "領収書の宛名は設定済みです", { status: 409 });
+    }
+    return receiptOf({ ...order, receiptName: name })!;
+  }
+
+  private async receiptOrder(token: string): Promise<TicketOrderRow> {
+    const id = await verifyReceiptToken(this.deps.ticketTokenSecret, token);
+    const order = id ? await this.repo.getOrder(TICKET_SITE, id) : null;
+    if (!order || !receiptOf(order)) throw errors.notFound("lp_ticket_receipt");
+    return order;
   }
 
   /** LP管理: every order as one CSV. Personal data, so only the route's policy decides who gets it. */

@@ -25,6 +25,8 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /lp/internal/tickets/preview": INTERNAL,
   "POST /lp/internal/tickets/confirm": INTERNAL,
   "GET /lp/internal/tickets/pass/:token": INTERNAL,
+  "GET /lp/internal/tickets/receipt/:token": INTERNAL,
+  "POST /lp/internal/tickets/receipt/:token": INTERNAL,
   "POST /lp/internal/tickets/stripe-webhook": INTERNAL,
   "GET /lp/internal/tickets/release": INTERNAL,
   "POST /lp/internal/tickets/release": INTERNAL,
