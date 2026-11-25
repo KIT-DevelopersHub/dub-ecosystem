@@ -131,6 +131,8 @@ const SETTINGS_WRITE = [
   "POST /driveshare/google-account/active",
   "POST /driveshare/google-account/callback",
   "POST /driveshare/google-account/connect",
+  // The role-grant backfill touches every grant of the org: admin-only like the account settings.
+  "POST /driveshare/role-grants/reconcile",
 ];
 // カレンダー > ミーティング.
 const MEETINGS_READ = ["GET /meetings", "GET /meetings/:id/attendees", "GET /meetings/targets"];
@@ -147,7 +149,7 @@ const ATTENDANCE_WRITE = [
   "PUT /meetings/attendance/settings",
 ];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
-const INTERNAL_ROUTES = ["GET /internal/health"];
+const INTERNAL_ROUTES = ["GET /internal/health", "POST /internal/role-membership"];
 // The whole external surface — what a caller can reach through api-gateway at most.
 const FULL = [...READS, ...WRITES, ...SETTINGS_READ, ...SETTINGS_WRITE, ...MEETINGS_READ, ...MEETINGS_WRITE, ...SELF, ...ATTENDANCE_READ, ...ATTENDANCE_WRITE].sort();
 const OPERATOR = [...READS, ...WRITES, ...SELF].sort();

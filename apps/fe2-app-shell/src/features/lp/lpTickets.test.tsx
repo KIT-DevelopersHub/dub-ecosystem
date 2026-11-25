@@ -73,6 +73,8 @@ function baseState(over: Partial<LpTicketsState> = {}): LpTicketsState {
     enabled: false,
     ctaEnabled: false,
     paymentReady: false,
+    previewCheckout: false,
+    paymentMethods: [],
     publicUrl: "https://hokuriku-it-conf.com/tickets",
     fields: [{ id: "f_aff", label: "所属", type: "text", required: false, options: [] }],
     types: [ticketType()],
@@ -419,6 +421,9 @@ describe("LpTicketsScreen", () => {
       paidAt: "2026-10-12T11:21:00.000Z",
       reviewReason: null,
       couponId: null,
+      paymentMethod: null,
+      preview: false,
+      test: false,
     };
     renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items: [order], nextCursor: null }) }));
     const items = await screen.findByTestId("fe2-lp-ticket-order-items-ord_x");
@@ -429,7 +434,7 @@ describe("LpTicketsScreen", () => {
     expect(screen.getByTestId("fe2-lp-ticket-order-total-ord_x")).toHaveTextContent("計 3 枚");
     fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-details-ord_x"));
     expect(screen.getByTestId("fe2-lp-ticket-order-answers-ord_x")).toHaveTextContent("¥3,000 × 2 枚 = ¥6,000");
-    // older API without paymentMethod: no method label
+    // no paymentMethod (free / unknown): no method label
     expect(screen.queryByTestId("fe2-lp-ticket-order-method-ord_x")).not.toBeInTheDocument();
   });
 
@@ -447,6 +452,8 @@ describe("LpTicketsScreen", () => {
       paidAt: "2026-10-12T11:21:00.000Z",
       reviewReason: null,
       couponId: null,
+      preview: false,
+      test: false,
       paymentMethod: "paypay",
     };
     const items = [base, { ...base, id: "ord_card", paymentMethod: "card" }, { ...base, id: "ord_pend", status: "pending" as const, paidAt: null, paymentMethod: null }];
@@ -470,6 +477,7 @@ describe("LpTicketsScreen", () => {
       paidAt: "2026-10-12T11:21:00.000Z",
       reviewReason: null,
       couponId: null,
+      paymentMethod: null,
       preview: true,
       test: true,
     };
@@ -500,6 +508,9 @@ describe("LpTicketsScreen", () => {
         paidAt: null,
         reviewReason: "oversold",
         couponId: null,
+        paymentMethod: null,
+        preview: false,
+        test: false,
         ...over,
       };
     }
@@ -774,6 +785,9 @@ describe("LpTicketsScreen coupons", () => {
       paidAt: "2026-10-14T03:00:00.000Z",
       reviewReason: null,
       couponId: "cpn_a",
+      paymentMethod: null,
+      preview: false,
+      test: false,
     };
     const orders = () => Promise.resolve({ items: [order], nextCursor: null });
     renderScreen(fakeApi({ listTicketOrders: orders, listTicketCoupons: () => Promise.resolve({ items: [coupon()] }) }));
@@ -794,6 +808,9 @@ describe("LpTicketsScreen coupons", () => {
       paidAt: "2026-10-14T03:00:00.000Z",
       reviewReason: null,
       couponId: "cpn_a",
+      paymentMethod: null,
+      preview: false,
+      test: false,
     };
     renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items: [order], nextCursor: null }) }), EDITOR);
     expect(await screen.findByTestId("fe2-lp-ticket-order-coupon-ord_c")).toHaveTextContent(/^クーポン$/);
