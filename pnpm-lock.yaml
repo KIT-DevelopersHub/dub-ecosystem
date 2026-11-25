@@ -1392,6 +1392,9 @@ importers:
       '@dub/freeq':
         specifier: workspace:*
         version: link:../../packages/freeq
+      '@dub/http':
+        specifier: workspace:*
+        version: link:../../packages/http
       '@dub/observability':
         specifier: workspace:*
         version: link:../../packages/observability
