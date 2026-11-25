@@ -24,6 +24,7 @@ import { useBffHome } from "../../bff/useBffHome.tsx";
 import { useRecentVisits } from "../useVisitTracker.tsx";
 import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
+import { LoadErrorState } from "../LoadErrorState.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { RegularMeetingsCard } from "./dashboard/RegularMeetingsCard.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
@@ -221,7 +222,7 @@ export function HomeScreen({
   // from the shell router (main.tsx wires router.navigate). Absent in unit tests.
   onNavigate?: (path: string) => void;
 }): JSX.Element {
-  const { data, isPending, errorFor, refetch } = useBffHome(api);
+  const { data, isPending, error: homeError, errorFor, refetch } = useBffHome(api);
   // Drives the same "current event" selection the header's イベント switcher
   // (GlobalEventSwitcher) and the Event app hub (/events → EventHubPage) read —
   // see openEvent() below.
@@ -289,6 +290,16 @@ export function HomeScreen({
   const unreadStatus: MetricStatus = notificationsError ? "info" : unread > 0 ? "warn" : "good";
 
   const rootRef = useViewportFit<HTMLElement>();
+
+  // The whole /bff/home call failed: say so (+ 再試行) instead of a dashboard of 0s.
+  if (homeError) {
+    return (
+      <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">
+        <PageHeader testId="fe2-home-header" title="ダッシュボード" />
+        <LoadErrorState error={homeError} onRetry={refetch} subject="ダッシュボード" testId="fe2-home-error" />
+      </main>
+    );
+  }
 
   return (
     <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">

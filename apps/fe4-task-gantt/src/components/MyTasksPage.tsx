@@ -50,6 +50,8 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
   const [tasks, setTasks] = useState<task.Task[]>([]);
   const [users, setUsers] = useState<UserCache>(() => createUserCache(people));
   const [loading, setLoading] = useState(true);
+  // A failed load is an error state + 再試行, never "タスクがありません" (#855).
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<task.Task | null>(null);
@@ -92,6 +94,9 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
       if (seq !== reqSeq.current) return; // a newer load superseded this one
       const merged = mergeTasks(...pages.map((p) => p.items));
       setTasks(merged);
+      setLoadError(null);
+    } catch (e) {
+      if (seq === reqSeq.current) setLoadError(e);
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
@@ -260,6 +265,8 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         users={users}
         teamNames={teamNames}
         loading={loading}
+        loadError={loadError}
+        onRetry={() => void load()}
         onSelect={setSelected}
         onComplete={onComplete}
         visibleCount={visibleCount}
