@@ -6,6 +6,8 @@ import { consoleSink } from "@dub/observability";
 import { createD1LpRepo } from "./d1-repo";
 import { createCfSiteTrafficSource } from "./site-traffic";
 import { createTicketReleaseClient } from "./ticket-release";
+import { DEFAULT_DAILY_SPONSOR_CAP, createSponsorNotifier } from "./sponsor-inquiries";
+import { sponsorInquiryRepo } from "./sponsor-inquiry-repo";
 import type { Env } from "./env";
 import type { AppDeps } from "./types";
 
@@ -41,5 +43,14 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     newSiteConfigHistoryId: () => newId("lph"),
     dailyProposalCap:
       Number(env.LP_DAILY_PROPOSAL_CAP) > 0 ? Number(env.LP_DAILY_PROPOSAL_CAP) : DEFAULT_DAILY_PROPOSAL_CAP,
+    sponsor: {
+      repo: sponsorInquiryRepo(db),
+      lpBaseUrl: env.LP_BASE_URL ?? DEFAULT_LP_BASE_URL,
+      now: nowIso,
+      newId: () => newId("lps"),
+      notifier: createSponsorNotifier(env.SVC_CHAT, env.SVC_MAIL),
+      defaultNotifyEmail: env.LP_SPONSOR_NOTIFY_EMAIL?.trim() || null,
+      dailyCap: Number(env.LP_DAILY_SPONSOR_CAP) > 0 ? Number(env.LP_DAILY_SPONSOR_CAP) : DEFAULT_DAILY_SPONSOR_CAP,
+    },
   };
 }

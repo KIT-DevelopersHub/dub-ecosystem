@@ -28,6 +28,15 @@ service = "dub-identity-roster"   # POST /authz/check (app:lp:view / app:lp:edit
 binding = "SVC_LP_TICKETS"
 service = "dub-lp-tickets"        # 公開設定の release のうちチケット販売の 2 項目の正本
 
+# スポンサー募集（/sponsors の資料請求）の通知: Dub チャットのチャンネルへ投稿・スポンサーチームと依頼者へメール。
+[[services]]
+binding = "SVC_CHAT"
+service = "dub-chat-service"
+
+[[services]]
+binding = "SVC_MAIL"
+service = "dub-mail-gateway"
+
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
 LP_BASE_URL = "https://hokuriku-it-conf.com"
@@ -35,6 +44,8 @@ LP_BASE_URL = "https://hokuriku-it-conf.com"
 #   npx wrangler secret put CF_ANALYTICS_TOKEN   (Account Analytics:Read)
 CF_ACCOUNT_ID = "b8f6ddbf8fa8cf4e421eae870bdb6dac"
 LP_WEB_ANALYTICS_SITE_TAG = "b1f4a5ab461a42dcb22c9ae37984d634"
+# スポンサー募集: LP管理で通知メールを設定していないときのスポンサーチームのアドレス（空 = メール通知なし）。
+LP_SPONSOR_NOTIFY_EMAIL = ""
 
 # --- TicketReconcileDO は lp-tickets (dub-lp-tickets) へ移った。適用済みの migration は消さず v1 を残し、
 # binding と class を外すのと同じデプロイで v2 の deleted_classes を流す（これが無いと class を失った

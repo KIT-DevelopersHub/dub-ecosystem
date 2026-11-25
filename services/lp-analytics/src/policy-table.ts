@@ -22,6 +22,8 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /lp/internal/proposals": INTERNAL,
   "GET /lp/internal/site-config": INTERNAL,
   "POST /lp/internal/proposals/submit": INTERNAL,
+  "GET /lp/internal/sponsor-inquiries": INTERNAL,
+  "POST /lp/internal/sponsor-inquiries/submit": INTERNAL,
 
   // ---- LP管理 ----
   "GET /lp/stats": VIEW,
@@ -41,4 +43,10 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /lp/proposals/fields": EDIT,
   "GET /lp/proposals/submissions": EDIT,
   "PATCH /lp/proposals/submissions/:id": EDIT,
+  // スポンサー募集: 公開 on/off と通知先（チャンネル / チームのメール）は PUBLISH、資料請求の一覧（個人情報）は EDIT。
+  "GET /lp/sponsor-inquiries": VIEW,
+  "POST /lp/sponsor-inquiries/enabled": PUBLISH,
+  "POST /lp/sponsor-inquiries/notify": PUBLISH,
+  "GET /lp/sponsor-inquiries/items": EDIT,
+  "PATCH /lp/sponsor-inquiries/items/:id": EDIT,
 });

@@ -7,6 +7,7 @@
 //   /lp/visits → ログ管理（流入ログのダッシュボード・LpProvider 経由で api を読む）
 //   /lp/tickets → チケット（LP の /tickets 購入ページの販売設定・券種・入力項目・購入者）
 //   /lp/proposals → 登壇者募集（LP の /proposals 応募ページの公開・入力項目・応募の選考）
+//   /lp/sponsors → スポンサー募集（LP の /sponsors 資料請求ページの公開・通知先・請求の対応状況）
 // バージョン一覧は静的カタログのままだが、流入URL/ログ管理は api を叩くので composition 側で
 // LpProvider に包む。タブは URL に紐づくので deep link / リロード / 戻る が成立する。
 // auth:"required" なので未ログインはシェルが /login に戻す。
@@ -18,6 +19,7 @@ import { LpPreviewScreen } from "./LpPreviewScreen.tsx";
 import { LpVisitLogScreen } from "./LpVisitLogScreen.tsx";
 import { LpTicketsScreen } from "./LpTicketsScreen.tsx";
 import { LpProposalsScreen } from "./LpProposalsScreen.tsx";
+import { LpSponsorScreen } from "./LpSponsorScreen.tsx";
 
 export interface LpSourceRoute {
   path: string;
@@ -37,6 +39,7 @@ export const lpRoutes: LpSourceRoute[] = [
   { path: "/lp/visits", lazy: () => Promise.resolve({ Component: LpVisitLogScreen }), auth: "required" },
   { path: "/lp/tickets", lazy: () => Promise.resolve({ Component: LpTicketsScreen }), auth: "required" },
   { path: "/lp/proposals", lazy: () => Promise.resolve({ Component: LpProposalsScreen }), auth: "required" },
+  { path: "/lp/sponsors", lazy: () => Promise.resolve({ Component: LpSponsorScreen }), auth: "required" },
 ];
 
 export const lpNav: LpNavEntry[] = [{ label: "LP管理", path: "/lp", icon: "megaphone" }];

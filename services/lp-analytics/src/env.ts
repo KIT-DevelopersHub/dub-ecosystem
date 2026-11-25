@@ -19,4 +19,12 @@ export interface Env {
   CF_ANALYTICS_TOKEN?: string;
   /** 1 日 (JST) に受け付ける登壇応募の上限（既定 200）。 */
   LP_DAILY_PROPOSAL_CAP?: string;
+  /** スポンサー募集の通知: Dub チャットへの投稿（chat-service POST /internal/system-messages）。無ければチャットは使わない。 */
+  SVC_CHAT?: Fetcher;
+  /** スポンサー募集の通知メール・受付メール（mail-gateway POST /send）。無ければメールは送らない。 */
+  SVC_MAIL?: Fetcher;
+  /** LP管理で通知メールを設定していないときのスポンサーチームのアドレス。 */
+  LP_SPONSOR_NOTIFY_EMAIL?: string;
+  /** 1 日 (JST) に受け付ける資料請求の上限（既定 100）。 */
+  LP_DAILY_SPONSOR_CAP?: string;
 }

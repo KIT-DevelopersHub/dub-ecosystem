@@ -29,6 +29,7 @@ export * as policy from "./policy"; // RBAC policy layer (PDP): 無効/閲覧/�
 export * as lp from "./lp"; // lp-analytics (LP管理: 公開版切り替え)
 export * as lpTickets from "./lp-tickets"; // lp-tickets (LP チケット販売: 券種・注文・クーポン) — fe2 LP管理と共有
 export * as lpMarkdown from "./lp-markdown"; // LP お知らせ詳細の Markdown 描画・Google ドライブ画像 URL の正規化（LP Worker と LP管理で共用）
+export * as lpSponsor from "./lp-sponsor"; // LP スポンサー募集（/sponsors の資料請求）— lp-analytics・fe2 LP管理・LP Worker で共有
 export * as meeting from "./meeting"; // drive-share-service /meetings (カレンダー > ミーティング)
 export * as hr from "./hr"; // member-service /members/hr/* (人事: 応募→選考→参加→オンボーディング)
 export * as hrForm from "./hr-interview-form"; // 人事: 面談申し込みフォーム (編集できる質問 + 回答 → 応募者)
