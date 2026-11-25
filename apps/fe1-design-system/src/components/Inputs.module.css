@@ -1,5 +1,7 @@
 .input {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   font-family: var(--dub-font-family-sans);
   font-size: var(--dub-font-size-md);
   color: var(--dub-color-text-primary);
@@ -32,6 +34,14 @@
 .textarea {
   resize: vertical;
   min-height: 80px;
+  /* URL など区切りの無い長い文字列も枠内で折り返す。 */
+  overflow-wrap: anywhere;
+}
+/* 高さは内容に合わせて JS が決める。rows が最小の行数。 */
+.textarea[data-autogrow] {
+  resize: none;
+  overflow-y: hidden;
+  min-height: 0;
 }
 .select {
   appearance: none;

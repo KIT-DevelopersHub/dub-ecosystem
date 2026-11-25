@@ -135,7 +135,7 @@ function QuestionInput({
   let input: JSX.Element;
   switch (q.type) {
     case "long_text":
-      input = <Textarea id={id} testId={testId} rows={4} value={text} onChange={onChange} invalid={!!error} />;
+      input = <Textarea id={id} testId={testId} rows={4} autoGrow value={text} onChange={onChange} invalid={!!error} />;
       break;
     case "email":
       input = <TextField id={id} testId={testId} type="email" value={text} onChange={onChange} invalid={!!error} placeholder="name@example.com" />;
@@ -185,7 +185,8 @@ function QuestionInput({
       );
       break;
     default:
-      input = <TextField id={id} testId={testId} value={text} onChange={onChange} invalid={!!error} />;
+      // 短文でも長く書く人がいるので、枠内で折り返して高さを伸ばす。
+      input = <Textarea id={id} testId={testId} rows={1} autoGrow singleLine value={text} onChange={onChange} invalid={!!error} />;
   }
   return (
     <FormField label={q.label} htmlFor={id} required={q.required} {...(q.description ? { help: q.description } : {})} {...(error ? { error } : {})}>
