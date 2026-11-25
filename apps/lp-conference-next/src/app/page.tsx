@@ -15,7 +15,7 @@ import { SectionSlot } from "@/sections/SectionSlot";
 // text flowed in and entirely original brand visuals. goodpatch section →
 // conference section mapping:
 //   hero (centered statement + sub)         → Hero
-//   dual service cards                       → Apply (参加者 / 登壇)
+//   dual service cards                       → Apply (参加者 / 登壇 / スポンサー)
 //   Featured Work (filter tabs + grid)       → Program (聴く/体験する/出会う)
 //   3-col interview/activity cards           → About (とは？ 3点)
 //   full-width special/callout band          → Crowdfunding (SUPPORT band)
