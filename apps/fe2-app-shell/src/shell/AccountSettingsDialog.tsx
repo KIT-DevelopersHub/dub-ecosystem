@@ -39,6 +39,7 @@ import {
 } from "../lib/personProfile.tsx";
 import { statusLabel } from "../features/members/memberStatus.ts";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.tsx";
+import { SELF_PARTICIPATION_KEY } from "./ProfileReminder.tsx";
 import { PasskeysDialog } from "./PasskeysDialog.tsx";
 
 type MeResponse = gateway.MeResponse;
@@ -48,8 +49,9 @@ const MAX_NAME_LENGTH = 40;
 // the /me cache). ~512KB pre-encode keeps the base64 well under storage limits.
 const MAX_AVATAR_BYTES = 512 * 1024;
 
-// The 参加届 profile lives under its own query key (a shell-owned feature key).
-const PARTICIPATION_KEY = queryKeys.feature("me-participation");
+// The 参加届 profile lives under its own query key, shared with the profile reminder
+// (ProfileReminder) so an optimistic save clears the banner / ⚙ dot at once.
+const PARTICIPATION_KEY = SELF_PARTICIPATION_KEY;
 
 // Preset avatars: a small palette of solid-colour tiles rendered as self-contained SVG
 // data: URLs (no network). Picking one sets avatarUrl to that data URL — a "preset avatar"
