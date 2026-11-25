@@ -9,7 +9,7 @@
 //
 // Types are declared locally (not in @dub/types): the LP visit shapes are not in the
 // frozen contract yet, exactly like driveshare's drive:read/drive:write shapes.
-import type { lp } from "@dub/types";
+import type { lp, lpTickets } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 // 公開設定（セクション切り替え・本番反映）の wire 型は @dub/types が唯一の定義（lp-analytics と共有）。
@@ -142,141 +142,23 @@ export interface LpPublishState {
   updatedBy: string | null;
 }
 
-// ── チケット販売（/tickets）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
-export type LpTicketFieldType = lp.LpFieldType;
-export interface LpTicketField {
-  id: string;
-  label: string;
-  /** 回答者に見せる補足説明（無ければキーごと持たない）。 */
-  description?: string;
-  type: LpTicketFieldType;
-  required: boolean;
-  options: string[];
-}
-export interface LpTicketType {
-  id: string;
-  name: string;
-  description: string;
-  priceJpy: number;
-  capacity: number | null;
-  /** "" = 日付なし（通し/共通）。例 "Day 1 · 9/13(月)"。0..30 字 */
-  dayLabel: string;
-  /** 1 回の購入で買える上限枚数 1..20（既定 10） */
-  maxPerOrder: number;
-  active: boolean;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-}
-/** sold / pending は「枚数」（注文数ではない）。pending = 確保中で未販売（決済待ち + 要確認）。 */
-export interface LpTicketTypeStats {
-  sold: number;
-  pending: number;
-  revenueJpy: number;
-  remaining: number | null;
-}
-export interface LpTicketTypeSummary extends LpTicketType {
-  stats: LpTicketTypeStats;
-}
-export type LpTicketPaymentMethod = "card" | "paypay";
-export interface LpTicketsState {
-  site: string;
-  enabled: boolean;
-  /** LP の「参加登録」ボタンを「参加チケットを購入」に差し替える。効くのは enabled && ctaEnabled のとき。 */
-  ctaEnabled: boolean;
-  paymentReady: boolean;
-  /** LP に表示する決済手段（PayPay は lp-analytics の LP_PAYPAY_ENABLED=1 の時だけ）。古い API では無い。 */
-  paymentMethods?: LpTicketPaymentMethod[];
-  /** Stripe がテストキーで動いていて、プレビューからテスト購入できる（本番キー・未設定なら false）。古い API では無い。 */
-  previewCheckout?: boolean;
-  /** LP_BASE_URL + "/tickets" */
-  publicUrl: string;
-  fields: LpTicketField[];
-  types: LpTicketTypeSummary[];
-  totals: { sold: number; revenueJpy: number };
-  updatedAt: string | null;
-  updatedBy: string | null;
-}
-/** needs_review = 金額/通貨の不一致・チャージバック等で人の確認が必要（席は確保したまま）。 */
-export type LpTicketOrderStatus = "pending" | "paid" | "expired" | "refunded" | "needs_review";
-export interface LpTicketAnswer {
-  fieldId: string;
-  label: string;
-  value: string;
-}
-export interface LpTicketOrderItem {
-  ticketTypeId: string;
-  ticketTypeName: string;
-  dayLabel: string;
-  unitPriceJpy: number;
-  quantity: number;
-}
-export interface LpTicketOrder {
-  id: string;
-  items: LpTicketOrderItem[];
-  /** 合計枚数 */
-  quantity: number;
-  /** 合計金額 */
-  amountJpy: number;
-  status: LpTicketOrderStatus;
-  buyerName: string;
-  buyerEmail: string;
-  answers: LpTicketAnswer[];
-  createdAt: string;
-  paidAt: string | null;
-  /** needs_review になった理由。確定後も履歴として残る（status は paid）。 */
-  reviewReason: string | null;
-  /** 使ったクーポン。クーポン注文は常に 0 円。 */
-  couponId: string | null;
-  /** 実際に使われた Stripe の決済手段（"card" / "paypay" など）。無料・未確定・不明は null。古い API では無い。 */
-  paymentMethod?: string | null;
-  /** LP管理のプレビューから作られた注文。古い API では無い。 */
-  preview?: boolean;
-  /** テスト注文（プレビュー由来、または Stripe テストモードの決済）。実際の請求はない。古い API では無い。 */
-  test?: boolean;
-}
-export interface LpTicketOrdersPage {
-  items: LpTicketOrder[];
-  nextCursor: string | null;
-}
-export interface LpTicketTypeInput {
-  name: string;
-  description: string;
-  priceJpy: number;
-  capacity: number | null;
-  dayLabel: string;
-  maxPerOrder: number;
-  active: boolean;
-}
-/** 無料券のクーポン。1 コード = 1 券種 x 最大 maxUses 枚。used = 使った枚数（決済待ち・要確認の確保分を含む）。 */
-export interface LpTicketCoupon {
-  id: string;
-  /** サーバー生成（英大文字 + 数字 10 文字）。 */
-  code: string;
-  label: string;
-  ticketTypeId: string;
-  maxUses: number;
-  used: number;
-  /** null = 期限なし */
-  expiresAt: string | null;
-  /** false = 停止中。削除は無い（注文が参照するため）。 */
-  active: boolean;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-export interface LpTicketCouponsPage {
-  items: LpTicketCoupon[];
-}
-export interface LpTicketCouponInput {
-  ticketTypeId: string;
-  /** 1..1000 */
-  maxUses: number;
-  /** 0..60 字 */
-  label?: string;
-  /** ISO・未来 */
-  expiresAt?: string;
-}
+// ── チケット販売（/tickets）。wire 型は @dub/types lpTickets が唯一の定義（services/lp-tickets と共有） ──
+export type LpTicketFieldType = lpTickets.LpTicketFieldType;
+export type LpTicketField = lpTickets.LpTicketField;
+export type LpTicketType = lpTickets.LpTicketType;
+export type LpTicketTypeStats = lpTickets.LpTicketTypeStats;
+export type LpTicketTypeSummary = lpTickets.LpTicketTypeSummary;
+export type LpTicketPaymentMethod = lpTickets.LpTicketPaymentMethod;
+export type LpTicketsState = lpTickets.LpTicketsState;
+export type LpTicketOrderStatus = lpTickets.LpTicketOrderStatus;
+export type LpTicketAnswer = lpTickets.LpTicketAnswer;
+export type LpTicketOrderItem = lpTickets.LpTicketOrderItem;
+export type LpTicketOrder = lpTickets.LpTicketOrder;
+export type LpTicketOrdersPage = lpTickets.LpTicketOrdersPage;
+export type LpTicketTypeInput = lpTickets.LpTicketTypeInput;
+export type LpTicketCoupon = lpTickets.LpTicketCoupon;
+export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
+export type LpTicketCouponInput = lpTickets.LpTicketCouponInput;
 
 // ── 登壇者募集（/proposals）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
 /** submitted = 未対応 / accepted = 採択 / rejected = 見送り。 */
