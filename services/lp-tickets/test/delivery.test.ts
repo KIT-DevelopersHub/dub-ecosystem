@@ -273,10 +273,14 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
     await h.charge(o, "charge.refunded", { amount: 6000, amount_refunded: 6000 });
     await h.flush();
     h.clock.set(later(10 * 60 * 1000));
-    const calls = mail.calls.length;
+    const orderMails = () => mail.calls.filter((k) => !k.endsWith(":buyer_refund")).length;
+    const calls = orderMails();
     await h.delivery.drain();
-    expect(mail.calls.length).toBe(calls);
+    expect(orderMails()).toBe(calls);
     expect((await h.outbox(o.id)).buyer_confirmation).toMatchObject({ status: "failed", lastError: "order_refunded" });
+    // Only the refund notice is still tried (and retried) by the same drain.
+    expect(mail.calls.at(-1)).toBe(`${o.id}:buyer_refund`);
+    expect((await h.outbox(o.id)).buyer_refund).toMatchObject({ status: "pending", lastError: "resend_500_unknown" });
   });
 
   it("fulfil after a refund issues nothing (a late retry cannot revive the order)", async () => {

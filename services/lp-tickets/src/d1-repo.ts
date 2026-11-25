@@ -1,6 +1,7 @@
 // D1-backed LpTicketRepo on the dedicated dub-tickets DB. Tables keep their lp_ticket_* names, so
 // namespace `lp_*` (enforced by @dub/db strict client) still fits.
 import type { DbClient } from "@dub/db";
+import { consoleSink } from "@dub/observability";
 import type {
   LpTicketAnswer,
   LpTicketField,
@@ -548,18 +549,41 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
       );
       return res.meta.changes > 0;
     },
-    async markOrderRefunded(id, refundedAt) {
-      const [res] = await db.batch([
+    async markOrderRefunded(id, refundedAt, mail) {
+      // changes() = rows the order UPDATE just changed, so the mail is queued only by the call that
+      // refunded the order (the next statement in the same batch = the same transaction).
+      const queue = mail
+        ? [
+            {
+              sql: `INSERT OR IGNORE INTO lp_ticket_outbox (id, order_id, kind, status, attempts, next_attempt_at, created_at)
+                    SELECT ?, ?, ?, 'pending', 0, ?, ? WHERE changes() > 0`,
+              binds: [mail.id, mail.orderId, mail.kind, mail.nextAttemptAt, mail.createdAt],
+            },
+          ]
+        : [];
+      const [res, ...rest] = await db.batch([
         {
           sql: "UPDATE lp_ticket_orders SET status = 'refunded', refunded_at = ? WHERE id = ? AND status IN ('paid', 'needs_review')",
           binds: [refundedAt, id],
         },
+        ...queue,
         {
           sql: "UPDATE lp_tickets SET status = 'void', voided_at = ? WHERE order_id = ? AND status = 'valid'",
           binds: [refundedAt, id],
         },
       ]);
-      return (res?.meta.changes ?? 0) > 0;
+      const queued = mail ? rest[0] : undefined;
+      const changed = (res?.meta.changes ?? 0) > 0;
+      // OR IGNORE also swallows the kind CHECK: 0 rows here means db/0004 is not applied yet.
+      if (changed && mail && (queued?.meta.changes ?? 0) === 0) {
+        consoleSink({
+          level: "error",
+          message: "lp ticket refund mail not queued: apply db/0004_refund_mail.sql",
+          service: "lp-tickets",
+          fields: { orderId: id },
+        });
+      }
+      return changed;
     },
     async approveOrder(id, resolvedBy, resolvedAt, onlyReason) {
       const res = await db.run(

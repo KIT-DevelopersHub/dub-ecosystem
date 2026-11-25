@@ -113,6 +113,24 @@ export function fulfilmentOf(order: TicketOrderRow, now: string): { tickets: Tic
   return { tickets, outbox };
 }
 
+/**
+ * 返金・取消のお知らせ（購入者あて）の outbox 行。markOrderRefunded が返金と同じトランザクションで入れる。
+ * id <orderId>:buyer_refund がそのまま Resend の Idempotency-Key になる。
+ */
+export function refundMailOf(orderId: string, now: string): OutboxRow {
+  return {
+    id: `${orderId}:buyer_refund`,
+    orderId,
+    kind: "buyer_refund",
+    status: "pending",
+    attempts: 0,
+    nextAttemptAt: now,
+    lastError: null,
+    sentAt: null,
+    createdAt: now,
+  };
+}
+
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -155,37 +173,18 @@ export class TicketDelivery {
   }
 
   /**
-   * 返金・取消が確定した時の購入者あてメール。呼ぶのは markOrderRefunded が true を返した側だけ
-   * （条件付き UPDATE なので、即時返金と後から来る charge.refunded のどちらか一方だけ = 1 回）。
-   * Idempotency-Key は <orderId>:buyer_refund。失敗しても返金の経路は止めない（ログだけ）。
+   * 返金・取消が確定した直後（markOrderRefunded(…, refundMailOf(…)) が true を返した側だけ）。
+   * お知らせは返金と同じトランザクションで outbox に入っているので、ここは購入確認と同じ「すぐ送る」だけ。
+   * 落ちた分は drain（reconcile の cron / DO alarm）が同じ backoff で送り直す。返金の経路は止めない。
    */
-  async onRefunded(orderId: string): Promise<void> {
-    const work = this.sendRefundMail(orderId);
-    if (this.deps.defer) this.deps.defer(work);
-    else await work;
-  }
-
-  private async sendRefundMail(orderId: string): Promise<void> {
-    try {
-      const mailer = this.deps.mailer;
-      if (!mailer) {
-        log("error", "lp ticket refund mail not sent: RESEND_API_KEY is not set", { orderId });
-        return;
-      }
-      const order = await this.repo.getOrder(SITE, orderId);
-      if (!order || order.status !== "refunded") return;
-      const res = await mailer.send({ from: this.deps.ticketMailFrom, to: order.buyerEmail, ...renderRefundMail(order) }, `${orderId}:buyer_refund`);
-      if (res.ok) log("info", "lp ticket refund mail sent", { orderId });
-      else log("error", "lp ticket refund mail not sent", { orderId, failure: res.failure, error: res.error });
-    } catch (e) {
-      log("error", "lp ticket refund mail failed", { orderId, error: String(e) });
-    }
+  onRefunded(orderId: string): void {
+    this.sendSoon(orderId);
   }
 
   /** The buyer's mail right after payment. In a burst Resend answers 429 and the alarm takes over. */
   private sendSoon(orderId: string): void {
     const { defer, armReconcile } = this.deps;
-    if (!defer || this.deliverableKinds().length === 0) return;
+    if (!defer || this.drainKinds().length === 0) return;
     defer(
       this.drain({ orderId, limit: 2, budgetMs: DRAIN_BUDGET_MS })
         .then((r) => (r.retried > 0 ? armReconcile?.({ soon: true }) : undefined))
@@ -193,12 +192,19 @@ export class TicketDelivery {
     );
   }
 
+  /** Mails a new order owes that can go out now (the order-acceptance check counts these). */
   private deliverableKinds(): OutboxKind[] {
     if (!this.deps.mailer) return [];
     return [
       ...(this.deps.ticketTokenSecret ? (["buyer_confirmation"] as const) : []),
       ...(this.deps.ticketOpsEmail ? (["ops_copy"] as const) : []),
     ];
+  }
+
+  /** Everything the drain sends: the order mails plus the refund notice (needs only the mailer). */
+  private drainKinds(): OutboxKind[] {
+    if (!this.deps.mailer) return [];
+    return [...this.deliverableKinds(), "buyer_refund"];
   }
 
   private async passes(tickets: readonly TicketRow[]): Promise<TicketPass[]> {
@@ -215,7 +221,10 @@ export class TicketDelivery {
   private async mailFor(row: OutboxRow, order: TicketOrderRow, tickets: readonly TicketRow[]): Promise<OutboundMail | null> {
     let rendered: RenderedMail;
     let to: string;
-    if (row.kind === "buyer_confirmation") {
+    if (row.kind === "buyer_refund") {
+      rendered = renderRefundMail(order);
+      to = order.buyerEmail;
+    } else if (row.kind === "buyer_confirmation") {
       const valid = tickets.filter((t) => t.status === "valid");
       if (valid.length === 0) return null;
       rendered = renderBuyerMail(order, await this.passes(valid));
@@ -248,12 +257,17 @@ export class TicketDelivery {
     tickets: readonly TicketRow[],
   ): Promise<{ update: OutboxUpdate; stop?: boolean }> {
     if (!order) return { update: this.counted(row, "order_missing") };
-    if (order.status === "refunded") {
-      return {
-        update: { id: row.id, status: "failed", attempts: row.attempts, nextAttemptAt: row.nextAttemptAt, lastError: "order_refunded", sentAt: null },
-      };
+    const gone = (lastError: string): { update: OutboxUpdate } => ({
+      update: { id: row.id, status: "failed", attempts: row.attempts, nextAttemptAt: row.nextAttemptAt, lastError, sentAt: null },
+    });
+    if (row.kind === "buyer_refund") {
+      // refunded is final, so anything else means the row is stale: never tell a paying buyer "refunded".
+      if (order.status !== "refunded") return gone("order_not_refunded");
+    } else if (order.status === "refunded") {
+      return gone("order_refunded");
+    } else if (order.status !== "paid") {
+      return { update: this.later(row, OUTBOX_HOLD_MS, "order_on_hold") };
     }
-    if (order.status !== "paid") return { update: this.later(row, OUTBOX_HOLD_MS, "order_on_hold") };
     let mail: OutboundMail | null;
     try {
       mail = await this.mailFor(row, order, tickets);
@@ -324,7 +338,7 @@ export class TicketDelivery {
   /** Sends due rows, paced. Two drains at once split the rows between them: the claim hands each to one. */
   async drain(o: { orderId?: string; limit?: number; budgetMs?: number } = {}): Promise<DrainResult> {
     const result: DrainResult = { sent: 0, retried: 0, failed: 0 };
-    const kinds = this.deliverableKinds();
+    const kinds = this.drainKinds();
     if (kinds.length === 0) return result;
     const now = this.deps.now();
     const deadline = Date.parse(now) + (o.budgetMs ?? DRAIN_BUDGET_MS);
@@ -385,10 +399,11 @@ export class TicketDelivery {
       const due = await this.repo.outboxDue(this.plusMs(BACKLOG_WINDOW_MS));
       const buyers = due.get("buyer_confirmation") ?? 0;
       const ops = due.get("ops_copy") ?? 0;
-      if (!this.deps.mailer && buyers + ops > 0) log("error", "lp ticket mail pending: RESEND_API_KEY is not set", { buyers, ops });
+      const refunds = due.get("buyer_refund") ?? 0;
+      if (!this.deps.mailer && buyers + ops + refunds > 0) log("error", "lp ticket mail pending: RESEND_API_KEY is not set", { buyers, ops, refunds });
       if (!this.deps.ticketTokenSecret && buyers > 0) log("error", "lp ticket mail pending: TICKET_TOKEN_SECRET is not set", { buyers });
       if (!this.deps.ticketOpsEmail && ops > 0) log("error", "lp ticket ops copy pending: TICKET_OPS_EMAIL is not set", { ops });
-      sum.mailBacklog = this.deliverableKinds().reduce((n, k) => n + (due.get(k) ?? 0), 0);
+      sum.mailBacklog = this.drainKinds().reduce((n, k) => n + (due.get(k) ?? 0), 0);
     } catch (e) {
       log("error", "lp ticket drain failed", { error: String(e) });
     }
