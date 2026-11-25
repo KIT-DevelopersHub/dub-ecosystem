@@ -1,3 +1,4 @@
+import type { identity } from "@dub/types";
 // Cloudflare Worker bindings. SVC_* Service Bindings are optional in P0 (the
 // integration wave 9-B/C/E wires audit-log + auth-service); when absent the
 // Worker builds degraded sinks (see sinks.ts) so unit deploys still boot.
@@ -18,10 +19,13 @@ export interface Env {
   SVC_AUDIT_LOG?: Fetcher; // audit-log sync POST /internal/log
   SVC_AUDIT?: Fetcher; // audit-log async ingest (free-tier outbox drain delivery target)
   SVC_AUTH?: Fetcher; // auth-service POST /internal/revoke-user
+  SVC_DRIVE_SHARE?: Fetcher; // drive-share-service POST /internal/role-membership (called synchronously on every role membership change)
   DUB_DEFAULT_ORG_ID?: string;
 }
 
 export type AppVariables = {
   requestId: string;
   userId: string | null;
+  /** Role membership changes of this request whose Drive共有 / ミーティング follow failed. */
+  propagationWarnings: identity.RolePropagationWarning[];
 };

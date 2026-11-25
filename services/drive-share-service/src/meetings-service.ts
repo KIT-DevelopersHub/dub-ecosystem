@@ -160,6 +160,25 @@ export interface MeetingsService {
   /** opts.system = the alarm: a not-ready account is skipped instead of a 409.
    *  opts.aclOnly = a paced continuation: only the calendar shares. */
   sync(opts?: { system?: boolean; aclOnly?: boolean }): Promise<SyncResult>;
+  /** Read-only, no Google call: the invitations the sync would add / remove now (ledger vs roster).
+   *  Ended meetings are counted, never planned: their attendees are frozen. */
+  plan(): Promise<meeting.RoleGrantReconcilePlan["calendar"]>;
+  /** Whether a meeting still in the sync invites one of these roles (a membership change matters). */
+  followsAnyRole(roleIds: readonly string[]): Promise<boolean>;
+  /** A role membership change, right now: bring the attendees of every live meeting that invites one
+   *  of these roles in line (same reconcile as the sync; ended meetings untouched). Calendar shares
+   *  are NOT written here — they are paced against Google's limits and stay with the sync. */
+  syncRoles(roleIds: readonly string[] | "all"): Promise<RoleSyncOutcome>;
+}
+
+export interface RoleSyncOutcome {
+  meetings: number;
+  invitedAdded: number;
+  invitedRemoved: number;
+  /** false = the Google budget ran out (the hourly sync finishes it). */
+  complete: boolean;
+  /** Why nothing was written: no calendar scope, or the sync is paused by a usage limit. */
+  skipped?: "not_ready" | "quota_paused";
 }
 
 /** One member to invite. */
@@ -1002,6 +1021,81 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       }
       items.sort((x, y) => RESPONSE_ORDER.indexOf(x.response) - RESPONSE_ORDER.indexOf(y.response) || x.name.localeCompare(y.name, "ja"));
       return { items, responsesAvailable: available };
+    },
+
+    async plan() {
+      const nowMs = Date.parse(deps.now());
+      const rows = await store.listMeetings(orgId);
+      // Strict, as the sync: a 名簿 outage must not read as "every Gmail changed".
+      const all = await invitees(undefined, true);
+      const targetDeleted = deletedRoleChecker();
+      const out: meeting.RoleGrantReconcilePlan["calendar"] = { meetings: 0, skippedPast: 0, toInvite: [], toUninvite: [], removalsHeld: [] };
+      for (const m of rows) {
+        if (isOver(fieldsOf(m), nowMs)) {
+          out.skippedPast++;
+          continue;
+        }
+        out.meetings++;
+        const desired = forTargets(all, m.targets);
+        const want = new Set(desired.map((d) => d.email));
+        const ledger = await store.listInvites(m.id);
+        const have = new Set(ledger.map((r) => r.email));
+        for (const d of desired) if (!have.has(d.email)) out.toInvite.push({ meetingId: m.id, title: m.title, email: d.email });
+        const leaving = ledger.filter((r) => !want.has(r.email));
+        if (leaving.length === 0) continue;
+        // Same holds as reconcileMeeting: an empty target, or a role read as empty but not deleted.
+        if (desired.length === 0 || !(await removalsSafe(all, m.targets, targetDeleted))) {
+          out.removalsHeld.push(m.id);
+          continue;
+        }
+        for (const r of leaving) out.toUninvite.push({ meetingId: m.id, title: m.title, email: r.email });
+      }
+      return out;
+    },
+
+    async followsAnyRole(roleIds) {
+      const wanted = new Set(roleIds);
+      const nowMs = Date.parse(deps.now());
+      return (await store.listMeetings(orgId)).some((m) => inSync(m, nowMs) && m.targets.some((t) => t.kind === "role" && wanted.has(t.id)));
+    },
+
+    async syncRoles(roleIds) {
+      const out: RoleSyncOutcome = { meetings: 0, invitedAdded: 0, invitedRemoved: 0, complete: true };
+      const account = await deps.account();
+      if (!account.calendarReady) return { ...out, skipped: "not_ready" };
+      const nowMs = Date.parse(deps.now());
+      const state = await syncState.load();
+      if (state.pausedUntil !== null && state.pausedUntil > nowMs) return { ...out, skipped: "quota_paused" };
+      const wanted = roleIds === "all" ? null : new Set(roleIds);
+      const rows = (await store.listMeetings(orgId)).filter(
+        (m) => m.accountId === account.accountId && inSync(m, nowMs) && m.targets.some((t) => t.kind === "role" && (!wanted || wanted.has(t.id))),
+      );
+      if (rows.length === 0) return out;
+      const cal = budgeted(account.calendar, budgetLimit, Date.now() + syncTimeLimit);
+      // Strict, as the sync: a 名簿 outage must not read as "every Gmail changed".
+      const all = await invitees(undefined, true);
+      const targetDeleted = deletedRoleChecker();
+      try {
+        for (const m of rows) {
+          try {
+            const r = await reconcileMeeting(cal, m, forTargets(all, m.targets), await removalsSafe(all, m.targets, targetDeleted));
+            out.meetings++;
+            out.invitedAdded += r.added;
+            out.invitedRemoved += r.removed;
+          } catch (err) {
+            if (err instanceof BudgetExhausted) {
+              out.complete = false;
+              break;
+            }
+            throw err;
+          }
+        }
+      } catch (err) {
+        if (isCalendarQuota(err)) await pauseSync(err);
+        throw err;
+      }
+      log("meeting_role_sync", { roleIds: wanted ? [...wanted] : "all", ...out });
+      return out;
     },
 
     async sync(opts) {

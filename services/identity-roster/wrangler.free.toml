@@ -43,6 +43,13 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 binding = "SVC_AUDIT"
 service = "dub-audit-log"
 
+# drive-share-service: every role membership change calls POST /internal/role-membership synchronously
+# (awaited, 10 s timeout) so a role's Drive共有 / ミーティング follow the user right then. No queue.
+# drive-share binds this worker back (SVC_IDENTITY): service bindings may point at each other.
+[[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "dub-drive-share-service"
+
 # NOTE: the per-service drain Cron Trigger (was `crons = ["40 3 * * *"]`) was REMOVED.
 # The freeq audit outbox is now drained centrally by the freeq-drain worker (the ONE freeq
 # cron), freeing a slot on the Workers FREE plan's 5-cron account cap.
