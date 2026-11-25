@@ -308,6 +308,37 @@ describe("meetings: plan + followsAnyRole (upcoming only)", () => {
     expect(await service.plan()).toMatchObject({ toInvite: [], toUninvite: [] });
   });
 
+  it("syncRoles invites a late joiner right away — only on meetings of that role, never an ended one", async () => {
+    let users = USERS;
+    let now = "2026-10-14T00:00:00.000Z";
+    const roster = { ...fakeRoster({}, { role_dev: "開発", role_pr: "広報" }, USERS), listActiveUsers: async (roleId?: string) => users.filter((u) => !roleId || u.roleIds.includes(roleId)) };
+    const { service, calendar } = buildMeetings({ roster, now: () => now });
+    await service.create("usr_admin", ONE_OFF);
+    await service.create("usr_admin", WEEKLY);
+    await service.create("usr_admin", { ...WEEKLY, title: "広報定例", targetId: "role_pr" });
+
+    now = "2026-11-01T00:00:00.000Z";
+    users = [...USERS, { id: "usr_c", email: "c@dub.example", name: "C", roleIds: ["role_dev", "role_pr"] }];
+    const r = await service.syncRoles(["role_dev"]);
+
+    expect(r).toMatchObject({ meetings: 1, invitedAdded: 1, invitedRemoved: 0, complete: true });
+    const mock = calendar as unknown as { state: { calendars: Map<string, { events: Map<string, { summary?: string; attendees: { email: string }[] }> }> } };
+    const events = [...mock.state.calendars.values()].flatMap((c) => [...c.events.values()]);
+    const attendeesOf = (title: string) => events.find((e) => e.summary === title)!.attendees.map((a) => a.email).sort();
+    expect(attendeesOf("開発定例")).toContain("c@dub.example");
+    expect(attendeesOf("キックオフ")).not.toContain("c@dub.example"); // ended
+    expect(attendeesOf("広報定例")).not.toContain("c@dub.example"); // another role: not this call
+
+    // idempotent
+    expect(await service.syncRoles(["role_dev"])).toMatchObject({ invitedAdded: 0, invitedRemoved: 0 });
+  });
+
+  it("syncRoles writes nothing while the calendar sync is paused by a usage limit", async () => {
+    const syncState = { load: async () => ({ pausedUntil: Date.parse("2099-01-01T00:00:00.000Z"), aclWritesNotBefore: 0, acl: {}, meetingCursor: null }), pause: async () => ({ until: 0, started: false }), save: async () => {} };
+    const { service } = buildMeetings({ roster: fakeRoster({}, { role_dev: "開発" }, USERS), now: () => "2026-10-14T00:00:00.000Z", syncState });
+    expect(await service.syncRoles(["role_dev"])).toMatchObject({ meetings: 0, skipped: "quota_paused" });
+  });
+
   it("holds planned removals when the role reads as empty", async () => {
     let users = USERS;
     const roster = { ...fakeRoster({}, { role_dev: "開発" }, USERS), listActiveUsers: async () => users };
@@ -318,7 +349,7 @@ describe("meetings: plan + followsAnyRole (upcoming only)", () => {
   });
 });
 
-describe("RoleFollowService (outbox delivery + backfill)", () => {
+describe("RoleFollowService (synchronous follow + backfill)", () => {
   const msg = (over: Partial<identity.RoleMembershipChangedV1> = {}): identity.RoleMembershipChangedV1 => ({
     type: "identity.role_membership.changed",
     version: 1,
@@ -332,14 +363,15 @@ describe("RoleFollowService (outbox delivery + backfill)", () => {
     ...over,
   });
 
-  function follow(opts: { live?: boolean; follows?: boolean; complete?: boolean; fail?: Error } = {}) {
+  function follow(opts: { live?: boolean; follows?: boolean; complete?: boolean; fail?: Error; skipped?: { email: string; reason: string }[]; calFail?: Error; calSkipped?: "quota_paused" | "not_ready" } = {}) {
     const kicks: number[] = [];
+    const synced: string[] = [];
     const calls: string[] = [];
     const roleGrants = {
       async followRoles(roleIds: readonly string[], change: string) {
         calls.push(`${change}:${roleIds.join(",")}`);
         if (opts.fail) throw opts.fail;
-        return { grants: 1, shared: 1, revoked: 0, skipped: [], held: 0, complete: opts.complete ?? true };
+        return { grants: 1, shared: 1, revoked: 0, skipped: opts.skipped ?? [], held: 0, complete: opts.complete ?? true };
       },
       async planReconcile() {
         return { grants: 1, toShare: [{ grantId: "g", fileId: FILE, roleId: "role_a", email: "b@gmail.com", driveRole: "reader" as const }], toRevoke: [], orphanGrants: [], withoutGmail: 0 };
@@ -354,10 +386,15 @@ describe("RoleFollowService (outbox delivery + backfill)", () => {
       meetings: async () => ({
         followsAnyRole: async () => opts.follows ?? false,
         plan: async () => ({ meetings: 1, skippedPast: 0, toInvite: [{ meetingId: "m", title: "t", email: "b@gmail.com" }], toUninvite: [], removalsHeld: [] }),
+        syncRoles: async (roleIds) => {
+          synced.push(roleIds === "all" ? "all" : roleIds.join(","));
+          if (opts.calFail) throw opts.calFail;
+          return { meetings: 1, invitedAdded: 1, invitedRemoved: 0, complete: true, ...(opts.calSkipped ? { skipped: opts.calSkipped } : {}) };
+        },
       }),
       kickCalendar: async () => void kicks.push(1),
     };
-    return { svc: createRoleFollowService(deps), kicks, calls };
+    return { svc: createRoleFollowService(deps), kicks, calls, synced };
   }
 
   it("validates the message; a malformed one is acknowledged and dropped (retrying cannot fix it)", async () => {
@@ -369,26 +406,45 @@ describe("RoleFollowService (outbox delivery + backfill)", () => {
     expect(calls).toEqual([]);
   });
 
-  it("follows Drive for the roles, and pulls the meeting sync only when a live meeting invites one", async () => {
+  it("follows Drive and the meeting attendees in the same call; calendar only when a live meeting invites the role", async () => {
     const a = follow({ follows: true });
-    expect(await a.svc.handle(msg({ change: "removed", roleIds: ["role_a", "role_b"] }))).toMatchObject({ calendarSyncKicked: true, drive: { shared: 1 } });
+    const res = await a.svc.handle(msg({ change: "removed", roleIds: ["role_a", "role_b"] }));
+    expect(res).toMatchObject({ complete: true, problems: [], drive: { shared: 1, complete: true }, calendar: { meetings: 1, invitedAdded: 1, complete: true, sharesPending: true } });
     expect(a.calls).toEqual(["removed:role_a,role_b"]);
-    expect(a.kicks).toHaveLength(1);
+    expect(a.synced).toEqual(["role_a,role_b"]); // attendees reconciled directly, not deferred
+    expect(a.kicks).toHaveLength(1); // only the paced calendar shares go through the DO
 
     const b = follow({ follows: false });
-    expect(await b.svc.handle(msg())).toMatchObject({ calendarSyncKicked: false });
+    expect(await b.svc.handle(msg())).toMatchObject({ calendar: null, complete: true });
+    expect(b.synced).toEqual([]);
     expect(b.kicks).toHaveLength(0);
   });
 
-  it("no Google account: Drive is skipped, acknowledged", async () => {
+  it("no Google account: Drive is skipped without a problem", async () => {
     const { svc, calls } = follow({ live: false });
-    expect(await svc.handle(msg())).toMatchObject({ drive: null });
+    expect(await svc.handle(msg())).toMatchObject({ drive: null, complete: true });
     expect(calls).toEqual([]);
   });
 
-  it("an unfinished or failed follow throws, so freeq-drain retries it with backoff", async () => {
-    await expect(follow({ complete: false }).svc.handle(msg())).rejects.toThrow();
-    await expect(follow({ fail: new GoogleQuotaError("drive", "rateLimitExceeded") }).svc.handle(msg())).rejects.toBeInstanceOf(GoogleQuotaError);
+  it("never throws: an unfinished, refused or failed part is reported in problems, the other part still runs", async () => {
+    const unfinished = await follow({ complete: false }).svc.handle(msg());
+    expect(unfinished.complete).toBe(false);
+    expect(unfinished.problems.join()).toContain("時間内に終わりませんでした");
+
+    const refused = await follow({ skipped: [{ email: "x@gmail.com", reason: "拒否" }] }).svc.handle(msg());
+    expect(refused.problems.join()).toContain("x@gmail.com");
+
+    const quota = follow({ fail: new GoogleQuotaError("drive", "rateLimitExceeded"), follows: true });
+    const r = await quota.svc.handle(msg());
+    expect(r).toMatchObject({ complete: false, drive: null, calendar: { invitedAdded: 1 } });
+    expect(r.problems.join()).toContain("Drive共有を反映できませんでした");
+
+    const cal = await follow({ follows: true, calFail: new Error("calendar down") }).svc.handle(msg());
+    expect(cal).toMatchObject({ complete: false, drive: { shared: 1 }, calendar: null });
+    expect(cal.problems.join()).toContain("ミーティングの招待を反映できませんでした");
+
+    const paused = await follow({ follows: true, calSkipped: "quota_paused" }).svc.handle(msg());
+    expect(paused).toMatchObject({ complete: false, calendar: { complete: false, skipped: "quota_paused" } });
   });
 
   it("the backfill is a dry-run unless dryRun: false is explicit", async () => {
@@ -403,8 +459,9 @@ describe("RoleFollowService (outbox delivery + backfill)", () => {
 
     const wet = follow();
     const res = await wet.svc.reconcile({ dryRun: false });
-    expect(res).toMatchObject({ dryRun: false, applied: { shared: 1, remaining: 0, calendarSyncKicked: true } });
+    expect(res).toMatchObject({ dryRun: false, applied: { shared: 1, remaining: 0, calendarSyncKicked: true, calendarInvited: 1, calendarComplete: true } });
     expect(wet.calls).toEqual(["apply"]);
+    expect(wet.synced).toEqual(["all"]);
     expect(wet.kicks).toHaveLength(1);
 
     await expect(follow({ live: false }).svc.reconcile({ dryRun: false })).rejects.toThrow();
@@ -416,7 +473,11 @@ describe("routes", () => {
     const { svc } = (() => {
       const deps: RoleFollowDeps = {
         roleGrants: async () => ({ service: { planReconcile: async () => ({ grants: 0, toShare: [], toRevoke: [], orphanGrants: [], withoutGmail: 0 }) } as unknown as RoleGrantsService, live: true }),
-        meetings: async () => ({ followsAnyRole: async () => false, plan: async () => ({ meetings: 0, skippedPast: 0, toInvite: [], toUninvite: [], removalsHeld: [] }) }),
+        meetings: async () => ({
+          followsAnyRole: async () => false,
+          plan: async () => ({ meetings: 0, skippedPast: 0, toInvite: [], toUninvite: [], removalsHeld: [] }),
+          syncRoles: async () => ({ meetings: 0, invitedAdded: 0, invitedRemoved: 0, complete: true }),
+        }),
         kickCalendar: async () => {},
       };
       return { svc: createRoleFollowService(deps) };

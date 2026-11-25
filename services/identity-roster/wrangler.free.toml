@@ -43,10 +43,9 @@ database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
 binding = "SVC_AUDIT"
 service = "dub-audit-log"
 
-# drive-share-service: immediate delivery of role membership changes (POST /internal/role-membership)
-# so a role's Drive共有 / ミーティング follow people who join or leave it. The freeq outbox row
-# (topic driveshare.role_membership, drained by freeq-drain) is the durable fallback. drive-share
-# binds this worker back (SVC_IDENTITY): service bindings may point at each other.
+# drive-share-service: every role membership change calls POST /internal/role-membership synchronously
+# (awaited, 10 s timeout) so a role's Drive共有 / ミーティング follow the user right then. No queue.
+# drive-share binds this worker back (SVC_IDENTITY): service bindings may point at each other.
 [[services]]
 binding = "SVC_DRIVE_SHARE"
 service = "dub-drive-share-service"

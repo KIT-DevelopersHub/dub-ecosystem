@@ -9,6 +9,8 @@ import type { WebauthnRepo } from "./repo/webauthn";
 export interface RequestCtx {
   requestId: string;
   actorId: string | null;
+  /** Collects the request's role-propagation failures (returned to the caller as propagationWarnings). */
+  warnings?: identity.RolePropagationWarning[];
 }
 
 export interface AuditSink {
@@ -34,10 +36,13 @@ export interface RoleMembershipNotice {
   reason: identity.RoleMembershipReason;
 }
 
+/** ok false = the follow did not (fully) happen; `message` says what, in Japanese. */
+export type RoleMembershipOutcome = { ok: true } | { ok: false; message: string };
+
 export interface RoleMembershipSink {
-  /** Best-effort (an outbox row): never throws into the business flow. A lost notice is caught by
-   *  drive-share-service's hourly sync (joins) or the role-grant backfill (leaves). */
-  changed(notice: RoleMembershipNotice): Promise<void>;
+  /** Synchronous: drive-share-service shares / unshares right now and answers. Never throws — a
+   *  failure is an outcome, so the role change itself is never rolled back for it. */
+  changed(notice: RoleMembershipNotice): Promise<RoleMembershipOutcome>;
 }
 
 export interface Deps {

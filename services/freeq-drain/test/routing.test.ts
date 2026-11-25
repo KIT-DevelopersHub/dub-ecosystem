@@ -253,23 +253,3 @@ describe("drainAll (multi-DB, best-effort)", () => {
     expect(readRow(core.raw, "c1")).toMatchObject({ status: "done" });
   });
 });
-
-describe("driveshare.role_membership (role follow)", () => {
-  it("POSTs to SVC_DRIVE_SHARE /internal/role-membership verbatim; a non-2xx keeps the row pending (retried)", async () => {
-    const { d1, raw } = makeD1();
-    const ok = fakeSvc(200);
-    const msg = { type: "identity.role_membership.changed", version: 1, id: "rm_1", userId: "usr_1", change: "added", roleIds: ["role_a"] };
-    seed(raw, "rm1", "driveshare.role_membership", msg);
-    expect(await drain(d1, makeDeliver({ SVC_DRIVE_SHARE: ok.svc } as unknown as Env), OPTS)).toMatchObject({ delivered: 1 });
-    expect(ok.calls[0]!.url).toBe("https://drive-share/internal/role-membership");
-    expect(ok.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
-    expect(ok.calls[0]!.body).toEqual(msg);
-    expect(readRow(raw, "rm1")).toMatchObject({ status: "done" });
-
-    const busy = makeD1();
-    seed(busy.raw, "rm2", "driveshare.role_membership", msg);
-    const res = await drain(busy.d1, makeDeliver({ SVC_DRIVE_SHARE: fakeSvc(503).svc } as unknown as Env), OPTS);
-    expect(res).toMatchObject({ delivered: 0, retried: 1 });
-    expect(readRow(busy.raw, "rm2")).toMatchObject({ status: "pending" });
-  });
-});

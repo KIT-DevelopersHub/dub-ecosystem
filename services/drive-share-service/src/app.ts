@@ -45,7 +45,7 @@ export interface AppDeps {
   attendance: () => AttendanceService;
   /** 「Googleと連携」 (Meet attendance matches the member automatically). */
   googleLink: () => GoogleLinkService;
-  /** Role follow (outbox delivery) + the role-grant backfill. Lazy, like meetings. Absent (tests that
+  /** Role follow (called synchronously by identity) + the role-grant backfill. Lazy, like meetings. Absent (tests that
    *  do not exercise it) = those two routes answer 503. */
   roleFollow?: () => RoleFollowService;
 }
@@ -153,8 +153,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await roleFollow().reconcile(body));
   });
 
-  // freeq-drain delivers identity's role membership changes here (outbox topic
-  // identity.ROLE_MEMBERSHIP_TOPIC). Non-2xx = retried with backoff.
+  // identity-roster calls this synchronously inside every role membership change (Drive共有 and
+  // ミーティング invitations follow the user right then). What did not finish comes back in `problems`.
   app.post("/internal/role-membership", async (c) => {
     const body = await c.req.json().catch(() => null);
     return c.json(await roleFollow().handle(body));

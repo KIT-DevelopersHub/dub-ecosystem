@@ -1,28 +1,29 @@
 // Role follow: a role's Drive共有 grants and ミーティング invitations reach the people who join the
-// role LATER, and leave the people who leave it.
+// role LATER, and leave the people who leave it — at the moment the membership changes.
 //
-// Trigger: identity-roster writes one freeq outbox row (topic identity.ROLE_MEMBERSHIP_TOPIC) per user
-// whose role membership changed; freeq-drain delivers it here (POST /internal/role-membership) within
-// about a minute and retries with backoff while this answers non-2xx. The message only says WHICH
-// roles to re-check — membership is read again from identity / 名簿 on delivery, and every step is
-// idempotent (Drive: the grant ledger + the live permissions; calendar: the invite ledger), so a
-// duplicate or late delivery changes nothing.
+// Trigger: identity-roster calls POST /internal/role-membership synchronously, inside the request that
+// changes the membership (assign / revoke / 名簿 auto-roles / role delete / (de)activation / offboard),
+// and waits for the answer. No queue: the message only says WHICH roles to re-check — membership is
+// read again from identity / 名簿 here, and every step is idempotent (Drive: the grant ledger + the
+// live permissions; calendar: the invite ledger), so a repeated call changes nothing.
 //
 //   Drive共有   — the grants of those roles are reconciled now (RoleGrantsService.followRoles).
-//   ミーティング — the MeetingSyncDO sync is pulled to now when a live meeting invites one of those
-//                 roles; it already adds / removes attendees for meetings still to come and never
-//                 touches an ended one.
+//   ミーティング — attendees of the live meetings that invite those roles are reconciled now
+//                 (MeetingsService.syncRoles; ended meetings untouched). Calendar SHARES ("add this
+//                 calendar") are paced against Google's limits, so they stay with MeetingSyncDO.
 //
-// The hourly MeetingSyncDO cycle stays the safety net (a lost message is caught within the hour for
-// joins). POST /driveshare/role-grants/reconcile is the one-off backfill, dry-run by default.
+// Whatever did not finish comes back in `problems` (never an error for a refusal of one address);
+// identity shows it to the admin. The hourly MeetingSyncDO cycle is only the safety net.
+// POST /driveshare/role-grants/reconcile is the one-off backfill, dry-run by default.
 import { errors } from "@dub/errors";
 import { identity, type meeting } from "@dub/types";
 import type { MeetingsService } from "./meetings-service";
 import type { RoleGrantsService } from "./role-grants-service";
 
-/** Per delivery. Not under the gateway's 15 s (freeq-drain calls over a Service Binding). */
-const FOLLOW_BUDGET_MS = 20_000;
-const FOLLOW_MAX_WRITES = 30;
+/** Per call. identity waits for the answer inside an admin request (api-gateway cuts at 15 s), so
+ *  each part does what fits in a few seconds; the rest is reported and left to the hourly sync. */
+const FOLLOW_DRIVE_BUDGET_MS = 4_000;
+const FOLLOW_DRIVE_MAX_WRITES = 12;
 /** Per backfill request (through the gateway). */
 const RECONCILE_BUDGET_MS = 8_000;
 const RECONCILE_MAX_WRITES = 25;
@@ -31,13 +32,13 @@ export interface RoleFollowDeps {
   /** System-actor role grants with the strict 名簿 lookup. live = a real Google account is connected
    *  (false: the mock / nothing connected — only planning is meaningful). */
   roleGrants: () => Promise<{ service: RoleGrantsService; live: boolean }>;
-  meetings: () => Promise<Pick<MeetingsService, "plan" | "followsAnyRole">>;
-  /** Pull the meeting sync to now (MeetingSyncDO kick). */
+  meetings: () => Promise<Pick<MeetingsService, "plan" | "followsAnyRole" | "syncRoles">>;
+  /** Make sure the paced calendar-share sync runs soon (MeetingSyncDO kick). */
   kickCalendar: () => Promise<void>;
 }
 
 export interface RoleFollowService {
-  /** One RoleMembershipChangedV1 from the outbox. Throws (non-2xx) when it should be retried. */
+  /** One RoleMembershipChangedV1 from identity. Never throws for Google: what did not finish is in `problems`. */
   handle(body: unknown): Promise<meeting.RoleMembershipFollowResponse>;
   /** The backfill: plan (dryRun, default) or apply one budgeted step. */
   reconcile(body: unknown): Promise<meeting.RoleGrantReconcileResponse>;
@@ -64,43 +65,46 @@ export function createRoleFollowService(deps: RoleFollowDeps): RoleFollowService
       const msg = parseMembershipMessage(body);
       if (!msg) {
         log("role_follow_ignored_malformed", {});
-        return { ignored: true, drive: null, calendarSyncKicked: false };
+        return { ignored: true, drive: null, calendar: null, complete: true, problems: [] };
       }
-      // Calendar first: cheap, and the sync it pulls does the work (with its own retries / pacing).
-      let calendarSyncKicked = false;
-      if (await (await deps.meetings()).followsAnyRole(msg.roleIds)) {
-        await deps.kickCalendar();
-        calendarSyncKicked = true;
-      }
-      const { service, live } = await deps.roleGrants();
-      if (!live) {
-        log("role_follow_drive_skipped_no_account", { messageId: msg.id });
-        return { drive: null, calendarSyncKicked };
-      }
-      let res;
+      const problems: string[] = [];
+      const failed = (part: string, err: unknown) => {
+        log("role_follow_failed", { messageId: msg.id, userId: msg.userId, change: msg.change, roleIds: msg.roleIds, part, message: err instanceof Error ? err.message : String(err) });
+        problems.push(`${part}を反映できませんでした（${err instanceof Error ? err.message : String(err)}）。毎時の同期で再試行します。`);
+      };
+
+      let drive: meeting.RoleMembershipFollowResponse["drive"] = null;
       try {
-        res = await service.followRoles(msg.roleIds, msg.change, { budgetMs: FOLLOW_BUDGET_MS, maxWrites: FOLLOW_MAX_WRITES });
+        const { service, live } = await deps.roleGrants();
+        if (live) {
+          const res = await service.followRoles(msg.roleIds, msg.change, { budgetMs: FOLLOW_DRIVE_BUDGET_MS, maxWrites: FOLLOW_DRIVE_MAX_WRITES });
+          drive = { grants: res.grants, shared: res.shared, revoked: res.revoked, held: res.held, refused: res.skipped.length, complete: res.complete };
+          if (!res.complete) problems.push("Drive共有の一部が時間内に終わりませんでした。残りは毎時の同期で反映します。");
+          if (res.skipped.length > 0) problems.push(`Drive共有で Google が受け付けなかった宛先があります: ${res.skipped.map((s) => `${s.email}（${s.reason}）`).join("、")}`);
+          if (msg.change === "removed" && res.held > 0) problems.push("ロールが見つからないか 0 人に見えるため、Drive共有の削除を保留しました。必要なら Drive共有 で付与を外してください。");
+          log("role_follow_drive", { messageId: msg.id, userId: msg.userId, change: msg.change, reason: msg.reason, roleIds: msg.roleIds, ...drive, refused: res.skipped });
+        }
       } catch (err) {
-        log("role_follow_failed", { messageId: msg.id, userId: msg.userId, change: msg.change, roleIds: msg.roleIds, message: err instanceof Error ? err.message : String(err) });
-        throw err;
+        failed("Drive共有", err);
       }
-      log("role_follow_done", {
-        messageId: msg.id,
-        userId: msg.userId,
-        change: msg.change,
-        reason: msg.reason,
-        roleIds: msg.roleIds,
-        grants: res.grants,
-        shared: res.shared,
-        revoked: res.revoked,
-        held: res.held,
-        complete: res.complete,
-        calendarSyncKicked,
-        // Refusals (e.g. an address Google will not take) are not retried here; the hourly sync tries again.
-        refused: res.skipped,
-      });
-      if (!res.complete) throw errors.upstreamUnavailable("google-drive (budget spent; continues on retry)");
-      return { drive: { grants: res.grants, shared: res.shared, revoked: res.revoked, held: res.held, refused: res.skipped.length }, calendarSyncKicked };
+
+      let calendar: meeting.RoleMembershipFollowResponse["calendar"] = null;
+      try {
+        const meetings = await deps.meetings();
+        if (await meetings.followsAnyRole(msg.roleIds)) {
+          const r = await meetings.syncRoles(msg.roleIds);
+          // The role calendars' shares are paced (Google limits): the sync writes them shortly.
+          await deps.kickCalendar().catch((err: unknown) => log("role_follow_kick_failed", { message: err instanceof Error ? err.message : String(err) }));
+          calendar = { meetings: r.meetings, invitedAdded: r.invitedAdded, invitedRemoved: r.invitedRemoved, complete: r.complete && !r.skipped, ...(r.skipped ? { skipped: r.skipped } : {}), sharesPending: true };
+          if (r.skipped === "quota_paused") problems.push("Google カレンダーの利用上限で同期が一時停止中のため、ミーティングの招待は停止明けに反映します。");
+          else if (r.skipped === "not_ready") problems.push("Google アカウントにカレンダーの権限が無いため、ミーティングの招待を反映できません。Drive共有 > 設定 で再接続してください。");
+          else if (!r.complete) problems.push("ミーティングの招待の一部が時間内に終わりませんでした。残りは毎時の同期で反映します。");
+          log("role_follow_calendar", { messageId: msg.id, userId: msg.userId, change: msg.change, roleIds: msg.roleIds, ...calendar });
+        }
+      } catch (err) {
+        failed("ミーティングの招待", err);
+      }
+      return { drive, calendar, complete: problems.length === 0, problems };
     },
 
     async reconcile(body) {
@@ -122,10 +126,16 @@ export function createRoleFollowService(deps: RoleFollowDeps): RoleFollowService
       if (!live) throw errors.conflict("Google アカウントが接続されていないため反映できません。Drive共有 > 設定 で接続してください。", { reason: "no_google_account" });
 
       const applied = await service.applyReconcile({ budgetMs: RECONCILE_BUDGET_MS, maxWrites: RECONCILE_MAX_WRITES });
-      const calendarSyncKicked = calendar.toInvite.length + calendar.toUninvite.length > 0;
-      if (calendarSyncKicked) await deps.kickCalendar();
-      log("role_reconcile_applied", { shared: applied.shared, revoked: applied.revoked, refused: applied.skipped.length, remaining: applied.remaining, calendarSyncKicked });
-      return { dryRun, drive, calendar, applied: { ...applied, calendarSyncKicked } };
+      // Attendees of every live meeting with a role target, now (same reconcile as the sync).
+      const cal = calendar.toInvite.length + calendar.toUninvite.length > 0 ? await meetings.syncRoles("all") : null;
+      if (cal) await deps.kickCalendar();
+      log("role_reconcile_applied", { shared: applied.shared, revoked: applied.revoked, refused: applied.skipped.length, remaining: applied.remaining, calendar: cal });
+      return {
+        dryRun,
+        drive,
+        calendar,
+        applied: { ...applied, calendarSyncKicked: cal !== null, ...(cal ? { calendarInvited: cal.invitedAdded, calendarUninvited: cal.invitedRemoved, calendarComplete: cal.complete && !cal.skipped } : {}) },
+      };
     },
   };
 }

@@ -8,7 +8,7 @@ import { createApp } from "../src/app";
 import { MemIdentityRepo } from "../src/repo/mem-repo";
 import { MemWebauthnRepo } from "../src/repo/webauthn";
 import { seedReferenceData } from "../src/seed";
-import type { AuditSink, Deps, RequestCtx, RoleMembershipNotice, RoleMembershipSink, SessionRevoker } from "../src/deps";
+import type { AuditSink, Deps, RequestCtx, RoleMembershipNotice, RoleMembershipOutcome, RoleMembershipSink, SessionRevoker } from "../src/deps";
 import type { UserRow } from "../src/repo/types";
 
 export class FakeAudit implements AuditSink {
@@ -35,8 +35,11 @@ export class FakeRevoker implements SessionRevoker {
 
 export class FakeMembership implements RoleMembershipSink {
   notices: RoleMembershipNotice[] = [];
-  async changed(notice: RoleMembershipNotice): Promise<void> {
+  /** What drive-share "answers" (ok by default). */
+  outcome: RoleMembershipOutcome = { ok: true };
+  async changed(notice: RoleMembershipNotice): Promise<RoleMembershipOutcome> {
     this.notices.push(notice);
+    return this.outcome;
   }
 }
 

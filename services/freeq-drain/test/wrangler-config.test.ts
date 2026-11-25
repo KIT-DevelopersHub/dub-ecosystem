@@ -36,9 +36,3 @@ describe("wrangler.toml — binding fixes", () => {
     expect(toml).not.toMatch(/dub-mo3-mobile-bff/);
   });
 });
-
-describe("wrangler.toml — role follow", () => {
-  it("binds SVC_DRIVE_SHARE to the live drive-share worker", () => {
-    expect(toml).toMatch(/binding\s*=\s*"SVC_DRIVE_SHARE"\s*\nservice\s*=\s*"dub-drive-share-service"/);
-  });
-});

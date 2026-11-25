@@ -565,23 +565,33 @@ export interface RoleGrantReconcilePlan {
 
 export interface RoleGrantReconcileResponse extends RoleGrantReconcilePlan {
   dryRun: boolean;
-  /** Only when dryRun is false. The calendar part runs in the hourly sync, pulled to now. */
+  /** Only when dryRun is false. Drive and meeting attendees are written in this call. */
   applied?: {
     shared: number;
     revoked: number;
     skipped: { email: string; reason: string }[];
     /** Drive items left for the next call (per-call budget). */
     remaining: number;
+    /** Attendees were reconciled in this call (calendar shares follow in the paced sync). */
     calendarSyncKicked: boolean;
+    calendarInvited?: number;
+    calendarUninvited?: number;
+    calendarComplete?: boolean;
   };
 }
 
-/** POST /internal/role-membership (freeq-drain -> drive-share-service; the body is identity.RoleMembershipChangedV1).
- *  Non-2xx = retried by the outbox. */
+/** POST /internal/role-membership (identity-roster -> drive-share-service, synchronously as part of the
+ *  role change; the body is identity.RoleMembershipChangedV1). */
 export interface RoleMembershipFollowResponse {
-  /** The message was malformed: acknowledged and dropped (logged). */
+  /** The message was malformed: nothing done. */
   ignored?: boolean;
   /** null = no Google account connected (or ignored): nothing to share on. */
-  drive: { grants: number; shared: number; revoked: number; held: number; refused: number } | null;
-  calendarSyncKicked: boolean;
+  drive: { grants: number; shared: number; revoked: number; held: number; refused: number; complete: boolean } | null;
+  /** null = no live meeting invites these roles. Attendees are reconciled in this call; calendar
+   *  shares follow in the paced sync (sharesPending). */
+  calendar: { meetings: number; invitedAdded: number; invitedRemoved: number; complete: boolean; skipped?: "not_ready" | "quota_paused"; sharesPending: boolean } | null;
+  /** true = everything this change needed was done now. */
+  complete: boolean;
+  /** Japanese, one per part that did not finish (shown to the admin via identity's propagationWarnings). */
+  problems: string[];
 }

@@ -212,13 +212,15 @@ export async function runScheduledRoleShareSync(env: Env, opts: { budgetMs: numb
 export function buildRoleFollowService(env: Env, ctx: { requestId: string; userId?: string }): RoleFollowService {
   return createRoleFollowService({
     roleGrants: () => buildSystemRoleGrants(env, { requestId: ctx.requestId, strict: true }),
-    meetings: () => buildMeetingsService(env, ctx, { system: true }),
-    kickCalendar: () => kickMeetingSync(env, ROLE_FOLLOW_KICK_SOON_MS),
+    // A few seconds of Google calls at most: identity is waiting inside an admin request.
+    meetings: () => buildMeetingsService(env, ctx, { system: true, googleBudget: 15, syncTimeLimitMs: 3_500 }),
+    kickCalendar: () => kickMeetingSync(env, CALENDAR_SHARES_SOON_MS),
   });
 }
 
-/** A membership change pulls the meeting sync this close. */
-const ROLE_FOLLOW_KICK_SOON_MS = 30_000;
+/** Calendar shares of a role calendar are paced (Google limits): a membership change asks the
+ *  MeetingSyncDO cycle to come round this soon to write them. Attendees were already done in-call. */
+const CALENDAR_SHARES_SOON_MS = 60_000;
 
 /** 「Googleと連携」 for the acting member. */
 export function buildGoogleLinkService(env: Env, ctx: { requestId: string }): GoogleLinkService {

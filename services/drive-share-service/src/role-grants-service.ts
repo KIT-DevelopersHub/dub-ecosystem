@@ -104,7 +104,7 @@ export interface RoleGrantsService {
   /** A user joined / left these roles: bring every grant of those roles in line now. Joining shares
    *  (名簿 Gmail only, like the hourly sync); leaving deletes ONLY permissions Dub created, only when
    *  no other grant on the file still needs the address, and never when the role is unknown or reads
-   *  as empty (a glitch must not unshare everyone). Throws on a transient failure so the outbox retries. */
+   *  as empty (a glitch must not unshare everyone). Throws on a transient failure (the caller reports it). */
   followRoles(roleIds: readonly string[], change: "added" | "removed", opts: { budgetMs: number; maxWrites: number }): Promise<RoleFollowResult>;
   /** Read-only, no Google call: what a full reconcile would share / revoke (ledger vs roster). */
   planReconcile(): Promise<meeting.RoleGrantReconcilePlan["drive"]>;

@@ -16,8 +16,6 @@ import type { Env } from "./env";
 const handler = {
   async fetch(request: Request, env: Env, ctx: unknown): Promise<Response> {
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
-    const exec = ctx as { waitUntil?: (p: Promise<unknown>) => void } | undefined;
-    const waitUntil = typeof exec?.waitUntil === "function" ? (p: Promise<unknown>) => exec.waitUntil!(p) : undefined;
     const db = createDbClient(env.DB, { namespace: "identity", ...(requestId ? { requestId } : {}) });
     const repo = new D1IdentityRepo(db);
     const defaultOrgId = env.DUB_DEFAULT_ORG_ID ?? common.DUB_DEFAULT_ORG_ID;
@@ -27,7 +25,7 @@ const handler = {
         webauthn: new D1WebauthnRepo(db),
         audit: createAuditSink(env),
         revoker: createSessionRevoker(env),
-        membership: createRoleMembershipSink(env, { now: nowIso, newId, ...(waitUntil ? { background: waitUntil } : {}) }),
+        membership: createRoleMembershipSink(env, { now: nowIso, newId }),
         now: nowIso,
         newId,
         defaultOrgId,

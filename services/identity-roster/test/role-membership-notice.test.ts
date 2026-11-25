@@ -1,6 +1,7 @@
-// Every path that changes a user's effective role membership tells drive-share-service (via the
-// freeq outbox), so a role's Drive共有 grants and ミーティング invitations follow people who join or
-// leave the role later. The sink is best-effort: a failing one never fails the role change.
+// Every path that changes a user's effective role membership calls drive-share-service synchronously
+// (no queue), so a role's Drive共有 grants and ミーティング invitations follow people who join or leave
+// the role right then. A failing call never fails the role change: it comes back as
+// propagationWarnings (body + header) and an audit record.
 import { describe, it, expect } from "vitest";
 import { identity } from "@dub/types";
 import type { identity as identityTypes } from "@dub/types";
@@ -91,28 +92,71 @@ describe("role membership notices", () => {
     expect(notices(h)).toEqual([`removed:offboard:${h.memberId}:${h.memberRoleId}`]);
   });
 
-  it("a throwing sink never fails the role change", async () => {
+  it("a drive-share failure never fails the role change; it is surfaced in the response and the audit log", async () => {
+    const h = await makeHarness();
+    h.membership.outcome = { ok: false, message: "Drive共有・ミーティングへの反映に失敗しました（HTTP 503）。" };
+    const role = await newRole(h, "A班");
+
+    const res = await h.app.request(`/identity/users/${h.memberId}/roles`, jsonBody(asUser(h.adminId), "POST", { roleId: role }));
+    expect(res.status).toBe(201);
+    expect(res.headers.get(identity.PROPAGATION_WARNING_HEADER)).toBe("1");
+    const body = (await res.json()) as { roleId: string; propagationWarnings: identityTypes.RolePropagationWarning[] };
+    expect(body.roleId).toBe(role); // the assignment is committed
+    expect(body.propagationWarnings).toEqual([{ userId: h.memberId, change: "added", roleIds: [role], reason: "assign", message: "Drive共有・ミーティングへの反映に失敗しました（HTTP 503）。" }]);
+    expect((await h.repo.listAssignmentsByUser(h.memberId, ORG_ID)).some((a) => a.roleId === role)).toBe(true);
+    expect(h.audit.published.find((a) => a.action === "identity.role.propagation_failed")).toMatchObject({ result: "failure", resourceId: h.memberId });
+
+    // 204 responses carry the header only.
+    const { id } = { id: (await h.repo.listAssignmentsByUser(h.memberId, ORG_ID)).find((a) => a.roleId === role)!.id };
+    const rv = await h.app.request(`/identity/users/${h.memberId}/roles/${id}`, { ...asUser(h.adminId), method: "DELETE" });
+    expect(rv.status).toBe(204);
+    expect(rv.headers.get(identity.PROPAGATION_WARNING_HEADER)).toBe("1");
+  });
+
+  it("a throwing sink is treated like a failure, never a 500", async () => {
     const h = await makeHarness();
     h.membership.changed = async () => {
-      throw new Error("outbox down");
+      throw new Error("boom");
     };
     const res = await h.app.request(`/identity/users/${h.memberId}/roles`, jsonBody(asUser(h.adminId), "POST", { roleId: h.adminRoleId }));
     expect(res.status).toBe(201);
+    expect(((await res.json()) as { propagationWarnings: unknown[] }).propagationWarnings).toHaveLength(1);
+  });
+
+  it("success adds nothing to the response", async () => {
+    const h = await makeHarness();
+    const res = await h.app.request(`/identity/users/${h.memberId}/roles`, jsonBody(asUser(h.adminId), "POST", { roleId: h.adminRoleId }));
+    expect(res.headers.get(identity.PROPAGATION_WARNING_HEADER)).toBeNull();
+    expect(await res.json()).not.toHaveProperty("propagationWarnings");
   });
 });
 
-describe("createRoleMembershipSink (freeq outbox)", () => {
-  it("writes one RoleMembershipChangedV1 row on the role-membership topic, deduped by id", async () => {
-    const { d1, raw } = makeOutboxD1();
-    let n = 0;
-    const sink = createRoleMembershipSink({ OUTBOX_DB: d1 } as unknown as Env, { now: () => "2026-11-24T00:00:00.000Z", newId: (p) => `${p}_${++n}` });
-    await sink.changed({ orgId: ORG_ID, userId: "user_1", change: "added", roleIds: ["role_a", "role_a", "role_b"], reason: "assign" });
-    await sink.changed({ orgId: ORG_ID, userId: "user_1", change: "added", roleIds: [], reason: "assign" }); // nothing to follow
+describe("createRoleMembershipSink (synchronous call to drive-share)", () => {
+  function fakeDriveShare(answer: { status?: number; body?: unknown; hang?: boolean }) {
+    const calls: { url: string; headers: Record<string, string>; body: identityTypes.RoleMembershipChangedV1 }[] = [];
+    const svc = {
+      async fetch(url: string, init: RequestInit) {
+        calls.push({ url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) });
+        if (answer.hang) {
+          return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+        }
+        return new Response(JSON.stringify(answer.body ?? { complete: true, problems: [] }), { status: answer.status ?? 200, headers: { "content-type": "application/json" } });
+      },
+    };
+    return { svc, calls };
+  }
+  const notice = { orgId: ORG_ID, userId: "user_1", change: "added" as const, roleIds: ["role_a", "role_a", "role_b"], reason: "assign" as const };
+  const ids = { now: () => "2026-11-24T00:00:00.000Z", newId: (p: string) => `${p}_1` };
 
-    const rows = raw.prepare("SELECT id, topic, payload, status FROM freeq_outbox").all() as { id: string; topic: string; payload: string; status: string }[];
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: "rm_1", topic: identity.ROLE_MEMBERSHIP_TOPIC, status: "pending" });
-    expect(JSON.parse(rows[0]!.payload)).toEqual({
+  it("POSTs the change to drive-share and waits for the answer — no outbox row is written", async () => {
+    const { d1, raw } = makeOutboxD1();
+    const ds = fakeDriveShare({});
+    const sink = createRoleMembershipSink({ OUTBOX_DB: d1, SVC_DRIVE_SHARE: ds.svc } as unknown as Env, ids);
+    expect(await sink.changed(notice)).toEqual({ ok: true });
+    expect(ds.calls).toHaveLength(1);
+    expect(ds.calls[0]!.url).toBe(`https://drive-share${identity.ROLE_MEMBERSHIP_PATH}`);
+    expect(ds.calls[0]!.headers["x-dub-internal"]).toBe("1");
+    expect(ds.calls[0]!.body).toEqual({
       type: "identity.role_membership.changed",
       version: 1,
       id: "rm_1",
@@ -123,50 +167,26 @@ describe("createRoleMembershipSink (freeq outbox)", () => {
       roleIds: ["role_a", "role_b"],
       reason: "assign",
     });
+    expect(raw.prepare("SELECT count(*) AS n FROM freeq_outbox").get()).toMatchObject({ n: 0 });
   });
 
-  it("no OUTBOX_DB: a no-op; a failing insert is swallowed", async () => {
-    const none = createRoleMembershipSink({} as Env, { now: () => "t", newId: (p) => p });
-    await expect(none.changed({ orgId: ORG_ID, userId: "u", change: "removed", roleIds: ["r"], reason: "revoke" })).resolves.toBeUndefined();
-    const broken = { prepare: () => ({ bind: () => ({ run: async () => { throw new Error("d1 down"); } }) }) };
-    const failing = createRoleMembershipSink({ OUTBOX_DB: broken } as unknown as Env, { now: () => "t", newId: (p) => p });
-    await expect(failing.changed({ orgId: ORG_ID, userId: "u", change: "removed", roleIds: ["r"], reason: "revoke" })).resolves.toBeUndefined();
-  });
-});
+  it("an HTTP error, an unfinished follow, or a timeout is a failure outcome with a Japanese message", async () => {
+    const http = createRoleMembershipSink({ SVC_DRIVE_SHARE: fakeDriveShare({ status: 503 }).svc } as unknown as Env, ids);
+    expect(await http.changed(notice)).toMatchObject({ ok: false, message: expect.stringContaining("HTTP 503") });
 
-describe("createRoleMembershipSink: immediate delivery", () => {
-  function fakeDriveShare(status: number) {
-    const calls: { url: string; headers: Record<string, string>; body: unknown }[] = [];
-    const svc = {
-      async fetch(url: string, init: RequestInit) {
-        calls.push({ url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) });
-        return new Response("{}", { status });
-      },
-    };
-    return { svc, calls };
-  }
+    const partial = createRoleMembershipSink({ SVC_DRIVE_SHARE: fakeDriveShare({ body: { complete: false, problems: ["ミーティングの招待の一部が時間内に終わりませんでした。"] } }).svc } as unknown as Env, ids);
+    expect(await partial.changed(notice)).toMatchObject({ ok: false, message: "ミーティングの招待の一部が時間内に終わりませんでした。" });
 
-  it("POSTs the same message to drive-share in the background and marks the outbox row done", async () => {
-    const { d1, raw } = makeOutboxD1();
-    const ds = fakeDriveShare(200);
-    const work: Promise<unknown>[] = [];
-    const sink = createRoleMembershipSink({ OUTBOX_DB: d1, SVC_DRIVE_SHARE: ds.svc } as unknown as Env, { now: () => "t", newId: (p) => `${p}_1`, background: (p) => void work.push(p) });
-    await sink.changed({ orgId: ORG_ID, userId: "user_1", change: "added", roleIds: ["role_a"], reason: "assign" });
-    await Promise.all(work);
-
-    expect(ds.calls).toHaveLength(1);
-    expect(ds.calls[0]!.url).toBe("https://drive-share/internal/role-membership");
-    expect(ds.calls[0]!.headers["x-dub-internal"]).toBe("1");
-    expect(ds.calls[0]!.body).toMatchObject({ id: "rm_1", change: "added", roleIds: ["role_a"] });
-    expect(raw.prepare("SELECT status FROM freeq_outbox WHERE id = 'rm_1'").get()).toMatchObject({ status: "done" });
+    const slow = createRoleMembershipSink({ SVC_DRIVE_SHARE: fakeDriveShare({ hang: true }).svc } as unknown as Env, { ...ids, timeoutMs: 20 });
+    expect(await slow.changed(notice)).toMatchObject({ ok: false, message: expect.stringContaining("秒以内に終わりませんでした") });
   });
 
-  it("a failed direct delivery leaves the row pending for freeq-drain", async () => {
-    const { d1, raw } = makeOutboxD1();
-    const work: Promise<unknown>[] = [];
-    const sink = createRoleMembershipSink({ OUTBOX_DB: d1, SVC_DRIVE_SHARE: fakeDriveShare(503).svc } as unknown as Env, { now: () => "t", newId: (p) => `${p}_1`, background: (p) => void work.push(p) });
-    await sink.changed({ orgId: ORG_ID, userId: "user_1", change: "removed", roleIds: ["role_a"], reason: "revoke" });
-    await Promise.all(work);
-    expect(raw.prepare("SELECT status FROM freeq_outbox WHERE id = 'rm_1'").get()).toMatchObject({ status: "pending" });
+  it("no binding / no roles: nothing is sent, ok", async () => {
+    const none = createRoleMembershipSink({} as Env, ids);
+    expect(await none.changed(notice)).toEqual({ ok: true });
+    const ds = fakeDriveShare({});
+    const empty = createRoleMembershipSink({ SVC_DRIVE_SHARE: ds.svc } as unknown as Env, ids);
+    expect(await empty.changed({ ...notice, roleIds: [] })).toEqual({ ok: true });
+    expect(ds.calls).toEqual([]);
   });
 });
