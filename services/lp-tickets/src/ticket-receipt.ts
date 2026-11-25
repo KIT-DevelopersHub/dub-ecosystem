@@ -1,25 +1,44 @@
 // 領収書（純粋関数）。HTML は公開 LP の Worker が描く（/receipt/<token>）。ここは「出してよい注文か」と中身だけ。
 import { errors } from "@dub/errors";
-import { lpTickets } from "@dub/types";
+import { accounting, lpTickets } from "@dub/types";
 import { EVENT_NAME, isTestOrder, orderNumber } from "./ticket-mail";
 import type { LpTicketReceipt, LpTicketReceiptIssuer, TicketOrderRow } from "./types";
 
 /**
- * 発行者。法人名と連絡先は LP（StructuredData.tsx の alternateName）・メールの差出人と同じもの。
- * 所在地とインボイス登録番号はまだ決まっていないので null（LP は「未設定」と明示して出す）。
- * TODO(運営が決める): address / invoiceRegistrationNo。登録番号を入れると消費税額の内訳も出る。
+ * 既定の発行者。会計アプリで発行者情報をまだ保存していない時に使う（LP の alternateName・メールの差出人と同じもの）。
+ * 所在地とインボイス登録番号は勝手に埋めない（LP は「未設定」と明示して出す）。
  */
 export const RECEIPT_ISSUER: LpTicketReceiptIssuer = {
   name: "一般社団法人 Developers Hub",
   event: EVENT_NAME,
+  office: `${EVENT_NAME} 事務局`,
   email: "info@developershub.jp",
   url: "https://developershub.jp",
   address: null,
+  phone: null,
   invoiceRegistrationNo: null,
+  taxRatePercent: accounting.DEFAULT_TAX_RATE,
 };
 
-/** 標準税率 10%。税込金額からの内税（端数切り捨て）。 */
-export const taxIncluded = (amountJpy: number): number => Math.floor((amountJpy * 10) / 110);
+/** 会計アプリの設定を領収書の発行者欄にする。未設定 (null) は既定のまま。空の任意項目は既定で埋める（連絡先が消えないように）。 */
+export function issuerFrom(s: accounting.IssuerSettings | null): LpTicketReceiptIssuer {
+  if (!s) return RECEIPT_ISSUER;
+  return {
+    name: s.name,
+    event: EVENT_NAME,
+    office: s.officeName ?? RECEIPT_ISSUER.office,
+    email: s.email ?? RECEIPT_ISSUER.email,
+    url: s.url ?? RECEIPT_ISSUER.url,
+    address: accounting.formatIssuerAddress(s),
+    phone: s.phone,
+    invoiceRegistrationNo: s.invoiceRegistrationNo,
+    taxRatePercent: s.taxRatePercent,
+  };
+}
+
+/** 税込金額からの内税（端数切り捨て）。既定は標準税率 10%。 */
+export const taxIncluded = (amountJpy: number, ratePercent: number = accounting.DEFAULT_TAX_RATE): number =>
+  accounting.taxIncluded(amountJpy, ratePercent);
 
 /** 領収書を出せる注文: 有料で、支払い済みか返金済み（返金済みは「無効」と明記して出す）。 */
 export function receiptAvailable(o: Pick<TicketOrderRow, "status" | "amountJpy" | "paidAt">): boolean {
@@ -34,7 +53,7 @@ export function receiptOf(o: TicketOrderRow, issuer: LpTicketReceiptIssuer = REC
     receiptName: o.receiptName ?? null,
     items: o.items.map((i) => ({ ...i })),
     amountJpy: o.amountJpy,
-    taxJpy: issuer.invoiceRegistrationNo ? taxIncluded(o.amountJpy) : null,
+    taxJpy: issuer.invoiceRegistrationNo ? taxIncluded(o.amountJpy, issuer.taxRatePercent) : null,
     paidAt: o.paidAt!,
     paymentMethod: o.paymentMethod,
     test: isTestOrder(o),

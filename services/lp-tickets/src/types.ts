@@ -1,7 +1,7 @@
 // Service-local types for lp-tickets (LP チケット販売). The wire shapes come from the shared
 // contract @dub/types lpTickets (also read by fe2) — never redeclare them here.
 import type { PermissionGranter } from "@dub/policy-gate";
-import type { common, lpTickets } from "@dub/types";
+import type { accounting, common, lpTickets } from "@dub/types";
 import type { Mailer } from "./mailer";
 import type { StripeClient } from "./stripe";
 
@@ -256,4 +256,9 @@ export interface AppDeps {
   /** ctx.waitUntil of the current request. null outside a request (cron, alarm, tests). */
   defer: ((work: Promise<unknown>) => void) | null;
   sleep: (ms: number) => Promise<void>;
+  /**
+   * 会計アプリの発行者情報 (member-service の内部口)。null を返したら未設定 = 既定の RECEIPT_ISSUER。
+   * 失敗は throw (領収書を古い発行者のまま出さず 503)。結線が無い環境 (テスト・未設定) は () => null。
+   */
+  loadIssuer: () => Promise<accounting.IssuerSettings | null>;
 }

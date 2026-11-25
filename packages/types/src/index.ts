@@ -35,6 +35,7 @@ export * as hrForm from "./hr-interview-form"; // 人事: 面談申し込みフ�
 export * as hrInterview from "./hr-interview"; // 人事: 面談の日程調整 (面談枠・案内メールの保留・公開の日程選択)
 export * as hrResult from "./hr-interview-result"; // 人事: 面談結果の登録 (合否メール・合格のアカウント発行)
 export * as goal from "./goal"; // member-service /members/goals (目標管理: チームの月間目標と KPI)
+export * as accounting from "./accounting"; // member-service /members/accounting/issuer (会計: 団体の発行者情報・領収書が読む)
 export * as sponsor from "./sponsor"; // member-service /members/sponsor/* (スポンサー: 名刺の共有)
 
 export const CONTRACT_VERSION = "1.0.0";

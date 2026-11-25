@@ -70,6 +70,7 @@ export async function makeApp(
     backup: null,
     defer: null,
     sleep: async () => {},
+    loadIssuer: async () => null,
     ...overrides,
   };
   const app = createApp(deps);

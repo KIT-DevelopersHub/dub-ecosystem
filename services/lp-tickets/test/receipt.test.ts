@@ -1,19 +1,30 @@
 // 領収書: 注文ごとの署名トークン・宛名（購入時 / 後から 1 回）・有料で支払い済み・返金済みだけ・メールのリンク。
 import { describe, it, expect } from "vitest";
-import { lpTickets } from "@dub/types";
+import { lpTickets, type accounting } from "@dub/types";
 import { TicketDelivery } from "../src/delivery";
 import type { OutboundMail } from "../src/mailer";
 import { createStripeClient } from "../src/stripe";
 import { renderBuyerMail } from "../src/ticket-mail";
-import { RECEIPT_ISSUER, receiptOf, taxIncluded } from "../src/ticket-receipt";
+import { issuerFrom, RECEIPT_ISSUER, receiptOf, taxIncluded } from "../src/ticket-receipt";
 import { receiptToken, ticketToken, verifyReceiptToken, verifyTicketToken } from "../src/ticket-token";
-import type { LpTicketReceipt, TicketOrderRow } from "../src/types";
+import type { AppDeps, LpTicketReceipt, TicketOrderRow } from "../src/types";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
 const SITE = "hokuriku-it-conf.com";
 const SECRET = "harness-secret";
 const INTERNAL = { "x-dub-internal": "1" };
 const NOW = "2026-10-07T03:00:00.000Z";
+const SETTINGS: accounting.IssuerSettings = {
+  name: "一般社団法人 テスト",
+  officeName: "テスト事務局",
+  postalCode: "920-1234",
+  address: "石川県金沢市テスト町 1-2-3",
+  phone: "076-000-0000",
+  email: "ops@example.com",
+  url: "https://example.com",
+  invoiceRegistrationNo: "T1234567890123",
+  taxRatePercent: 8,
+};
 
 /** Stripe that only creates sessions (payment is settled through the repo in these tests). */
 function sessionOnlyStripe() {
@@ -24,7 +35,7 @@ function sessionOnlyStripe() {
   });
 }
 
-async function setup(kind: RepoKind) {
+async function setup(kind: RepoKind, loadIssuer?: AppDeps["loadIssuer"]) {
   const sent: OutboundMail[] = [];
   const deferred: Promise<unknown>[] = [];
   const h = await makeApp(kind, "edit", ["lp:publish"], {
@@ -32,6 +43,7 @@ async function setup(kind: RepoKind) {
     stripeWebhookSecret: "whsec_test",
     mailer: { send: async (mail) => (sent.push(mail), { ok: true, id: "re_1" }) },
     defer: (p) => void deferred.push(p),
+    ...(loadIssuer ? { loadIssuer } : {}),
   });
   h.clock.set(NOW);
   const create = async (priceJpy: number) =>
@@ -104,6 +116,21 @@ describe("receiptOf", () => {
     expect(RECEIPT_ISSUER.address).toBeNull();
     expect(RECEIPT_ISSUER.invoiceRegistrationNo).toBeNull();
   });
+
+  it("builds the issuer from the 会計 settings, falling back to the defaults only where unset", () => {
+    expect(issuerFrom(null)).toBe(RECEIPT_ISSUER);
+    const issuer = issuerFrom({ ...SETTINGS, officeName: null, email: null, url: null });
+    expect(issuer).toEqual({
+      ...RECEIPT_ISSUER,
+      name: "一般社団法人 テスト",
+      address: "〒920-1234 石川県金沢市テスト町 1-2-3",
+      phone: "076-000-0000",
+      invoiceRegistrationNo: "T1234567890123",
+      taxRatePercent: 8,
+    });
+    // 内訳は設定の税率で出す: 6000 * 8 / 108。
+    expect(receiptOf(base, issuer)?.taxJpy).toBe(444);
+  });
 });
 
 describe.each<RepoKind>(["memory", "d1"])("receipt API (%s repo)", (kind) => {
@@ -129,6 +156,24 @@ describe.each<RepoKind>(["memory", "d1"])("receipt API (%s repo)", (kind) => {
     // The LP管理 order list does not carry the 宛名 (not part of LpTicketOrder).
     const list = (await (await h.app.fetch(get("/lp/tickets/orders"))).json()) as { items: Record<string, unknown>[] };
     expect(list.items[0]).not.toHaveProperty("receiptName");
+  });
+
+  it("prints the issuer saved in the 会計 app (and its tax rate)", async () => {
+    const h = await setup(kind, async () => SETTINGS);
+    const o = await h.buy();
+    const r = (await (await h.receipt(await h.token(o.id))).json()) as LpTicketReceipt;
+    expect(r.issuer).toEqual(issuerFrom(SETTINGS));
+    expect(r.taxJpy).toBe(444);
+    const named = await h.setName(await h.token(o.id), { receiptName: "株式会社サンプル" });
+    expect(((await named.json()) as LpTicketReceipt).issuer.office).toBe("テスト事務局");
+  });
+
+  it("answers 503 instead of a stale issuer when the 会計 settings cannot be read", async () => {
+    const h = await setup(kind, async () => {
+      throw new Error("member-service down");
+    });
+    const o = await h.buy();
+    expect((await h.receipt(await h.token(o.id))).status).toBe(503);
   });
 
   it("rejects a bad 宛名 at checkout", async () => {

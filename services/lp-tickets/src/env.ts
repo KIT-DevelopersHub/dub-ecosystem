@@ -5,6 +5,8 @@ import type { D1Database, DurableObjectNamespace, Fetcher, R2Bucket } from "@clo
 export interface Env {
   DB: D1Database;
   SVC_IDENTITY: Fetcher;
+  /** member-service: 会計アプリの発行者情報 (領収書の発行者欄)。Optional: 無ければ既定の発行者で出す。 */
+  SVC_MEMBER?: Fetcher;
   DUB_DEFAULT_ORG_ID?: string;
   /** 公開 LP の URL（LP管理に出す /tickets の URL）。未設定なら本番 LP。 */
   LP_BASE_URL?: string;

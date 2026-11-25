@@ -154,14 +154,22 @@ export type LpTicketReceiptStatus = "issued" | "refunded";
 
 /** 発行者。未設定の項目は null（LP は「未設定」と明示して出す。勝手に埋めない）。 */
 export interface LpTicketReceiptIssuer {
+  /** 法人名。 */
   name: string;
+  /** イベント名（但し書き・明細に使う）。 */
   event: string;
+  /** 事務局名（発行者欄の表示名）。会計アプリの設定、未設定なら「<イベント名> 事務局」。 */
+  office: string;
   email: string;
   url: string;
-  /** 所在地。null = 未設定。 */
+  /** 所在地（〒 + 住所の 1 行）。null = 未設定。 */
   address: string | null;
+  /** 電話番号。null = 出さない。 */
+  phone: string | null;
   /** 適格請求書発行事業者の登録番号（T + 13 桁）。null = 登録なし（消費税額の内訳も出さない）。 */
   invoiceRegistrationNo: string | null;
+  /** 消費税率（%）。内訳を出す時の率。 */
+  taxRatePercent: number;
 }
 
 /** GET/POST /lp/internal/tickets/receipt/:token（LP Worker が HTML にする）。有料で支払い済み・返金済みの注文だけ。 */

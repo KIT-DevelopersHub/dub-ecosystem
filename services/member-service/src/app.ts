@@ -26,8 +26,9 @@ import { registerHrInterviewFormRoutes } from "./hr-form-routes";
 import { HrInterviewService } from "./hr-interview-service";
 import { registerHrInterviewRoutes } from "./hr-interview-routes";
 import { HrResultService } from "./hr-result-service";
-import type { goal, hr, hrResult, sponsor } from "@dub/types";
+import type { accounting, goal, hr, hrResult, sponsor } from "@dub/types";
 import { GoalService } from "./goal-service";
+import { AccountingService } from "./accounting-service";
 import { SponsorService } from "./sponsor-service";
 import { SponsorLeadService } from "./sponsor-lead-service";
 import { SponsorMailService } from "./sponsor-mail-service";
@@ -80,6 +81,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const sponsorLeadSvc = new SponsorLeadService(deps);
   const sponsorMailSvc = new SponsorMailService(deps);
   const goalSvc = new GoalService(deps);
+  const accountingSvc = new AccountingService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "member-service" }));
@@ -349,6 +351,15 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
 
   // ---- スポンサー (フェーズ1 = 名刺の共有) ----
+  // 会計: 団体の発行者情報 (1 団体 1 行)。認可は表、入力の検査と楽観ロックは accounting-service。
+  app.get("/members/accounting/issuer", async (c) => c.json(await accountingSvc.getIssuer()));
+  app.put("/members/accounting/issuer", async (c) => {
+    const body = await readJson<accounting.PutIssuerRequest>(c);
+    return c.json(await accountingSvc.putIssuer(reqCtx(c), body));
+  });
+  // 領収書 (lp-tickets) が発行者欄を読む s2s 口。中身は公開の領収書に印字する情報だけ。
+  app.get("/members/internal/accounting/issuer", async (c) => c.json(await accountingSvc.getIssuer()));
+
   // 目標管理。認可は表、入力の検証と楽観ロックは goal-service。
   app.get("/members/goals", async (c) => c.json(await goalSvc.list(reqCtx(c), c.req.query("month"))));
   app.put("/members/goals/:teamId/:month", async (c) => {

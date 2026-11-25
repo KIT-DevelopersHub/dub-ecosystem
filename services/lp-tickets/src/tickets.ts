@@ -8,7 +8,7 @@ import { issuePreviewToken, verifyPreviewToken } from "./preview-token";
 import { stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
 import { ordersCsv } from "./ticket-csv";
 import { isTestOrder, orderNumber } from "./ticket-mail";
-import { checkReceiptName, parseReceiptNameInput, receiptOf } from "./ticket-receipt";
+import { checkReceiptName, issuerFrom, parseReceiptNameInput, receiptOf } from "./ticket-receipt";
 import { verifyReceiptToken } from "./ticket-token";
 import type {
   AppDeps,
@@ -21,6 +21,7 @@ import type {
   LpTicketOrderStatus,
   LpTicketOrdersPage,
   LpTicketReceipt,
+  LpTicketReceiptIssuer,
   LpTicketPaymentMethod,
   LpTicketsState,
   LpTicketType,
@@ -983,7 +984,7 @@ export class TicketService {
   /** LP Worker: the receipt behind a receipt URL. Same 404 for a bad token and for an order with no receipt. */
   async receipt(token: string): Promise<LpTicketReceipt> {
     const order = await this.receiptOrder(token);
-    return receiptOf(order)!;
+    return receiptOf(order, await this.receiptIssuer())!;
   }
 
   /** LP Worker: the buyer sets the 宛名 once (only while it is empty; 409 afterwards — a receipt is not re-addressed). */
@@ -993,7 +994,18 @@ export class TicketService {
     if (!(await this.repo.setReceiptName(order.id, name))) {
       throw new DubError("LP_TICKET_RECEIPT_NAME_SET", "領収書の宛名は設定済みです", { status: 409 });
     }
-    return receiptOf({ ...order, receiptName: name })!;
+    return receiptOf({ ...order, receiptName: name }, await this.receiptIssuer())!;
+  }
+
+  /** 発行者欄 = 会計アプリの設定。読めない時は古い発行者で出さず 503（LP は「ただいま表示できません」）。 */
+  private async receiptIssuer(): Promise<LpTicketReceiptIssuer> {
+    try {
+      return issuerFrom(await this.deps.loadIssuer());
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(JSON.stringify({ level: "warn", service: "lp-tickets", msg: "receipt issuer unavailable", error: err instanceof Error ? err.message : String(err) }));
+      throw new DubError("LP_TICKET_RECEIPT_ISSUER_UNAVAILABLE", "領収書の発行者情報を読めませんでした", { status: 503 });
+    }
   }
 
   private async receiptOrder(token: string): Promise<TicketOrderRow> {
