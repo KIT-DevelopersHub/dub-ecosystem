@@ -138,7 +138,10 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect(within(dialog).getByText("公開サイトの切り替え")).toBeInTheDocument();
     expect((within(dialog).getByTestId("fe7-app-dialog-toggle-lp:publish") as HTMLInputElement).checked).toBe(false);
     expect(within(dialog).getByTestId("fe7-app-dialog-danger-lp:publish")).toBeInTheDocument();
-    expect(screen.getByTestId("fe7-app-detail-count-lp").textContent).toBe("0 / 1");
+    // 当日受付 (lp:checkin) も同じダイアログに出る。会場の受付係向けなので危険フラグは付かない。
+    expect(within(dialog).getByText("チケットの当日受付")).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("fe7-app-dialog-danger-lp:checkin")).not.toBeInTheDocument();
+    expect(screen.getByTestId("fe7-app-detail-count-lp").textContent).toBe("0 / 2");
   });
 
   it("the dialog can also change the level (same policy helper as the table)", async () => {
