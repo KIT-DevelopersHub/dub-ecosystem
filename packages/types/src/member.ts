@@ -779,9 +779,17 @@ export function parseOnboardingItemInput(
 export const TEAM_ROLE_NAME_PREFIX = "チーム: ";
 export const POSITION_ROLE_NAME_PREFIX = "役職: ";
 
+const TEAM_ROLE_ID_PREFIX = "role_auto_team_";
+
 /** チームロールの id (チーム id から決まる)。 */
 export function teamRoleId(teamId: TeamId): string {
-  return `role_auto_team_${teamId}`;
+  return `${TEAM_ROLE_ID_PREFIX}${teamId}`;
+}
+/** teamRoleId の逆。チームロールでなければ null (#881: ロールから所属チームを出す)。 */
+export function teamIdOfRoleId(roleId: string): TeamId | null {
+  return roleId.startsWith(TEAM_ROLE_ID_PREFIX) && roleId.length > TEAM_ROLE_ID_PREFIX.length
+    ? roleId.slice(TEAM_ROLE_ID_PREFIX.length)
+    : null;
 }
 /** 役職ロールの id。 */
 export function positionRoleId(position: MemberPosition): string {

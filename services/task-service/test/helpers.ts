@@ -297,6 +297,13 @@ export class FakeIdentityClient implements IdentityClient {
   async userExists(_ctx: RequestContext, userId: string): Promise<boolean> {
     return !this.unknown.has(userId);
   }
+  /** userId -> team ids (#881 team members edit their team's tasks). */
+  teams = new Map<string, string[]>();
+  teamLookups = 0;
+  async teamIdsOf(_ctx: RequestContext, userId: string): Promise<string[]> {
+    this.teamLookups++;
+    return this.teams.get(userId) ?? [];
+  }
 }
 
 export class FakeIdempotencyStore implements IdempotencyStore {

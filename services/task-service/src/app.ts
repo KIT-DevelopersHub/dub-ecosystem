@@ -151,15 +151,21 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
   /**
    * INSTANCE LAYER (#881): may this caller edit THIS task? The table already demanded
-   * `task:write` (or the calendar key); here the row decides — assignee or creator, else
-   * `task:edit_all`. Rule lives in @dub/types `task.canEditTask` (FE4 renders the same).
-   * Service principals (github-sync) edit everything, as at the entry layer.
+   * `task:write` (or the calendar key); here the row decides — assignee (person, or a member
+   * of the task's team) or creator, else `task:edit_all`. Rule lives in @dub/types
+   * `task.canEditTask` (FE4 renders the same). Service principals (github-sync) edit
+   * everything, as at the entry layer. Cheapest first: row-only check → edit_all (auth-client
+   * cache) → the caller's teams (one identity `GET /users/:id`, only for a task with a team).
    */
   const assertCanEditTask = async (c: Context, t: task.Task): Promise<void> => {
     const principal = principalOf(c);
     if (principal.kind === "service") return;
     if (task.canEditTask(t, { userId: principal.userId }, false)) return;
     if (await holdsKey(c, task.TASK_EDIT_ALL_KEY)) return;
+    if (task.taskTeamIds(t).length > 0) {
+      const teamIds = await deps.identity.teamIdsOf(ctxOf(c), principal.userId);
+      if (task.isTaskAssignee(t, { userId: principal.userId, teamIds })) return;
+    }
     throw errors.forbidden("permission denied: task:edit_all", {
       reason: "not_task_assignee",
       required: [task.TASK_EDIT_ALL_KEY],

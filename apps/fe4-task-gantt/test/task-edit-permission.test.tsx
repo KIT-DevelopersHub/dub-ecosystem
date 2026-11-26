@@ -5,8 +5,8 @@ import { App } from "../src/App";
 import { MockApiClient } from "../src/api/mock-client";
 import { makeCanEditBar, makeCanEditTask } from "../src/domain/permissions";
 
-// #881: without task:edit_all a member edits only tasks assigned to or created by them; the
-// rest render read-only (no drag/resize handles, disabled detail fields, a short hint).
+// #881: without task:edit_all a member edits only tasks assigned to them (or their team) or
+// created by them; the rest render read-only (no drag/resize handles, disabled detail fields, a short hint).
 
 const EVENT = "evt_test";
 const ME = "usr_me";
@@ -47,6 +47,14 @@ describe("makeCanEditTask / makeCanEditBar", () => {
     expect(makeCanEditTask(TASKS, ME, ["task:read"])("mine")).toBe(false);
   });
 
+  it("a member of the task's team edits it; a non-member does not", () => {
+    const teamTasks = [mk("ops", { teamId: "team_ops" }), mk("pr", { teamId: "team_pr" })];
+    const can = makeCanEditTask(teamTasks, ME, MEMBER, ["team_ops"]);
+    expect(can("ops")).toBe(true);
+    expect(can("pr")).toBe(false);
+    expect(makeCanEditTask(teamTasks, ME, MEMBER)("ops")).toBe(false);
+  });
+
   it("a parent bar needs its whole subtree editable", () => {
     const can = makeCanEditTask(TASKS, ME, MEMBER);
     const rows = [
@@ -68,7 +76,7 @@ describe("gantt read-only rendering for tasks I may not edit", () => {
     renderAs(MEMBER);
     const theirs = await screen.findByTestId("fe4-gantt-bar-theirs");
     expect(theirs.getAttribute("data-readonly")).toBe("true");
-    expect(theirs.getAttribute("title")).toContain("担当者か作成者だけが編集できます");
+    expect(theirs.getAttribute("title")).toContain("作成者だけが編集できます");
     expect(screen.queryByTestId("fe4-gantt-bar-theirs-rz-l")).toBeNull();
     expect(screen.queryByTestId("fe4-gantt-bar-theirs-rz-r")).toBeNull();
     expect(screen.getByTestId("fe4-gantt-bar-mine").getAttribute("data-readonly")).toBeNull();
@@ -89,6 +97,21 @@ describe("gantt read-only rendering for tasks I may not edit", () => {
     panel = await screen.findByTestId("fe4-detail-panel");
     expect(within(panel).queryByTestId("fe4-detail-readonly-hint")).toBeNull();
     expect((within(panel).getByTestId("fe4-detail-title") as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it("member: a bar of my team's task (myTeamIds from mention-teams) is editable", async () => {
+    class TeamClient extends MockApiClient {
+      override async request<T>(req: Parameters<MockApiClient["request"]>[0]): Promise<T> {
+        if (req.path === "/api/v1/members/me/mention-teams") return { teams: [], myTeamIds: ["team_ops"] } as T;
+        return super.request<T>(req);
+      }
+    }
+    const OPS = "usr_ops_member"; // own user id: App's QueryClient is module-level, keyed per user
+    const tasks = [...TASKS, mk("ops", { assigneeId: "usr_bob", teamId: "team_ops" })];
+    render(<App client={new TeamClient({ tasks, currentUserId: OPS })} eventId={EVENT} permissions={MEMBER} currentUserId={OPS} />);
+    await screen.findByTestId("fe4-gantt-bar-ops-rz-r");
+    expect(screen.getByTestId("fe4-gantt-bar-ops").getAttribute("data-readonly")).toBeNull();
+    expect(screen.getByTestId("fe4-gantt-bar-theirs").getAttribute("data-readonly")).toBe("true");
   });
 
   it("task:edit_all holder: every bar is editable", async () => {

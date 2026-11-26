@@ -5,7 +5,7 @@ import { createServiceClient, type RequestContext } from "@dub/http";
 import { isDubError } from "@dub/errors";
 import { createAuthClient } from "@dub/auth-client";
 import type { PermissionGranter } from "@dub/policy-gate";
-import type { event, identity } from "@dub/types";
+import { member, type event, type identity } from "@dub/types";
 
 // ---- event-service: eventId existence + archived state ----
 export interface EventRef {
@@ -34,6 +34,11 @@ export function createServiceBindingEventClient(binding: Fetcher): EventClient {
 // ---- identity-roster: assignee existence ----
 export interface IdentityClient {
   userExists(ctx: RequestContext, userId: string): Promise<boolean>;
+  /**
+   * #881: the teams `userId` belongs to, from their identity roles (member-service syncs a
+   * `role_auto_team_<teamId>` role per 名簿 team). One `GET /users/:id` per call.
+   */
+  teamIdsOf(ctx: RequestContext, userId: string): Promise<string[]>;
 }
 
 export function createServiceBindingIdentityClient(binding: Fetcher): IdentityClient {
@@ -45,6 +50,15 @@ export function createServiceBindingIdentityClient(binding: Fetcher): IdentityCl
         return true;
       } catch (err) {
         if (isDubError(err) && err.status === 404) return false;
+        throw err;
+      }
+    },
+    async teamIdsOf(ctx, userId) {
+      try {
+        const u = await client.get<identity.IdentityUserDetail>(ctx, `/users/${userId}`);
+        return (u.roleIds ?? []).map(member.teamIdOfRoleId).filter((id): id is string => id !== null);
+      } catch (err) {
+        if (isDubError(err) && err.status === 404) return [];
         throw err;
       }
     },

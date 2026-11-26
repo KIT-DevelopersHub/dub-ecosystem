@@ -10,6 +10,7 @@ import { useGanttData } from "../api/useGanttData";
 import { useGanttRealtime } from "../api/useGanttRealtime";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
+import { useMyTeamIds } from "../api/useMyTeamIds";
 import { useRoster } from "../api/useRoster";
 import { useTaskStore } from "../store/useTaskStore";
 import type { OptimisticPatch } from "../domain/task-store";
@@ -226,10 +227,11 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   }, [query]);
 
   const tasks = store.list();
+  const myTeamIds = useMyTeamIds(currentUserId);
 
-  // #881: per-task edit rights (assignee / creator / task:edit_all), mirroring task-service.
+  // #881: per-task edit rights (assignee / team member / creator / task:edit_all), mirroring task-service.
   const canEditTaskId =
-    currentUserId === undefined ? () => caps.canWrite : makeCanEditTask(tasks, currentUserId, permissions);
+    currentUserId === undefined ? () => caps.canWrite : makeCanEditTask(tasks, currentUserId, permissions, myTeamIds);
   const canEditBar = makeCanEditBar(canEditTaskId, gantt.data?.rows ?? []);
   /** Drop the ids this viewer may not edit from a bulk op, telling them how many were skipped. */
   const onlyEditable = (ids: readonly common.TaskId[], check: (id: common.TaskId) => boolean): common.TaskId[] => {

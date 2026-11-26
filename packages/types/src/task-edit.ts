@@ -2,28 +2,52 @@
 // (read-only rendering), re-exported through the `task` namespace.
 //
 // Rule: a holder of `task:edit_all` edits every task. Anyone else (who already passed the
-// route's `task:write` / calendar gate) edits only a task they are assigned to, or one they
-// created themselves. A parent task does NOT become editable because a child is assigned to
-// me — the child row is editable on its own, the parent's fields stay with its assignee.
+// route's `task:write` / calendar gate) edits only a task they are an assignee of — the
+// person assignee, or a member of the task's team (see isTaskAssignee) — or one they created
+// themselves. A parent task does NOT become editable because a child is assigned to me — the
+// child row is editable on its own, the parent's fields stay with its assignee.
 import type { TeamId, UserId } from "./common";
 
 export const TASK_EDIT_ALL_KEY = "task:edit_all" as const;
 
-/** The task fields the rule reads. #882 (team assignees) adds its field here. */
+/** The task fields the rule reads. */
 export interface TaskEditSubject {
   assigneeId: UserId | null;
+  /** 担当チーム (#882). Optional so the rule works before/without that column. */
+  assigneeTeamId?: TeamId | null;
+  /** 所属チーム (the gantt「チーム」). */
+  teamId?: TeamId | null;
   createdBy?: UserId;
 }
 
-/** The acting user. `teamIds` is for #882 ("assigned to my team"); unused until then. */
+/**
+ * The acting user. `teamIds` = the teams they belong to. task-service derives it from the
+ * caller's identity roles (`role_auto_team_<teamId>`, member.teamIdOfRoleId); FE4 from
+ * `GET /members/me/mention-teams` `myTeamIds`. Omitted ⇒ no team grants.
+ */
 export interface TaskEditor {
   userId: UserId;
   teamIds?: readonly TeamId[];
 }
 
-/** Is `editor` an assignee of `t`? THE place to extend when a task can be assigned to a team. */
+/** The teams whose members count as assignees of `t` (担当チーム and 所属チーム). */
+export function taskTeamIds(t: TaskEditSubject): TeamId[] {
+  const out: TeamId[] = [];
+  if (t.assigneeTeamId) out.push(t.assigneeTeamId);
+  if (t.teamId && t.teamId !== t.assigneeTeamId) out.push(t.teamId);
+  return out;
+}
+
+/**
+ * Is `editor` an assignee of `t`? THE place that decides it: the person assignee, or a member
+ * of a team the task is handed to (`assigneeTeamId`) or belongs to (`teamId`) — tasks are
+ * usually given to a team, so its members edit them.
+ */
 export function isTaskAssignee(t: TaskEditSubject, editor: TaskEditor): boolean {
-  return t.assigneeId !== null && t.assigneeId === editor.userId;
+  if (t.assigneeId !== null && t.assigneeId === editor.userId) return true;
+  const mine = editor.teamIds;
+  if (!mine || mine.length === 0) return false;
+  return taskTeamIds(t).some((id) => mine.includes(id));
 }
 
 /** Instance-level edit check (the `task:write` key check happens before this). */

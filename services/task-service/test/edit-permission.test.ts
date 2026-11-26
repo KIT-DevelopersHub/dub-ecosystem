@@ -121,6 +121,49 @@ describe("task edit permission (#881)", () => {
     expect(mine.status).toBe(200);
   });
 
+  it("a member of the task's team edits it; a non-member does not (#881 team = role)", async () => {
+    const { h, app } = setup();
+    const t = await seed(app, { teamId: "team_ops" });
+    h.authz.denied.add("task:edit_all");
+    h.identity.teams.set("usr_dave", ["team_ops"]);
+    h.identity.teams.set("usr_erin", ["team_pr"]);
+    const member = await app.request(`/tasks/${t.id}`, as("usr_dave", "PATCH", { version: 1, title: "by team" }));
+    expect(member.status).toBe(200);
+    const outsider = await app.request(`/tasks/${t.id}`, as("usr_erin", "PATCH", { version: 2, title: "x" }));
+    expect(outsider.status).toBe(403);
+    expect((await h.repo.getById(t.id))?.title).toBe("by team");
+  });
+
+  it("does not look up teams for a task without a team (no extra identity call)", async () => {
+    const { h, app } = setup();
+    const t = await seed(app);
+    h.authz.denied.add("task:edit_all");
+    h.identity.teams.set("usr_carol", ["team_ops"]);
+    const res = await app.request(`/tasks/${t.id}`, as("usr_carol", "PATCH", { version: 1, title: "x" }));
+    expect(res.status).toBe(403);
+    expect(h.identity.teamLookups).toBe(0);
+  });
+
+  it("an organizer without task:edit_all cannot edit someone else's non-team task", async () => {
+    // organizer keeps task:write/task:delete but (owner decision) no task:edit_all.
+    const { h, app } = setup();
+    const t = await seed(app);
+    h.authz.denied.add("task:edit_all");
+    const res = await app.request(`/tasks/${t.id}`, as("usr_organizer", "PATCH", { version: 1, title: "x" }));
+    expect(res.status).toBe(403);
+    const del = await app.request(`/tasks/${t.id}`, as("usr_organizer", "DELETE"));
+    expect(del.status).toBe(403);
+  });
+
+  it("admin / maintainer (task:edit_all holders) edit any task, team or not", async () => {
+    const { h, app } = setup();
+    const t = await seed(app, { teamId: "team_ops" });
+    h.identity.teams.set("usr_admin", []);
+    const res = await app.request(`/tasks/${t.id}`, as("usr_admin", "PATCH", { version: 1, title: "x" }));
+    expect(res.status).toBe(200);
+    expect(h.identity.teamLookups).toBe(0);
+  });
+
   it("creating a task is unchanged (task:write is enough)", async () => {
     const { h, app } = setup();
     h.authz.denied.add("task:edit_all");

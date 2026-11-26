@@ -24,17 +24,19 @@ export function taskCapabilities(perms: readonly PermissionKey[] | null): TaskCa
 }
 
 /** The hint a read-only task shows (detail panel + bar tooltip). */
-export const READ_ONLY_TASK_HINT = "担当者か作成者だけが編集できます（すべて編集するにはロール管理の「すべてのタスクを編集」が必要です）";
+export const READ_ONLY_TASK_HINT = "担当者（担当チームのメンバー）か作成者だけが編集できます（すべて編集するにはロール管理の「すべてのタスクを編集」が必要です）";
 
 /**
  * Per-task edit check for the UI (#881), mirroring task-service via `task.canEditTask`.
  * Unknown ids are read-only (fail-closed) except optimistic `task_tmp_*` rows, which the
  * caller just created. `currentUserId === null` (not loaded) ⇒ only `task:edit_all` edits.
+ * `myTeamIds`: teams I belong to (members of a task's team edit it).
  */
 export function makeCanEditTask(
   tasks: readonly task.Task[],
   currentUserId: common.UserId | null,
   perms: readonly PermissionKey[] | null,
+  myTeamIds: readonly common.TeamId[] = [],
 ): (id: common.TaskId) => boolean {
   if (perms === null || !perms.includes("task:write")) return () => false;
   const holdsEditAll = perms.includes(task.TASK_EDIT_ALL_KEY);
@@ -44,7 +46,7 @@ export function makeCanEditTask(
     if (id.startsWith("task_tmp_")) return true;
     const t = byId.get(id);
     if (!t || currentUserId === null) return false;
-    return task.canEditTask(t, { userId: currentUserId }, false);
+    return task.canEditTask(t, { userId: currentUserId, teamIds: myTeamIds }, false);
   };
 }
 

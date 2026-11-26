@@ -101,7 +101,7 @@ const SYSTEM_ROLES: { name: string; permissions: identity.PermissionKey[] }[] = 
   },
   {
     name: "organizer",
-    permissions: withAppAccess(["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "task:edit_all", "file:read", "file:write", "notif:send", "notif:receive_all", "chat:create", "chat:create_private", "usage:view", "infra:read", "audit:read"]),
+    permissions: withAppAccess(["identity:read", "event:read", "event:write", "event:admin", "task:read", "task:write", "task:delete", "file:read", "file:write", "notif:send", "notif:receive_all", "chat:create", "chat:create_private", "usage:view", "infra:read", "audit:read"]),
   },
   {
     name: "member",
