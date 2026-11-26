@@ -73,6 +73,7 @@ const APP_TILES: AppTile[] = [
   { id: "hr", label: "人事", desc: "面談・採用・オンボーディング", icon: "user", path: "/hr" },
   { id: "sponsor", label: "スポンサー", desc: "名刺と営業の進捗・目標をチームで共有", icon: "folder", path: "/sponsor" },
   { id: "goals", label: "目標管理", desc: "チームの月間目標と KPI の進捗", icon: "flag", path: "/goals" },
+  { id: "accounting", label: "会計", desc: "領収書の発行者情報（所在地・登録番号）", icon: "file", path: "/accounting" },
 ];
 
 /** One clickable app tile. Renders as an anchor (real href for accessibility /

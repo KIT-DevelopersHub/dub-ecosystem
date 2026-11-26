@@ -41,10 +41,13 @@ export const DEMO_RECEIPT: LpTicketReceipt = {
   issuer: {
     name: "一般社団法人 Developers Hub",
     event: "北陸ITカンファレンス 2027",
+    office: "北陸ITカンファレンス 2027 事務局",
     email: "info@developershub.jp",
     url: "https://developershub.jp",
     address: null,
+    phone: null,
     invoiceRegistrationNo: null,
+    taxRatePercent: 10,
   },
 };
 
@@ -130,7 +133,7 @@ export function renderReceiptPage(r: LpTicketReceipt, token: string, error: stri
     `<div class="to">${r.receiptName ? escapeHtml(r.receiptName) : "&nbsp;"} 様</div>` +
     `<div>No. ${escapeHtml(r.orderNumber)}<br>発行日 ${escapeHtml(jstDate(r.paidAt))}</div></div>` +
     `<p class="amount">${escapeHtml(yen(r.amountJpy))} <span style="font-size:16px">（税込）</span></p>` +
-    (r.taxJpy !== null ? `<p class="small" style="text-align:center">うち消費税（10%） ${escapeHtml(yen(r.taxJpy))}</p>` : "") +
+    (r.taxJpy !== null ? `<p class="small" style="text-align:center">うち消費税（${escapeHtml(String(iss.taxRatePercent))}%） ${escapeHtml(yen(r.taxJpy))}</p>` : "") +
     `<p style="text-align:center">但し、${escapeHtml(iss.event)} 参加チケット代として<br>上記正に領収いたしました。</p>` +
     '<table><thead><tr><th>内容</th><th>単価（税込）</th><th>数量</th><th>金額（税込）</th></tr></thead>' +
     `<tbody>${rows}<tr><td colspan="3">合計</td><td class="n">${escapeHtml(yen(r.amountJpy))}</td></tr></tbody></table>` +
@@ -139,8 +142,9 @@ export function renderReceiptPage(r: LpTicketReceipt, token: string, error: stri
     "</p>" +
     '<div class="issuer">' +
     `<div>${escapeHtml(iss.name)}</div>` +
-    `<div>${escapeHtml(iss.event)} 事務局</div>` +
+    `<div>${escapeHtml(iss.office)}</div>` +
     `<div>${iss.address ? escapeHtml(iss.address) : unset("所在地")}</div>` +
+    (iss.phone ? `<div>TEL ${escapeHtml(iss.phone)}</div>` : "") +
     `<div>${escapeHtml(iss.email)}</div>` +
     (iss.invoiceRegistrationNo ? `<div>登録番号 ${escapeHtml(iss.invoiceRegistrationNo)}</div>` : "") +
     "</div></div>";

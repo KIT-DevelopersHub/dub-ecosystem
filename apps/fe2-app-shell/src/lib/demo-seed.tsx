@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 
@@ -104,6 +104,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "sponsor:write",
   "sponsor:admin",
   "goals:read",
+  "accounting:read",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -6221,6 +6222,24 @@ function createLpProposalsStore() {
   return { handle, settings };
 }
 
+// ── 会計 (member-service /members/accounting/issuer の demo) ─────────────────────
+// 発行者情報 1 件をメモリで持つ。検査・正規化は本物と同じ @dub/types accounting を使う。
+function createAccountingStore(me: () => { id: string; displayName: string }) {
+  let issuer: accountingValues.AccountingIssuer | null = null;
+  function handle(method: string, pathname: string, body: any): Response | null {
+    if (pathname !== "/api/v1/members/accounting/issuer") return null;
+    if (method === "GET") return json({ issuer } satisfies accountingValues.GetIssuerResponse);
+    if (method !== "PUT") return null;
+    if ((issuer?.version ?? 0) !== body?.expectedVersion) return json({ error: { code: "ACCOUNTING_VERSION_CONFLICT", message: "conflict" } }, 409);
+    const parsed = accountingValues.parseIssuerInput(body);
+    if (!parsed.ok) return json({ error: { code: "VALIDATION_FAILED", message: "Validation failed", details: parsed.errors } }, 400);
+    const u = me();
+    issuer = { ...parsed.value, version: body.expectedVersion + 1, updatedBy: u.id as accountingValues.AccountingIssuer["updatedBy"], updatedByName: u.displayName, updatedAt: new Date().toISOString() };
+    return json({ ...issuer, warnings: parsed.warnings } satisfies accountingValues.PutIssuerResponse);
+  }
+  return { handle };
+}
+
 // ── 目標管理 (member-service /members/goals の demo) ─────────────────────────────
 // 保存はメモリ上。実績は本物と同じ指標の見本値を月ごとに持ち、計算は @dub/types goal を使う。
 function createGoalsStore(
@@ -6626,6 +6645,7 @@ export function createDemoFetch(): typeof fetch {
   const lpProposalsStore = createLpProposalsStore();
   const lpSponsorStore = createDemoLpSponsorStore((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL);
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
+  const accountingStore = createAccountingStore(() => currentMe().user);
   const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.actuals(m));
   const sponsorStore = createSponsorStore(() => currentMe().user, goalsStore.sponsorGoals);
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
@@ -6831,6 +6851,9 @@ export function createDemoFetch(): typeof fetch {
       }
       if (res) return res;
     }
+    const accountingHit = accountingStore.handle(method, url.pathname, parsedBody);
+    if (accountingHit) return accountingHit;
+
     const goalsHit = goalsStore.handle(method, url.pathname, url, parsedBody);
     if (goalsHit) return goalsHit;
 

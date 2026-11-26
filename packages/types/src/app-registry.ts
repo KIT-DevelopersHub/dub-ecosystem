@@ -147,6 +147,10 @@ export const APP_MANIFEST = [
   // 無効/閲覧/編集 がそのまま全部の設定。未公開アプリなので identity/0031 で admin のみ付与。
   { id: "goals", label: "目標管理", navPath: "/goals", domain: "goals", permissions: ["goals:read"], access: { view: "app:goals:view", edit: "app:goals:edit" },
     detailPermissions: ["goals:read"] },
+  // 会計: 団体の発行者情報 (法人名・所在地・インボイス登録番号・税率)。領収書 (lp-tickets) がここを読む
+  // (member-service /members/accounting/issuer)。未公開アプリなので identity/0036 で admin のみ付与。
+  { id: "accounting", label: "会計", navPath: "/accounting", domain: "accounting", permissions: ["accounting:read"], access: { view: "app:accounting:view", edit: "app:accounting:edit" },
+    detailPermissions: ["accounting:read"] },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

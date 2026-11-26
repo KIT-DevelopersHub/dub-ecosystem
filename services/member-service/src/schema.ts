@@ -597,6 +597,29 @@ WHERE stage = 'scheduling'
 `.trim(),
 };
 
+export const MEMBER_ACCOUNTING_ISSUER_MIGRATION: Migration = {
+  id: "0028_accounting_issuer",
+  namespace: "member",
+  up: `
+CREATE TABLE member_accounting_issuer (
+  org_id                   TEXT PRIMARY KEY,
+  name                     TEXT NOT NULL,
+  office_name              TEXT,
+  postal_code              TEXT,
+  address                  TEXT,
+  phone                    TEXT,
+  email                    TEXT,
+  url                      TEXT,
+  invoice_registration_no  TEXT,
+  tax_rate_percent         INTEGER NOT NULL,
+  version                  INTEGER NOT NULL,
+  updated_by               TEXT NOT NULL,
+  updated_by_name          TEXT,
+  updated_at               TEXT NOT NULL
+);
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -626,4 +649,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_HR_INTERVIEWS_MIGRATION,
   MEMBER_HR_INTERVIEW_RESULTS_MIGRATION,
   MEMBER_HR_BOOKED_BACKFILL_MIGRATION,
+  MEMBER_ACCOUNTING_ISSUER_MIGRATION,
 ];

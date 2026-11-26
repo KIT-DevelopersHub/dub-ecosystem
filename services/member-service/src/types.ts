@@ -10,6 +10,7 @@ import type { HrInterviewRepo } from "./hr-interview-repo";
 import type { HrResultRepo } from "./hr-result-repo";
 import type { HrMailSender, InterviewerNotifier } from "./hr-interview-mail";
 import type { GoalMetricSources, GoalRepo } from "./goal-repo";
+import type { AccountingRepo } from "./accounting-repo";
 import type { SponsorImageStore, SponsorRepo } from "./sponsor-repo";
 import type { SponsorLeadRepo } from "./sponsor-lead-repo";
 import type { SponsorMailRepo } from "./sponsor-mail-repo";
@@ -232,6 +233,8 @@ export interface AppDeps {
   /** 目標管理 (member_goals) の永続化と、他サービスの実績の取り口 (goal-repo.ts)。 */
   goalRepo: GoalRepo;
   goalSources: GoalMetricSources;
+  /** 会計: 団体の発行者情報 (member_accounting_issuer)。 */
+  accountingRepo: AccountingRepo;
   /** チーム・役職ロールの自動付与 (identity-roster)。index.ts で SVC_IDENTITY に結線。
    *  undefined なら同期しない (単体テスト等)。名簿の保存は同期の成否に関わらず成功する。 */
   roleSync?: RoleSyncPort;
