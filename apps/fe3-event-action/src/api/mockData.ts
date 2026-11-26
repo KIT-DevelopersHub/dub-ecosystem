@@ -216,6 +216,7 @@ export function createStore(seed: MockSeed = {}): Store {
 export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi {
   const store = createStore(seed);
   const orgId = seed.orgId ?? "org_devhub";
+  const digests = new Map<string, event.EventDigest>();
   const delay = () => (latencyMs > 0 ? new Promise((r) => setTimeout(r, latencyMs)) : Promise.resolve());
 
   function getEventOr404(eid: string): event.DubEvent {
@@ -268,6 +269,8 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
         phase: "planning",
         startsAt: req.startsAt ?? null,
         endsAt: req.endsAt ?? null,
+        venue: req.venue ?? null,
+        capacity: req.capacity ?? null,
         archivedAt: null,
         version: 1,
         createdAt: now(),
@@ -309,6 +312,8 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
         phase: req.phase ?? e.phase,
         startsAt: req.startsAt !== undefined ? req.startsAt : e.startsAt,
         endsAt: req.endsAt !== undefined ? req.endsAt : e.endsAt,
+        venue: req.venue !== undefined ? req.venue : (e.venue ?? null),
+        capacity: req.capacity !== undefined ? req.capacity : (e.capacity ?? null),
         version: e.version + 1,
         updatedAt: now(),
       };
@@ -461,6 +466,34 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
       await delay();
       const a = getActionOr404(aid);
       store.actions.set(aid, { ...a, archivedAt: now(), updatedAt: now(), version: a.version + 1 });
+    },
+
+    // AI digest (#879). The mock mirrors the production default shape-wise: enabled
+    // with the deterministic "fake" provider (no model), digest built from the store,
+    // and the Q&A answering 「停止中」 (offline) the way it does until the Mac mini arrives.
+    async getEventDigest(eid: common.EventId): Promise<event.GetEventDigestResponse> {
+      await delay();
+      getEventOr404(eid);
+      return { enabled: true, provider: { id: "fake", status: "online" }, digest: digests.get(eid) ?? null };
+    },
+    async runEventDigest(eid: common.EventId): Promise<event.RunEventDigestResponse> {
+      await delay();
+      const e = getEventOr404(eid);
+      const lines: event.EventDigestLine[] = [
+        { text: `イベント「${e.title}」${e.venue ? `・会場 ${e.venue}` : ""}`, source: "event", link: `/events?eventId=${eid}` },
+        ...[...store.actions.values()]
+          .filter((a) => a.eventId === eid && !a.archivedAt)
+          .slice(0, 5)
+          .map((a) => ({ text: `アクション「${a.title}」`, source: "actions" as const, link: `/events/${eid}` })),
+      ];
+      const digest: event.EventDigest = { eventId: eid, lines, discrepancies: [], model: "fake", trigger: "manual", generatedAt: now() };
+      digests.set(eid, digest);
+      return { ran: true, changedSources: ["actions", "event"], digest };
+    },
+    async askEvent(eid: common.EventId): Promise<event.AskEventResponse> {
+      await delay();
+      getEventOr404(eid);
+      return { status: "offline", answer: null, sources: [] };
     },
 
     async getUsers(ids: readonly common.UserId[]): Promise<common.Paginated<identity.UserSummary>> {

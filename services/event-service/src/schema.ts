@@ -100,3 +100,41 @@ CREATE TABLE event_event_page_layout (
 );
 `.trim(),
 };
+
+// Additive follow-up migration (#879): structured 会場 / 定員 on event_events, the
+// source of truth the AI digest only reads. Lockstep with
+// infra/d1/migrations/event/0005_event_venue_capacity.sql.
+export const EVENT_VENUE_CAPACITY_SCHEMA_MIGRATION: Migration = {
+  namespace: "event",
+  id: "0005_event_venue_capacity",
+  up: `
+ALTER TABLE event_events ADD COLUMN venue TEXT;
+ALTER TABLE event_events ADD COLUMN capacity INTEGER;
+`.trim(),
+};
+
+// Additive follow-up migration (#879): AI digest (one row per event) + per-source
+// last-seen hashes for diff-only runs. Lockstep with
+// infra/d1/migrations/event/0006_event_ai_digest.sql.
+export const EVENT_AI_DIGEST_SCHEMA_MIGRATION: Migration = {
+  namespace: "event",
+  id: "0006_event_ai_digest",
+  up: `
+CREATE TABLE IF NOT EXISTS event_ai_digests (
+  event_id     TEXT PRIMARY KEY REFERENCES event_events(id),
+  data         TEXT NOT NULL,
+  model        TEXT NOT NULL,
+  trigger_kind TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS event_ai_digest_sources (
+  event_id   TEXT NOT NULL REFERENCES event_events(id),
+  source     TEXT NOT NULL,
+  hash       TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (event_id, source)
+);
+`.trim(),
+};

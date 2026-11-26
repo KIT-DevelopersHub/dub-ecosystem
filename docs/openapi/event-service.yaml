@@ -204,6 +204,104 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /events/{id}/digest:
+    get:
+      operationId: getEventDigest
+      summary: AI digest of the event (#879; feature flag, default OFF)
+      tags:
+        - events
+      description: >-
+        Requires app:events:view + event:read. Shape = @dub/types event.GetEventDigestResponse.
+        enabled=false while the feature flag is OFF (digest is then null).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Digest state
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /events/{id}/digest/run:
+    post:
+      operationId: runEventDigest
+      summary: Generate the AI digest now (admin; diff-only)
+      tags:
+        - events
+      description: >-
+        Requires app:events:edit + event:admin. 409 EVENT_AI_DIGEST_DISABLED when the flag is OFF;
+        503 EVENT_AI_PROVIDER_OFFLINE when the Mac mini is not connected. Shape =
+        event.RunEventDigestResponse.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Run outcome
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /events/{id}/ask:
+    post:
+      operationId: askEvent
+      summary: Ask the event AI a question (#879)
+      tags:
+        - events
+      description: >-
+        Requires app:events:view + event:read. Body event.AskEventRequest. status is
+        "disabled" (flag OFF), "offline" (Mac mini down; no fallback) or "answered".
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Answer state
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /events/{id}/actions:
     get:
       operationId: listActions
@@ -450,6 +548,19 @@ components:
             - string
             - 'null'
           format: date-time
+        venue:
+          type:
+            - string
+            - 'null'
+          maxLength: 200
+          description: 会場 (structured source of truth, #879)
+        capacity:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          maximum: 100000
+          description: 定員 (people, #879)
         archivedAt:
           type:
             - string
@@ -564,6 +675,19 @@ components:
           type: string
           format: date-time
           description: ISO8601 UTC
+        venue:
+          type:
+            - string
+            - 'null'
+          maxLength: 200
+          description: 会場 (structured source of truth, #879)
+        capacity:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          maximum: 100000
+          description: 定員 (people, #879)
     UpdateEventRequest:
       type: object
       description: version is the optimistic lock. phase is validated against EVENT_PHASE_TRANSITIONS.
@@ -590,6 +714,19 @@ components:
             - string
             - 'null'
           format: date-time
+        venue:
+          type:
+            - string
+            - 'null'
+          maxLength: 200
+          description: 会場 (structured source of truth, #879)
+        capacity:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          maximum: 100000
+          description: 定員 (people, #879)
     CreateActionRequest:
       type: object
       required:

@@ -905,3 +905,26 @@ describe("参加届からのアカウント発行 (人事・members:onboard_mail
     });
   });
 });
+
+describe("event AI digest (#879, demo = fake provider)", () => {
+  it("GET returns a cited digest with a 食い違い; run refreshes it; ask answers 停止中 (offline)", async () => {
+    const st = await api().request<{ enabled: boolean; provider: { status: string }; digest: { lines: { link: string }[]; discrepancies: unknown[] } }>({
+      method: "GET",
+      path: "/api/v1/events/evt_1/digest",
+    });
+    expect(st.enabled).toBe(true);
+    expect(st.digest.lines.length).toBeGreaterThan(0);
+    expect(st.digest.lines.every((l) => l.link !== "")).toBe(true);
+    expect(st.digest.discrepancies.length).toBe(1);
+    const run = await api().request<{ ran: boolean }>({ method: "POST", path: "/api/v1/events/evt_1/digest/run" });
+    expect(run.ran).toBe(true);
+    const ask = await api().request<{ status: string }>({ method: "POST", path: "/api/v1/events/evt_1/ask", body: { question: "会場は？" } });
+    expect(ask.status).toBe("offline");
+  });
+
+  it("the demo conference event carries structured venue / capacity", async () => {
+    const ev = await api().request<{ venue: string; capacity: number }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    expect(ev.venue).toContain("金沢工業大学");
+    expect(ev.capacity).toBe(300);
+  });
+});

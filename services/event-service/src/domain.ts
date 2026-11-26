@@ -53,11 +53,30 @@ export function toDubEvent(r: EventRow): event.DubEvent {
     phase: r.phase,
     startsAt: r.startsAt,
     endsAt: r.endsAt,
+    venue: r.venue ?? null,
+    capacity: r.capacity ?? null,
     archivedAt: r.archivedAt,
     version: r.version,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
+}
+
+/** 会場: trimmed, bounded; "" / null => null. Throws-free: caller validates type first. */
+export function normalizeVenue(v: unknown): string | null | "invalid" {
+  if (v === null) return null;
+  if (typeof v !== "string") return "invalid";
+  const t = v.trim();
+  if (t === "") return null;
+  if (t.length > eventNs.EVENT_VENUE_MAX_LENGTH) return "invalid";
+  return t;
+}
+
+/** 定員: integer 0..EVENT_CAPACITY_MAX, or null. */
+export function normalizeCapacity(v: unknown): number | null | "invalid" {
+  if (v === null) return null;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > eventNs.EVENT_CAPACITY_MAX) return "invalid";
+  return v;
 }
 
 export function toDubAction(r: ActionRow): event.DubAction {

@@ -544,6 +544,11 @@ export interface SelfParticipation extends PersonProfile {
   /** 名簿に未登録 (identity 未紐付け) なら null。 */
   operations: SelfOperationsInfo | null;
 }
+/** 本人の未入力項目 (表示順)。アカウント設定のリマインド (バナー・設定アイコンの点) が使う。
+ *  判定は名簿の催促と同じ PROFILE_REMINDER_KEYS / missingProfileKeys に寄せる (定義は 1 か所)。 */
+export function missingSelfProfileKeys(p: SelfParticipation): PersonProfileKey[] {
+  return missingProfileKeys({ ...p, name: p.operations?.name ?? null });
+}
 /** Patch body for the self entry: any subset of PersonProfile + 連絡先. */
 export type SelfParticipationUpdateRequest = Partial<PersonProfile> & { contact?: string | null };
 

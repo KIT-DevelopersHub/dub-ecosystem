@@ -255,9 +255,19 @@ function fieldsFromEvent(m: MeetingRow, ev: CalendarEvent): Partial<MeetingField
   if (startsAt !== m.startsAt) out.startsAt = startsAt;
   const minutes = Math.round((endMs - startMs) / 60_000);
   if (minutes >= DURATION_MIN && minutes <= DURATION_MAX && minutes !== m.durationMinutes) out.durationMinutes = minutes;
-  const rule = ev.recurrence ? fromRecurrence(ev.recurrence) : null;
-  if (rule && (rule.recurrence !== m.recurrence || rule.until !== m.until)) Object.assign(out, rule);
+  // Never the repeat rule: Dub's recurrence / until is the source of truth (recurrenceDrift).
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Google's RRULE when it no longer says what Dub stored (null = in line). A "this and following"
+ *  edit in Google Calendar ends the series with an UNTIL and starts a new event; Dub never takes
+ *  that over on its own, so a sync must not shorten or change the repeat. */
+export function recurrenceDrift(m: Pick<MeetingFields, "startsAt" | "recurrence" | "until">, ev: Pick<CalendarEvent, "recurrence">): string[] | null {
+  const google = ev.recurrence ?? [];
+  // EXDATE etc. (an occurrence deleted in Google) leave the rule itself alone.
+  const rule = fromRecurrence(google.filter((l) => l.startsWith("RRULE:")));
+  if (rule && rule.recurrence === m.recurrence && rule.until === m.until) return null;
+  return google;
 }
 
 /** Hash, not the list itself: the state needs no addresses to tell that the list changed. */
@@ -638,9 +648,13 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       m = { ...m, ...pulled, updatedAt: deps.now() };
       log("meeting_sync_pulled_from_google", { meetingId: m.id, fields: Object.keys(pulled) });
     }
+    const drift = recurrenceDrift(m, ev);
+    if (drift) {
+      // Kept as Dub has it (not pulled, not pushed back: a split series would then repeat twice).
+      log("meeting_sync_recurrence_drift_kept", { meetingId: m.id, dub: toRecurrence(m), google: drift });
+    }
     if (isOver(m, nowMs)) {
       // Judged after the pull: a meeting moved forward in Google is live again.
-      if (ev.recurrence?.length && !fromRecurrence(ev.recurrence)) log("meeting_sync_recurrence_unrepresentable", { meetingId: m.id });
       await store.updateMeetingIf({ ...m, meetUrl: m.meetUrl ?? ev.meetUrl, htmlLink: m.htmlLink ?? ev.htmlLink, syncedAt: deps.now() }, row.updatedAt);
       return { added: 0, removed: 0 };
     }
@@ -943,9 +957,12 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
           ...when,
           ...(f.title !== row.title ? { summary } : {}),
           ...(f.description !== row.description ? { description } : {}),
-          ...(f.recurrence !== row.recurrence || f.until !== row.until ? { recurrence } : {}),
+          // Always the whole rule (no UNTIL when cleared) onto the series itself: a save in Dub
+          // puts back whatever Google holds, and an end date cleared in Dub is cleared in Google.
+          recurrence,
           ...(invites ? { attendees: invites.attendees } : {}),
         });
+        if (recurrenceDrift(f, ev)) log("meeting_update_recurrence_not_applied", { meetingId: row.id, sent: recurrence, google: ev.recurrence });
         next = { ...row, ...f, meetUrl: ev.meetUrl ?? row.meetUrl, htmlLink: ev.htmlLink ?? row.htmlLink, updatedAt: at };
         await store.updateMeeting(next);
         if (invites) await store.replaceInvites(row.id, invites.ledger);
