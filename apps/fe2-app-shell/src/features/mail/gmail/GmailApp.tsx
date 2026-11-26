@@ -4,7 +4,7 @@
 // ReadingPane, which owns the addressing). State lives in the client
 // MailStore, hydrated from the real gateway by useMailSync (inbox + Sent are live data).
 import { useEffect, useRef, useState } from "react";
-import { COARSE_POINTER_QUERY, Drawer, IconButton, Modal, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
+import { Badge, Button, COARSE_POINTER_QUERY, Drawer, IconButton, Modal, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
 import { ScheduledList } from "./ScheduledList.tsx";
@@ -15,7 +15,10 @@ import blockStyles from "./blocks.module.css";
 import { ComposeWindow, COMPOSE_WINDOW_DRAFT_PREFIX } from "./ComposeWindow.tsx";
 import { MailIcon } from "./icons.tsx";
 import { SHARED_FOLDERS } from "./mailModel.ts";
-import { MailStoreProvider, composing, folderUnread, selectOrdered, showSharedFolders, useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { MailStoreProvider, composing, folderUnread, queryActive, selectOrdered, showSharedFolders, useMailStore, type ComposeState } from "./useMailStore.tsx";
+import { MailFilterRegion } from "./filters/MailFilterRegion.tsx";
+import { useFilterUrlSync } from "./filters/useFilterUrlSync.ts";
+import { activeFilterCount } from "./filters/mailFilters.ts";
 import { useMailSync } from "./useMailSync.tsx";
 import { useReadState } from "./useReadState.tsx";
 import { deliver } from "./sendMail.ts";
@@ -77,7 +80,7 @@ function useRestoreComposeDraftsOnMount(): void {
 
 /** Phones: the folder nav moves into a drawer opened from the search row, and the
  *  fixed 240px title column gives its width to the search box. */
-function SearchBar({ narrow, onOpenNav }: { narrow: boolean; onOpenNav: () => void }): JSX.Element {
+function SearchBar({ narrow, onOpenNav, filtersOpen, onToggleFilters }: { narrow: boolean; onOpenNav: () => void; filtersOpen: boolean; onToggleFilters: () => void }): JSX.Element {
   const { state, dispatch } = useMailStore();
   const ref = useRef<HTMLInputElement>(null);
   // iOS zooms the page when focusing an input under 16px.
@@ -123,6 +126,15 @@ function SearchBar({ narrow, onOpenNav }: { narrow: boolean; onOpenNav: () => vo
           </button>
         ) : null}
       </div>
+      <Button
+        variant={filtersOpen ? "primary" : "secondary"}
+        size="sm"
+        onClick={onToggleFilters}
+        testId="fe2-mail-filter-toggle"
+        iconRight={activeFilterCount(state.filters) > 0 ? <Badge tone={filtersOpen ? "neutral" : "brand"}>{activeFilterCount(state.filters)}</Badge> : undefined}
+      >
+        絞り込み
+      </Button>
       {narrow && canCompose ? (
         <IconButton
           name="edit"
@@ -323,6 +335,8 @@ function GmailBody({ openMessageId }: { openMessageId?: string | undefined }): J
   useOpenMessageFromLink(openMessageId);
   useMailSync(); // hydrate inbox + Sent from the gateway; lazy-load bodies on open
   useRestoreComposeDraftsOnMount(); // re-open any compose window left dirty by a reload/crash
+  useFilterUrlSync(); // #899: filters live in the URL so a reload keeps them
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // A purged (完全に削除) thread is never shown, even if it was the open one when a reload's
   // APPLY_FLAGS marked it purged — fall back to the list.
   const openThread = state.openThreadId ? state.threads.find((t) => t.id === state.openThreadId && !t.purged) : undefined;
@@ -346,7 +360,8 @@ function GmailBody({ openMessageId }: { openMessageId?: string | undefined }): J
       data-unread={unreadInbox}
       style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: narrow ? 0 : 560, background: "var(--dub-color-surface-sunken)" }}
     >
-      <SearchBar narrow={narrow} onOpenNav={() => setNavOpen(true)} />
+      <SearchBar narrow={narrow} onOpenNav={() => setNavOpen(true)} filtersOpen={filtersOpen} onToggleFilters={() => setFiltersOpen((o) => !o)} />
+      <MailFilterRegion open={filtersOpen} />
       {canCompose ? null : (
         <div role="status" data-testid="fe2-mail-readonly" style={{ margin: "0 16px 8px", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
           メールは閲覧のみの権限です。送信が必要なら管理者に編集権限を依頼してください。
@@ -360,9 +375,9 @@ function GmailBody({ openMessageId }: { openMessageId?: string | undefined }): J
         ) : (
           <MailSidebar />
         )}
-        {state.folder === "scheduled" && !state.labelFilter && state.search.trim() === "" ? (
+        {state.folder === "scheduled" && !state.labelFilter && !queryActive(state) ? (
           <ScheduledList />
-        ) : state.folder === "drafts" && !state.labelFilter && state.search.trim() === "" ? (
+        ) : state.folder === "drafts" && !state.labelFilter && !queryActive(state) ? (
           <DraftList />
         ) : openThread ? (
           // Keyed: j / k moves between conversations, and a half-typed reply must stay with its own.

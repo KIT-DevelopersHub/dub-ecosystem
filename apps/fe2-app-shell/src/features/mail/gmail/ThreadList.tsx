@@ -26,7 +26,8 @@ import {
 import { MailIcon } from "./icons.tsx";
 import { SenderAvatar } from "./SenderAvatar.tsx";
 import { LoadErrorState } from "../../../shell/LoadErrorState.tsx";
-import { PAGE_SIZE, canSelectAllInView, pageSourceOf, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
+import { PAGE_SIZE, canSelectAllInView, pageSourceOf, queryActive, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
+import { filtersActive } from "./filters/mailFilters.ts";
 import { useBulkAction, useReadState } from "./useReadState.tsx";
 import { useSenderBlocks } from "./useSenderBlocks.tsx";
 
@@ -558,7 +559,7 @@ export function ThreadList(): JSX.Element {
   // 完全に削除 (purged) threads never show. With a search active this is the client
   // pre-filter plus the server matches (see selectVisible / useMailSync).
   const visible = selectOrdered(state, now);
-  const searching = state.search.trim().length > 0;
+  const searching = queryActive(state);
   const search = state.searchResults;
   const searchPending = searching && (search.status === "loading" || search.status === "loadingMore");
   const canLoadMore = searching && search.status === "done" && (search.next.inbox !== null || search.next.sent !== null);
@@ -792,7 +793,7 @@ export function ThreadList(): JSX.Element {
           <MailIcon name="search" size={48} style={{ opacity: 0.4 }} />
           <div style={{ fontSize: "var(--dub-font-size-md)", fontWeight: 600 }}>見つかりませんでした</div>
           <div style={{ fontSize: "var(--dub-font-size-sm)" }}>
-            {search.status === "failed" ? "検索に失敗しました。時間をおいてもう一度お試しください。" : `「${state.search.trim()}」に一致するメールはありません。`}
+            {search.status === "failed" ? "検索に失敗しました。時間をおいてもう一度お試しください。" : state.search.trim() ? `「${state.search.trim()}」${filtersActive(state.filters) ? "と絞り込み条件" : ""}に一致するメールはありません。` : "絞り込み条件に一致するメールはありません。"}
           </div>
         </div>
       ) : visible.length === 0 && state.listError ? (

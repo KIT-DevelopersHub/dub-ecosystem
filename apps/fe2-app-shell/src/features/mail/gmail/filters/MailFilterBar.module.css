@@ -1,0 +1,105 @@
+/* Mail filter panel + active-filter chips (#899). Tokens only. */
+
+.region {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: 0 var(--dub-space-4) var(--dub-space-2);
+  flex-shrink: 0;
+}
+
+.bar {
+  max-width: 100%;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--dub-space-3);
+  width: 100%;
+  padding-top: var(--dub-space-2);
+  border-top: 1px solid var(--dub-color-border-default);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+}
+
+.picker {
+  width: calc(var(--dub-space-16) * 3.5);
+  max-width: 100%;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  flex-wrap: wrap;
+}
+
+.rangeSep {
+  color: var(--dub-color-text-muted);
+}
+
+.active {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
+
+.activeLabel {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+
+.clearAll {
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border: none;
+  border-radius: var(--dub-radius-sm);
+  background: transparent;
+  color: var(--dub-color-text-link);
+  font-family: inherit;
+  font-size: var(--dub-font-size-sm);
+  cursor: pointer;
+}
+.clearAll:hover {
+  background: var(--dub-color-surface-raised);
+}
+.clearAll:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+}
+
+.toggleCount {
+  margin-left: var(--dub-space-1);
+}
+
+@media (max-width: 640px) {
+  .region {
+    padding: 0 var(--dub-space-2) var(--dub-space-2);
+  }
+  .picker {
+    width: 100%;
+  }
+  .field {
+    width: 100%;
+  }
+}
+
+@media (pointer: coarse) {
+  .clearAll {
+    min-height: 44px;
+    font-size: var(--dub-font-size-md);
+  }
+}

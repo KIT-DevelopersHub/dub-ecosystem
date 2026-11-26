@@ -34,12 +34,23 @@ export interface InboxQuery {
   folder?: mail.MailFolderView;
   /** false: skip the view's total COUNT (the caller takes it from counts()). */
   withTotal?: boolean;
+  /** #899 list filters (unread / from / to / starred / attachment / dates / mailbox). */
+  filters?: MailFilterQuery;
 }
 
 export interface SentQuery {
   limit?: number;
   cursor?: string;
   q?: string;
+  filters?: MailFilterQuery;
+}
+
+/** The #899 filter keys of mail.ListMailMessagesQuery (shared by /messages and /sent). */
+export type MailFilterQuery = Pick<mail.ListMailMessagesQuery, "unread" | "from" | "to" | "starred" | "hasAttachment" | "after" | "before" | "mailbox">;
+
+function putFilters(q: Record<string, string | number | boolean | undefined>, f: MailFilterQuery | undefined): void {
+  if (!f) return;
+  for (const [k, v] of Object.entries(f)) if (v !== undefined) q[k] = v;
 }
 
 export interface ScheduledQuery {
@@ -145,6 +156,7 @@ export function createMailApi(api: ApiClient): MailApi {
       if (query?.q !== undefined) q.q = query.q;
       if (query?.folder !== undefined) q.folder = query.folder;
       if (query?.withTotal === false) q.withTotal = "0";
+      putFilters(q, query?.filters);
       const hasQuery = Object.keys(q).length > 0;
       return api.request<mail.MailMessagePage>({ method: "GET", path: `${MAIL}/messages`, ...(hasQuery ? { query: q } : {}) });
     },
@@ -178,6 +190,7 @@ export function createMailApi(api: ApiClient): MailApi {
       if (query?.limit !== undefined) q.limit = query.limit;
       if (query?.cursor !== undefined) q.cursor = query.cursor;
       if (query?.q !== undefined) q.q = query.q;
+      putFilters(q, query?.filters);
       const hasQuery = Object.keys(q).length > 0;
       return api.request<Paginated<MailSentListItem>>({ method: "GET", path: `${MAIL}/sent`, ...(hasQuery ? { query: q } : {}) });
     },
