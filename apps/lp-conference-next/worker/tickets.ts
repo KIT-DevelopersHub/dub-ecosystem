@@ -1440,7 +1440,7 @@ export function renderThanksPage(o: {
   return shell(
     "お申し込み",
     hero({ title: ok ? 'Thank <span class="g">you!</span>' : "お申し込み", ghost: ok ? "THANKS" : "TICKETS", step, small: true }) +
-      `<div class="body"><div class="wrap"><section class="card done rv">${inner}<div class="acts">${acts}</div></section></div></div>${share}`,
+      `<div class="body"><div class="wrap"><section class="card done rv"${ok ? " data-lp-purchase" : ""}>${inner}<div class="acts">${acts}</div></section></div></div>${share}`,
     !!o.demo,
     !!o.test,
     undefined,

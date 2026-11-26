@@ -9,13 +9,15 @@
 //
 // Types are declared locally (not in @dub/types): the LP visit shapes are not in the
 // frozen contract yet, exactly like driveshare's drive:read/drive:write shapes.
-import type { lp, lpTickets } from "@dub/types";
+import type { lp, lpInsights, lpTickets } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 // 公開設定（セクション切り替え・本番反映）の wire 型は @dub/types が唯一の定義（lp-analytics と共有）。
 export type LpSiteConfig = lp.LpSiteConfig;
 export type LpSiteConfigState = lp.LpSiteConfigState;
 export type LpSiteConfigWriteRequest = lp.LpSiteConfigWriteRequest;
+// 詳しい分析（GET /api/v1/lp/insights）の wire 型も @dub/types が唯一の定義。
+export type LpInsights = lpInsights.LpInsights;
 
 /** How the visit was classified. `bot` is counted separately and excluded from totals. */
 export type LpDevice = "mobile" | "desktop" | "bot" | "unknown";
@@ -207,6 +209,8 @@ export interface LpApi {
   getStats(query: LpStatsQuery): Promise<LpStats>;
   /** Site-wide PV / visits / referrers from Cloudflare Web Analytics (app:lp:view). */
   getSiteTraffic(query: LpSiteTrafficQuery): Promise<LpSiteTraffic>;
+  /** 詳しい分析: 推移・流入元・ページ・セクション・CTA・購入までの段階・端末・地域・表示速度 (app:lp:view)。 */
+  getInsights(query: { from: string; to: string }): Promise<LpInsights>;
   /** One cursor page of raw visits, newest first (app:lp:view). */
   listVisits(query: LpVisitsQuery): Promise<LpVisitsPage>;
   /** Issued tracking links with their in-range counters (app:lp:view). */
@@ -291,6 +295,7 @@ export function createLpApi(api: ApiClient): LpApi {
       if (query.referrer !== undefined) q.referrer = query.referrer;
       return api.request<LpSiteTraffic>({ method: "GET", path: `${BASE}/site-traffic`, query: q });
     },
+    getInsights: (query) => api.request<LpInsights>({ method: "GET", path: `${BASE}/insights`, query: { from: query.from, to: query.to } }),
     listVisits: (query) => {
       const q: Record<string, string | number | boolean | undefined> = { from: query.from, to: query.to };
       if (query.source !== undefined) q.source = query.source;

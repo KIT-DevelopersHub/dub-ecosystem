@@ -1,7 +1,7 @@
 // LpService — business rules over LpRepo. Reads aggregate in SQL (GROUP BY) so a range
 // costs one indexed scan per bucket kind, never a row-by-row pull into the Worker.
 import { errors } from "@dub/errors";
-import { lp } from "@dub/types";
+import { lp, lpInsights } from "@dub/types";
 import {
   DEVICE_LABELS,
   DIRECT_LABEL,
@@ -39,6 +39,9 @@ export function normalizeVersionId(raw: unknown): string | null {
   const id = t.startsWith("v") ? t : `v${t}`;
   return PUBLISHABLE.has(id) ? id : null;
 }
+
+/** アクセス解析ビーコンの日次上限（既定）。1 件 ≒ 10〜20 行の UPSERT なので、上限時でも 1 日 6 万行程度に収まる。 */
+export const DEFAULT_DAILY_INSIGHT_CAP = 3000;
 
 const EMPTY_STATS: LpLinkStats = { visits: 0, uniques: 0, lastVisitAt: null };
 const DEFAULT_PAGE = 25;
@@ -233,6 +236,34 @@ export class LpService {
     if (!versionId) throw errors.validationFailed([{ field: "versionId", reason: "not_publishable" }]);
     await this.deps.repo.setPublish(lp.LP_PUBLISH_SITE, versionId, ctx.userId, this.deps.now());
     return this.getPublish();
+  }
+
+  /** アクセス解析ビーコン（gateway から s2s）。日次集計に足し込むだけで、1 訪問ごとの行は作らない。
+   *  上限を超えた日は黙って捨てる（1 行読むだけ・書き込み 0）。 */
+  async ingestInsight(raw: unknown): Promise<void> {
+    const body = lpInsights.parseInsightIngest(raw);
+    if (!body) throw errors.validationFailed([{ field: "body", reason: "invalid" }]);
+    const day = dayJst(this.deps.now());
+    const cap = this.deps.dailyInsightCap ?? DEFAULT_DAILY_INSIGHT_CAP;
+    if ((await this.deps.repo.metricsCountOn(this.deps.orgId, day)) >= cap) return;
+    const rows = lpInsights.insightRows({ ...body, source: sourceFromParam(body.source) });
+    await this.deps.repo.addMetrics(this.deps.orgId, day, rows);
+  }
+
+  /** 詳しい分析（推移・流入元・ページ・セクション・CTA・購入までの段階・端末・地域・表示速度）。
+   *  期間の集計行を 1 回の範囲スキャンで読み、Worker 内でまとめる。 */
+  async getInsights(q: RangeQuery): Promise<lpInsights.LpInsights> {
+    const range = parseRange(q.from, q.to);
+    const [rows, links] = await Promise.all([
+      this.deps.repo.listMetrics(this.deps.orgId, range.from, range.to),
+      this.deps.repo.listLinks(this.deps.orgId),
+    ]);
+    const nameBySlug = new Map(links.map((l) => [l.slug, l.name]));
+    const lpHost = new URL(this.deps.lpBaseUrl).host;
+    return lpInsights.buildInsights(rows, range, eachDay(range.from, range.to), {
+      source: (key) => (key === DIRECT_SOURCE ? DIRECT_LABEL : (nameBySlug.get(key) ?? key)),
+      referrer: (host) => referrerLabel(host, lpHost),
+    });
   }
 
   /** Public beacon landing (s2s from the gateway). Matching is by slug at record time.

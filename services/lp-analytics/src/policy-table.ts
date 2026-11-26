@@ -17,6 +17,7 @@ export const POLICY_TABLE = definePolicyTable({
 
   // ---- public LP Worker / gateway beacon (s2s) ----
   "POST /lp/internal/visits": INTERNAL,
+  "POST /lp/internal/events": INTERNAL,
   "GET /lp/internal/publish": INTERNAL,
   "GET /lp/internal/goal-metrics": INTERNAL,
   "GET /lp/internal/proposals": INTERNAL,
@@ -28,6 +29,7 @@ export const POLICY_TABLE = definePolicyTable({
   // ---- LP管理 ----
   "GET /lp/stats": VIEW,
   "GET /lp/site-traffic": VIEW,
+  "GET /lp/insights": VIEW,
   "GET /lp/visits": VIEW,
   "GET /lp/links": VIEW,
   "POST /lp/links": EDIT,

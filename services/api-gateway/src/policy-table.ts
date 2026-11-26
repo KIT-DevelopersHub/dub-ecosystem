@@ -82,6 +82,8 @@ export const POLICY_TABLE = definePolicyTable({
   // LP visit beacon. The handler drops non-LP origins and forwards only a sanitized row to
   // lp-analytics s2s; there is no session to check and nothing readable comes back (204).
   "POST /api/v1/public/lp-visits": PUBLIC,
+  // LP アクセス解析ビーコン。lp-visits と同じ理由（Origin で絞り、検証・分類した集計値だけを s2s で転送・204 のみ）。
+  "POST /api/v1/public/lp-events": PUBLIC,
   // Resend delivery-event webhook. Resend has no session, so PUBLIC is the only possible
   // rule. What authenticates it is the Svix HMAC over the raw body, checked downstream in
   // mail-gateway (/internal/webhooks/resend) — the gateway forwards bytes verbatim and makes

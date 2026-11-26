@@ -1,5 +1,6 @@
 // D1-backed LpRepo. Owns namespace `lp_*` only (enforced by @dub/db strict client).
 import type { DbClient } from "@dub/db";
+import type { lpInsights } from "@dub/types";
 import type {
   AggregateBy,
   AggregateQuery,
@@ -352,10 +353,60 @@ function siteConfigRepo(db: DbClient): LpSiteConfigRepo {
   };
 }
 
+/** D1 は 1 文あたり bind 100 個まで。1 行 7 個なので 14 行ずつの複数行 UPSERT にする。 */
+const METRIC_ROWS_PER_STMT = 14;
+const METRIC_UPSERT_TAIL =
+  " ON CONFLICT(org_id, day_jst, dim, key) DO UPDATE SET n = n + excluded.n, sessions = sessions + excluded.sessions, sum_ms = sum_ms + excluded.sum_ms";
+
+function metricsRepo(db: DbClient): Pick<LpRepo, "metricsCountOn" | "addMetrics" | "listMetrics"> {
+  return {
+    async metricsCountOn(orgId, dayJst) {
+      const r = await db.first<{ n: number }>(
+        "SELECT n FROM lp_metrics_daily WHERE org_id = ? AND day_jst = ? AND dim = 'total' AND key = ''",
+        orgId,
+        dayJst,
+      );
+      return r?.n ?? 0;
+    },
+    async addMetrics(orgId, dayJst, rows) {
+      if (rows.length === 0) return;
+      const stmts = [];
+      for (let i = 0; i < rows.length; i += METRIC_ROWS_PER_STMT) {
+        const chunk = rows.slice(i, i + METRIC_ROWS_PER_STMT);
+        stmts.push({
+          sql:
+            "INSERT INTO lp_metrics_daily (org_id, day_jst, dim, key, n, sessions, sum_ms) VALUES " +
+            chunk.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ") +
+            METRIC_UPSERT_TAIL,
+          binds: chunk.flatMap((r) => [orgId, dayJst, r.dim, r.key, r.n, r.sessions, r.sumMs]),
+        });
+      }
+      await db.batch(stmts);
+    },
+    async listMetrics(orgId, from, to) {
+      const rows = await db.all<{ day_jst: string; dim: string; key: string; n: number; sessions: number; sum_ms: number }>(
+        "SELECT day_jst, dim, key, n, sessions, sum_ms FROM lp_metrics_daily WHERE org_id = ? AND day_jst >= ? AND day_jst <= ?",
+        orgId,
+        from,
+        to,
+      );
+      return rows.map((r) => ({
+        day: r.day_jst,
+        dim: r.dim as lpInsights.LpMetricDim,
+        key: r.key,
+        n: r.n,
+        sessions: r.sessions,
+        sumMs: r.sum_ms,
+      }));
+    },
+  };
+}
+
 export function createD1LpRepo(db: DbClient): LpRepo {
   return {
     ...proposalRepo(db),
     ...siteConfigRepo(db),
+    ...metricsRepo(db),
     async listLinks(orgId) {
       return (await db.all<LinkDbRow>("SELECT * FROM lp_links WHERE org_id = ?", orgId)).map(toLink);
     },

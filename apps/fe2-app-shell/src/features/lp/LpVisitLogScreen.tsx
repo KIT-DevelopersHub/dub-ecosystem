@@ -51,6 +51,7 @@ import {
   toDayKey,
   type LpRangeDays,
 } from "./lpRange.ts";
+import { LpInsightsCard } from "./LpInsightsCard.tsx";
 import { LpTabs } from "./LpTabs.tsx";
 import { SourceBars } from "./SourceBars.tsx";
 import { TrafficLineChart } from "./TrafficLineChart.tsx";
@@ -565,6 +566,7 @@ export function LpVisitLogScreen(): JSX.Element {
       <LpTabs active="visits" />
       {rangePicker}
       <SiteTrafficCard range={range} />
+      <LpInsightsCard range={range} />
       <span className={styles.sectionTitle}>流入URLの計測</span>
       <SourceSelect
         id="fe2-lp-source"

@@ -13,7 +13,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
     .sort();
 }
 
-const VIEW = ["GET /lp/links", "GET /lp/proposals", "GET /lp/publish", "GET /lp/site-config", "GET /lp/site-traffic", "GET /lp/sponsor-inquiries", "GET /lp/stats", "GET /lp/visits"];
+const VIEW = ["GET /lp/insights", "GET /lp/links", "GET /lp/proposals", "GET /lp/publish", "GET /lp/site-config", "GET /lp/site-traffic", "GET /lp/sponsor-inquiries", "GET /lp/stats", "GET /lp/visits"];
 const EDIT = [
   "GET /lp/proposals/submissions",
   "GET /lp/sponsor-inquiries/items",
@@ -51,7 +51,7 @@ describe("role x endpoint matrix (frozen)", () => {
 
   it("every internal route is INTERNAL (no key opens them)", () => {
     const internal = Object.entries(POLICY_TABLE).filter(([route]) => route.includes("/internal/"));
-    expect(internal.length).toBe(9);
+    expect(internal.length).toBe(10);
     for (const [, rule] of internal) expect(rule).toBe("internal");
   });
 });

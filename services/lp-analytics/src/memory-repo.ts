@@ -1,5 +1,6 @@
 // In-memory LpRepo for tests — same semantics as the D1 repo (bots excluded unless asked,
 // link aggregation skips untagged visits, visits newest-first by id).
+import type { lpInsights } from "@dub/types";
 import type {
   AggregateBy,
   AggregateQuery,
@@ -119,6 +120,25 @@ export class InMemoryLpRepo implements LpRepo {
     if (dup) return false;
     this.visits.push({ ...row });
     return true;
+  }
+  private metrics = new Map<string, lpInsights.LpMetricDayRow & { orgId: string }>();
+  async metricsCountOn(orgId: string, dayJst: string) {
+    return this.metrics.get(`${orgId}|${dayJst}|total|`)?.n ?? 0;
+  }
+  async addMetrics(orgId: string, dayJst: string, rows: readonly lpInsights.LpMetricRow[]) {
+    for (const r of rows) {
+      const k = `${orgId}|${dayJst}|${r.dim}|${r.key}`;
+      const cur = this.metrics.get(k) ?? { orgId, day: dayJst, dim: r.dim, key: r.key, n: 0, sessions: 0, sumMs: 0 };
+      cur.n += r.n;
+      cur.sessions += r.sessions;
+      cur.sumMs += r.sumMs;
+      this.metrics.set(k, cur);
+    }
+  }
+  async listMetrics(orgId: string, from: string, to: string) {
+    return [...this.metrics.values()]
+      .filter((m) => m.orgId === orgId && m.day >= from && m.day <= to)
+      .map(({ orgId: _o, ...m }) => ({ ...m }));
   }
   async recordedOn(dayJst: string) {
     return this.recorded.get(dayJst) ?? 0;

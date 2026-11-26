@@ -49,6 +49,7 @@ import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supp
 import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
 import { contentInjections, contentSelector } from "./lp-content.ts";
 import { joinTicketsAttributes } from "../src/lib/join-tickets.ts";
+import { insightsApiBase, insightsTag } from "./insights.ts";
 import type { LpContentSectionId } from "../../../packages/types/src/lp.ts";
 
 interface Fetcher {
@@ -63,6 +64,10 @@ interface Env {
   TICKETS_DEMO?: string;
   /** LP管理のミニプレビュー連動で許可する追加の親オリジン（カンマ区切り・https のみ）。 */
   PREVIEW_PARENT_ORIGINS?: string;
+  /** アクセス解析ビーコンの送り先（Dub api-gateway）。未設定 = 本番の gateway（デモでは差し込まない）。 */
+  DUB_API_BASE?: string;
+  /** "off" でアクセス解析スクリプトを差し込まない。 */
+  LP_INSIGHTS?: string;
 }
 interface RewriterElement {
   append(content: string, opts: { html: boolean }): void;
@@ -199,6 +204,13 @@ function proposalsInternal(env: Env): ((path: string, init: RequestInit) => Prom
   return internalFetch(env.LP_FLAG, "lp-analytics", env.TICKETS_DEMO === "1");
 }
 
+/** Worker が描いたページ（チケット・登壇者募集・スポンサー募集）にもアクセス解析を足す。プレビュー表示には足さない。 */
+function withInsights(res: Response, apiBase: string | null): Response {
+  if (!apiBase || res.status !== 200 || !(res.headers.get("content-type") ?? "").includes("text/html")) return res;
+  const tag = insightsTag(apiBase);
+  return new HTMLRewriter().on("body", { element: (el) => el.append(tag, { html: true }) }).transform(res);
+}
+
 async function notFound(env: Env, origin: string, version: string, req: Request): Promise<Response> {
   let res = await env.ASSETS.fetch(new Request(`${origin}/versions/${version}/404.html`, { headers: req.headers }));
   const loc = res.headers.get("location");
@@ -232,13 +244,15 @@ export default {
     // 下書きの公開設定プレビュー（?config=draft）。この閲覧者にだけ効く。
     const cfgDraft = draftPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
     const cfgCookie = draftCookie(url);
+    // LP管理のプレビュー（?tickets= / ?proposals= / ?config=draft / テスト購入）は数えない。
+    const insights = mode || spMode || cfgDraft || tkToken ? null : insightsApiBase(env);
     if (proposalsPath) {
       const handled = await handleProposals(req, {
         demo: env.TICKETS_DEMO === "1",
         getConfig: getProposals,
         internal: proposalsInternal(env),
       });
-      if (handled) return handled;
+      if (handled) return withInsights(handled, insights);
     }
     // スポンサー募集（/sponsors の資料請求）。公開中だけ応答し、それ以外は通常の 404。
     const sponsorsPath = isSponsorsPath(url.pathname);
@@ -248,7 +262,7 @@ export default {
         getConfig: () => sponsorConfig(env),
         internal: proposalsInternal(env),
       });
-      if (handled) return handled;
+      if (handled) return withInsights(handled, insights);
     }
     if (ticketsPath) {
       const handled = await handleTickets(req, {
@@ -261,7 +275,7 @@ export default {
         previewToken: tkToken,
       });
       if (handled) {
-        if (!tkTokenCookie) return handled;
+        if (!tkTokenCookie) return withInsights(handled, insights);
         const h = new Headers(handled.headers);
         h.append("set-cookie", tkTokenCookie);
         return new Response(handled.body, { status: handled.status, statusText: handled.statusText, headers: h });
@@ -327,7 +341,10 @@ export default {
     const bridge = shouldInjectBridge({ page, siteConfig, previewing: r.preview || !!mode || !!spMode || cfgDraft })
       ? bridgeScript(parseExtraOrigins(env.PREVIEW_PARENT_ORIGINS))
       : "";
+    // アクセス解析（公開表示の 200 ページだけ。版のプレビュー・LP管理のプレビューには足さない）。
+    const tracking = page && !r.preview && insights ? insightsTag(insights) : "";
     const inject =
+      tracking +
       bridge +
       (r.preview ? previewBanner(r.version, published) : "") +
       previewBar(previewing, hidden) +

@@ -22,6 +22,7 @@ import { publicOnboardingHandler } from "./handlers/public-onboarding";
 import { publicHrInterviewFormGetHandler, createPublicHrInterviewFormSubmitHandler } from "./handlers/public-hr-interview-form";
 import { publicHrInterviewBookingHandler } from "./handlers/public-hr-interview-booking";
 import { publicLpVisitHandler } from "./handlers/public-lp-visit";
+import { publicLpEventsHandler } from "./handlers/public-lp-events";
 import { publicResendWebhookHandler } from "./handlers/public-resend-webhook";
 import { selfPasswordHandler, adminSetPasswordHandler, adminViewPasswordHandler } from "./handlers/passwords";
 import { adminSendAccountMailHandler } from "./handlers/account-mail";
@@ -117,6 +118,8 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   app.post(`${API_PREFIX}/public/hr-interview-booking/book`, publicHrInterviewBookingHandler("book"));
   // Public LP pageview beacon (sendBeacon from the conference LP) → lp-analytics internal route.
   app.post(`${API_PREFIX}/public/lp-visits`, publicLpVisitHandler);
+  // Public LP アクセス解析ビーコン（ページを離れる時に 1 回）→ lp-analytics の日次集計。
+  app.post(`${API_PREFIX}/public/lp-events`, publicLpEventsHandler);
   // Resend delivery-event webhook (Svix-signed) → mail-gateway internal route, raw bytes.
   app.post(`${API_PREFIX}/public/webhooks/resend`, publicResendWebhookHandler);
 

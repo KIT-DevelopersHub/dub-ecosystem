@@ -1,0 +1,13 @@
+/* ログ管理「詳しい分析」(LpInsightsCard)。棒・KPI などは lp.module.css を共用し、ここは配置だけ。 */
+.grid {
+  display: grid;
+  /* 狭い幅では 1 列に落ちる（メディアクエリ不要）。 */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--dub-space-8) var(--dub-space-6);
+}
+
+.path {
+  font-family: var(--dub-font-family-mono, ui-monospace, monospace);
+  font-size: var(--dub-font-size-sm);
+  overflow-wrap: anywhere;
+}

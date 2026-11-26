@@ -3,7 +3,7 @@
 // that file and the demo transport answer exactly these, so keep them in lockstep.
 import type { MiddlewareHandler, Context } from "hono";
 import type { PermissionGranter } from "@dub/policy-gate";
-import type { common, identity, lp } from "@dub/types";
+import type { common, identity, lp, lpInsights } from "@dub/types";
 import type { SiteTrafficSource } from "./site-traffic";
 
 export type LpDevice = "mobile" | "desktop" | "bot" | "unknown";
@@ -269,6 +269,13 @@ export interface LpRepo extends LpProposalRepo, LpSiteConfigRepo {
   getPublish(site: string): Promise<PublishRow | null>;
   /** Upsert the live version for a site. */
   setPublish(site: string, versionId: string, updatedBy: string, updatedAt: string): Promise<void>;
+  // ---- アクセス解析（lp_metrics_daily・日次集計）----
+  /** その日に受け付けたビーコン数（dim='total' の n）。日次上限の判定用。 */
+  metricsCountOn(orgId: string, dayJst: string): Promise<number>;
+  /** 集計行を足し込む（同じ (dim, key) は呼び出し側でまとめておく）。 */
+  addMetrics(orgId: string, dayJst: string, rows: readonly lpInsights.LpMetricRow[]): Promise<void>;
+  /** 期間の集計行（日ごと）。 */
+  listMetrics(orgId: string, from: string, to: string): Promise<lpInsights.LpMetricDayRow[]>;
 }
 
 import type { SponsorDeps } from "./sponsor-inquiries";
@@ -302,6 +309,8 @@ export interface AppDeps {
   newVisitId: () => string;
   /** 1 日に記録する訪問の上限。匿名ビーコンが共有 D1 の書き込み枠を食い潰さないための天井。 */
   dailyVisitCap: number;
+  /** 1 日に受け付けるアクセス解析ビーコンの上限（既定 3000）。1 件 ≒ 10〜20 行の UPSERT。 */
+  dailyInsightCap?: number;
   /** Cloudflare Web Analytics reader. null when not configured in this environment. */
   siteTraffic: SiteTrafficSource | null;
   ticketRelease: TicketReleaseClient;
