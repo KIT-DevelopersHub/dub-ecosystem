@@ -109,6 +109,8 @@ export interface ApplyConfig {
   heading: string;
   participant: ApplySide;
   speaker: ApplySide;
+  /** 未設定の旧スナップショットでは表示しない。 */
+  sponsor?: ApplySide;
 }
 
 export interface ContactConfig {
