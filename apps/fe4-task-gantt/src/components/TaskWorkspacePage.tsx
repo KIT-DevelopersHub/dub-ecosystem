@@ -1319,6 +1319,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
           onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
+          openStateKey={eventId}
         />
       )}
 

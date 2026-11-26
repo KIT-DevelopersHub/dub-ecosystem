@@ -40,6 +40,7 @@ import {
 } from "../domain/timeline-axis";
 import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import { visibleTreeRows } from "../domain/gantt-layout";
+import { allExpanded, collapseAll, expandAll, loadOpenParents, saveOpenParents } from "../domain/gantt-expand";
 import { clampBulkResizeDelta } from "../domain/bulk-resize";
 import styles from "../styles/app.module.css";
 
@@ -134,6 +135,8 @@ export interface GanttViewProps {
    *  手動 mode only. Absent ⇒ a group drag falls back to a single-row `onReorder`. */
   onBulkReorderTo?: (ids: readonly common.TaskId[], draggedId: common.TaskId, overId: common.TaskId) => void;
   canWrite?: boolean;
+  /** 指定時は親タスクの開閉状態をこのイベントの表示設定として保存・復元する。 */
+  openStateKey?: common.EventId;
 }
 
 // Granularity chips (month/week/day), built on the shared @dub/ui SegmentedControl
@@ -316,6 +319,7 @@ export function GanttView({
   onBulkMoveVertical,
   onBulkReorderTo,
   canWrite = true,
+  openStateKey,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
   const [win, setWin] = useState<AxisWindow>(() => initialWindow(dto.rows, zoomProp));
@@ -352,7 +356,21 @@ export function GanttView({
   const marqueeConsumedClickRef = useRef(false);
   // WBS drill-down: set of expanded work-package ids. Empty = all collapsed, so the
   // view opens on the 41 work-packages and each toggle reveals its leaf children.
-  const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() => new Set());
+  // openStateKey があれば保存済みの開閉状態から始める（#872）。
+  const [openParents, setOpenParents] = useState<ReadonlySet<common.TaskId>>(() =>
+    openStateKey ? loadOpenParents(openStateKey) : new Set(),
+  );
+  const loadedKeyRef = useRef(openStateKey);
+  useEffect(() => {
+    if (!openStateKey) return;
+    if (loadedKeyRef.current !== openStateKey) {
+      // イベントが切り替わった: そのイベントの保存値を読み直す（この回は保存しない）。
+      loadedKeyRef.current = openStateKey;
+      setOpenParents(loadOpenParents(openStateKey));
+      return;
+    }
+    saveOpenParents(openStateKey, openParents);
+  }, [openStateKey, openParents]);
 
   const toggleParent = useCallback((id: common.TaskId) => {
     setOpenParents((prev) => {
@@ -504,6 +522,14 @@ export function GanttView({
       return next;
     });
   }, [parentIds]);
+
+  const parentIdList = useMemo(() => [...parentIds], [parentIds]);
+  const everyOpen = allExpanded(parentIdList, openParents);
+  const toggleAll = useCallback(() => {
+    setOpenParents((cur) =>
+      allExpanded(parentIdList, cur) ? collapseAll(parentIdList, cur) : expandAll(parentIdList, cur),
+    );
+  }, [parentIdList]);
 
   // taskId -> the ROLLED row (parent dates are the union of their children). Drag
   // start/end must read these displayed dates, not the parent's pre-rollup seed.
@@ -1131,6 +1157,17 @@ export function GanttView({
             <div className={styles.tlSort}>
               <GanttSortControl state={sortState} actions={sortActions} />
             </div>
+          )}
+          {parentIdList.length > 0 && (
+            <button
+              type="button"
+              className={styles.tlTodayBtn}
+              onClick={toggleAll}
+              title={everyOpen ? "親タスクをすべて折りたたむ" : "親タスクをすべて展開"}
+              data-testid="fe4-gantt-toggle-all"
+            >
+              {everyOpen ? "すべて折りたたむ" : "すべて展開"}
+            </button>
           )}
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
             今日
