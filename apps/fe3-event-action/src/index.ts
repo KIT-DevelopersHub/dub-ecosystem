@@ -90,3 +90,7 @@ export { EventListPage } from "./pages/EventListPage";
 export { EventDetailPage } from "./pages/EventDetailPage";
 export { ActionDetailPage } from "./pages/ActionDetailPage";
 export { EventSettingsPage } from "./pages/EventSettingsPage";
+
+// AI side panel (FE2 shell): the read-only 「AI のまとめ」 + the event lookup for its 文脈 line.
+export { EventAiDigestSummary } from "./components/EventAiDigestPanel";
+export { useEventDetailQuery } from "./hooks/useEventQueries";
