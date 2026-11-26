@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "org-chart-nested",
+  "worker": "dub-demo-org-chart-nested",
+  "url": "https://dub-demo-org-chart-nested.developershub-site.workers.dev",
+  "deployedSha": "da45bac2",
+  "branch": "fix/org-chart-nested-horizontal",
+  "actor": "ko-tarou",
+  "markers": ["members-orgunits-","members-orggroup"],
+  "live": true,
+  "verifiedAt": "2026-11-26T14:31:13Z",
+  "updatedAt": "2026-11-26T14:31:13Z",
+  "note": "org chart: recursive horizontal units (fix/org-chart-nested-horizontal)"
+}
