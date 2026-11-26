@@ -4343,6 +4343,7 @@ function createMembersStore() {
     { id: "team_pr", key: "pr", name: "集客広報チーム", color: "#db2777", description: "LP・SNS・デザイン・広報／集客" },
     { id: "team_corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: "法人設立・契約・会計／規程" },
     { id: "team_network", key: "network", name: "ネットワークチーム", color: "#0891b2", description: "会場ネットワーク・Wi-Fi・配信回線" },
+    { id: "team_legal", key: "legal", name: "法務会計チーム", color: "#475569", description: "規約・契約書の確認・会計" },
   ];
   // デモ用の役職 (実サーバは role_title から推測しない。ここは見本データを埋めるだけ)。
   const demoPosition = (roleTitle: string | null): memberValues.MemberPosition =>
@@ -4370,77 +4371,78 @@ function createMembersStore() {
   // ステータス表示は added＝通常(バッジなし)、invited/considering＝「打診中」、on_leave＝
   // 「休み中」、declined＝「辞退」(名簿一覧では既定非表示・辞退者フィルタで参照)。
   const members: DemoMember[] = [
-    // 統括 — 高岡 is already linked to the admin login account (demonstrates #1/#2).
-    mk("member_1", "高岡 己太朗", "副代表", "added", ["team_hq"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
-    mk("member_h2", "黒川 誠", "統括リーダー", "added", ["team_hq"], 1, null, "情報工学科", "3年", null, "member_1"),
-    mk("member_h3", "金井 友楽", "代表", "added", ["team_hq"], 2, null, "電気電子工学科", "2年", null),
-    // 開発 — リーダー2人、各リーダーに配下2人。
-    mk("member_d1", "荒木 大地", "オーガナイザー", "added", ["team_dev"], 3, null, "情報工学科", "M1"),
-    mk("member_d2", "阿閉 健", "開発リーダー", "added", ["team_dev"], 4, null, "情報工学科", "3年", null, "member_d1"),
-    mk("member_d3", "池田 学", "メンバー", "added", ["team_dev"], 5, null, "情報工学科", "1年", null, "member_d2"),
-    mk("member_d4", "上田 拓真", "メンバー", "added", ["team_dev"], 6, null, "情報工学科", "2年", null, "member_d2"),
-    mk("member_d5", "遠藤 涼子", "開発リーダー", "added", ["team_dev"], 7, null, "情報工学科", "M1", null, "member_d1"),
-    mk("member_d6", "岡本 亮", "メンバー", "added", ["team_dev"], 8, null, "情報工学科", "2年", null, "member_d5"),
-    mk("member_d7", "加藤 千夏", "メンバー", "invited", ["team_dev"], 9, null, "情報工学科", "1年", null, "member_d5"),
-    // 当日進行 — リーダー2人。大野 は「休み中」(一時離脱) の確認用。
-    mk("member_o1", "久米 宏", "オーガナイザー", "added", ["team_ops"], 10, null, "機械工学科", "3年"),
-    mk("member_o2", "中村 蓮", "進行リーダー", "added", ["team_ops"], 11, null, "経営情報学科", "2年", null, "member_o1"),
-    mk("member_o3", "大野 翼", "メンバー", "on_leave", ["team_ops"], 12, null, "機械工学科", "2年", null, "member_o2"),
-    mk("member_o4", "木下 悠", "メンバー", "added", ["team_ops"], 13, null, "機械工学科", "1年", null, "member_o2"),
-    mk("member_o5", "佐々木 誠", "進行リーダー", "added", ["team_ops"], 14, null, "経営情報学科", "3年", null, "member_o1"),
-    mk("member_o6", "島田 拓", "メンバー", "added", ["team_ops"], 15, null, "機械工学科", "2年", null, "member_o5"),
-    // スポンサー — リーダー配下2人。
-    mk("member_s1", "吉岡 誠一", "オーガナイザー", "added", ["team_sponsor"], 16, null, "経営情報学科", "3年"),
-    mk("member_s2", "前田 直樹", "渉外リーダー", "added", ["team_sponsor"], 17, null, "情報工学科", "2年", null, "member_s1"),
-    mk("member_s3", "松島 花", "メンバー", "invited", ["team_sponsor"], 18, null, "電気電子工学科", "1年", null, "member_s2"),
-    mk("member_s4", "森 健太", "メンバー", "added", ["team_sponsor"], 19, null, "経営情報学科", "2年", null, "member_s2"),
-    // 会場 — リーダー配下2人。
-    mk("member_v1", "清水 洋介", "オーガナイザー", "added", ["team_venue"], 20, null, "建築学科", "3年"),
-    mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 21, null, "建築学科", "2年", null, "member_v1"),
-    mk("member_v3", "田口 涼太", "メンバー", "added", ["team_venue"], 22, null, "建築学科", "1年", null, "member_2"),
-    mk("member_v4", "谷 真央", "メンバー", "added", ["team_venue"], 23, null, "建築学科", "2年", null, "member_2"),
-    // 集客広報 — 班が3つ(広報班はリーダー2人)。各リーダーに配下。
-    mk("member_e1", "白木 彩", "オーガナイザー", "added", ["team_pr"], 24, null, "メディア情報学科", "3年"),
-    mk("member_e2", "石井 里奈", "広報リーダー", "added", ["team_pr"], 25, null, "メディア情報学科", "2年", null, "member_e1"),
-    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 26, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
-    mk("member_e4", "藤田 直人", "メンバー", "added", ["team_pr"], 27, null, "メディア情報学科", "1年", null, "member_e2"),
-    mk("member_e5", "中田 桜", "デザインリーダー", "added", ["team_pr"], 28, null, "メディア情報学科", "3年", null, "member_e1"),
-    mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 29, null, "メディア情報学科", "2年", null, "member_e5"),
-    // 組織図の「班」確認用: 広報班の共同リーダー(leaderId が同じチームのリーダー)と、3つ目の SNS 班。
-    mk("member_e7", "村上 千尋", "広報リーダー", "added", ["team_pr"], 30, null, "メディア情報学科", "2年", null, "member_e2"),
-    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 31, null, "メディア情報学科", "2年", null, "member_e10"),
-    mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 32, null, "メディア情報学科", "1年", null, "member_e8"),
-    // オーガナイザー 2 人目: 組織図でチームの中が 2 グループに横に分かれ、各グループの下に自分の班が並ぶ確認用。
-    // 白木 → 広報班・デザイン班 / 岡田 → SNS班・LP班。
-    mk("member_e10", "岡田 真琴", "オーガナイザー", "added", ["team_pr"], 49, null, "メディア情報学科", "3年"),
-    mk("member_e11", "小野 葵", "LPリーダー", "added", ["team_pr"], 50, null, "メディア情報学科", "2年", null, "member_e10"),
-    mk("member_e12", "松井 陽", "メンバー", "added", ["team_pr"], 51, null, "メディア情報学科", "1年", null, "member_e11"),
-    // ネットワーク — 本番の集客広報と同じ形(position 未設定・役割は roleTitle だけ)の確認用。
-    // リーダー4人に配下は居ない / メンバー3人はオーガナイザーを leaderId に持つ / 役割も役職も無い人。
-    mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 33, null, "情報工学科", "3年"),
-    mk("member_n2", "片山 美咲", "オーガナイザー", "added", ["team_network"], 34, null, "情報工学科", "3年"),
-    mk("member_n3", "川口 隼", "リーダー", "added", ["team_network"], 35, null, "情報工学科", "2年"),
-    mk("member_n4", "北村 楓", "リーダー", "added", ["team_network"], 36, null, "電気電子工学科", "2年"),
-    mk("member_n5", "久保 蒼", "リーダー", "added", ["team_network"], 37, null, "情報工学科", "2年"),
-    mk("member_n6", "小松 遥", "リーダー", "added", ["team_network"], 38, null, "電気電子工学科", "2年"),
-    mk("member_n7", "斉藤 湊", "メンバー", "added", ["team_network"], 39, null, "情報工学科", "1年", null, "member_n1"),
-    mk("member_n8", "坂本 杏", "メンバー", "added", ["team_network"], 40, null, "情報工学科", "1年", null, "member_n1"),
-    mk("member_n9", "杉山 翔", "メンバー", "invited", ["team_network"], 41, null, "情報工学科", "1年", null, "member_n1"),
-    mk("member_n10", "関 美月", "メンバー", "added", ["team_network"], 42, null, "電気電子工学科", "1年"),
-    mk("member_n11", "高木 陸斗", null, "added", ["team_network"], 43, null, "情報工学科", "1年"),
-    mk("member_n12", "竹内 心", null, "added", ["team_network"], 44, null, "情報工学科", "1年"),
-    mk("member_n13", "千葉 悠真", null, "added", ["team_network"], 45, null, "電気電子工学科", "1年"),
-    mk("member_n14", "土屋 七海", null, "added", ["team_network"], 46, null, "電気電子工学科", "1年"),
+    // 本番の運営名簿と同じくらいの量・形(架空の名前): 9 チーム(法人は組織図に出さない)・56 名(採用済み 4 名を含む)・
+    // オーガナイザー 14 / リーダー 14(=班 14)・打診中 5 / 休み中 1 / 未所属 1 / 辞退 1。
+    // 本番はリーダー(上長)がほぼ未設定なので、多くのリーダーは leaderId を持たない。
+    // 統括 7 — オーガナイザー 5(代表・副代表を含む) + メンバー 2。うち 4 人は法人チームも兼任。
+    mk("member_1", "高岡 己太朗", "副代表", "added", ["team_hq", "team_corp"], 0, "kota@developershub.jp", "情報工学科", "3年", ME_ID),
+    mk("member_h2", "黒川 誠", "オーガナイザー", "added", ["team_hq"], 1, null, "情報工学科", "3年", null),
+    mk("member_h3", "金井 友楽", "代表", "added", ["team_hq", "team_corp"], 2, null, "電気電子工学科", "2年", null),
+    mk("member_h4", "三浦 隆", "オーガナイザー", "added", ["team_hq", "team_corp"], 3, null, "経営情報学科", "3年"),
+    mk("member_h5", "原田 綾", "オーガナイザー", "added", ["team_hq", "team_corp"], 4, null, "情報工学科", "M1"),
+    mk("member_h6", "平野 智", "メンバー", "added", ["team_hq"], 5, null, "情報工学科", "2年"),
+    mk("member_h7", "福田 晴", "メンバー", "added", ["team_hq"], 6, null, "経営情報学科", "2年"),
+    // 法人 5 — オーガナイザー 4(統括と兼任) + 法人だけのメンバー 1(組織図には出ない)。
+    mk("member_c1", "星野 正樹", "メンバー", "added", ["team_corp"], 7, null, "経営情報学科", "M2"),
+    // 開発 7 — オーガナイザー 1 / リーダー 2 / メンバー 4(採用済みの 2 人を含む)。
+    mk("member_d1", "荒木 大地", "オーガナイザー", "added", ["team_dev"], 8, null, "情報工学科", "M1"),
+    mk("member_d2", "阿閉 健", "開発リーダー", "added", ["team_dev"], 9, null, "情報工学科", "3年"),
+    mk("member_d3", "池田 学", "メンバー", "added", ["team_dev"], 10, null, "情報工学科", "1年", null, "member_d2"),
+    mk("member_d4", "上田 拓真", "メンバー", "added", ["team_dev"], 11, null, "情報工学科", "2年", null, "member_d2"),
+    mk("member_d5", "遠藤 涼子", "インフラリーダー", "added", ["team_dev"], 12, null, "情報工学科", "M1"),
+    // 当日進行 6 — オーガナイザー 1 / リーダー 4 / メンバー 1(休み中)。
+    mk("member_o1", "久米 宏", "オーガナイザー", "added", ["team_ops"], 13, null, "機械工学科", "3年"),
+    mk("member_o2", "中村 蓮", "進行リーダー", "added", ["team_ops"], 14, null, "経営情報学科", "2年"),
+    mk("member_o3", "大野 翼", "メンバー", "on_leave", ["team_ops"], 15, null, "機械工学科", "2年", null, "member_o2"),
+    mk("member_o5", "佐々木 誠", "受付リーダー", "added", ["team_ops"], 16, null, "経営情報学科", "3年"),
+    mk("member_o7", "安田 光", "誘導リーダー", "added", ["team_ops"], 17, null, "機械工学科", "2年"),
+    mk("member_o8", "山口 千里", "配信リーダー", "added", ["team_ops"], 18, null, "電気電子工学科", "2年"),
+    // スポンサー 10 — オーガナイザー 1 / リーダー 2 / メンバー 7。
+    mk("member_s1", "吉岡 誠一", "オーガナイザー", "added", ["team_sponsor"], 19, null, "経営情報学科", "3年"),
+    mk("member_s2", "前田 直樹", "渉外リーダー", "added", ["team_sponsor"], 20, null, "情報工学科", "2年"),
+    mk("member_s3", "松島 花", "メンバー", "invited", ["team_sponsor"], 21, null, "電気電子工学科", "1年", null, "member_s2"),
+    mk("member_s4", "森 健太", "メンバー", "added", ["team_sponsor"], 22, null, "経営情報学科", "2年", null, "member_s2"),
+    mk("member_s5", "今井 美穂", "企画リーダー", "added", ["team_sponsor"], 23, null, "経営情報学科", "2年"),
+    mk("member_s6", "内田 康平", "メンバー", "added", ["team_sponsor"], 24, null, "経営情報学科", "1年", null, "member_s5"),
+    mk("member_s7", "太田 早紀", "メンバー", "added", ["team_sponsor"], 25, null, "情報工学科", "1年", null, "member_s5"),
+    mk("member_s8", "菊地 隼人", "メンバー", "added", ["team_sponsor"], 26, null, "電気電子工学科", "2年"),
+    mk("member_s9", "工藤 茜", "メンバー", "added", ["team_sponsor"], 27, null, "経営情報学科", "1年"),
+    mk("member_s10", "近藤 勇気", "メンバー", "added", ["team_sponsor"], 28, null, "機械工学科", "2年"),
+    // 会場 4 — オーガナイザー 1 + メンバー 3(採用済みの 1 人を含む)。リーダー無し。
+    mk("member_v1", "清水 洋介", "オーガナイザー", "added", ["team_venue"], 29, null, "建築学科", "3年"),
+    mk("member_2", "佐藤 花子", "会場担当", "added", ["team_venue"], 30, null, "建築学科", "2年", null, "member_v1"),
+    mk("member_v3", "田口 涼太", "メンバー", "added", ["team_venue"], 31, null, "建築学科", "1年", null, "member_v1"),
+    // ネットワーク 3 — オーガナイザー 1 / リーダー 2(上長が設定済みは 1 人だけ)。
+    mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 32, null, "情報工学科", "3年"),
+    mk("member_n3", "川口 隼", "リーダー", "added", ["team_network"], 33, null, "情報工学科", "2年", null, "member_n1"),
+    mk("member_n4", "北村 楓", "リーダー", "added", ["team_network"], 34, null, "電気電子工学科", "2年"),
+    // 法務会計 2 — オーガナイザー 2 だけ。
+    mk("member_l1", "酒井 理恵", "オーガナイザー", "added", ["team_legal"], 35, null, "経営情報学科", "3年"),
+    mk("member_l2", "柴田 悟", "オーガナイザー", "invited", ["team_legal"], 36, null, "経営情報学科", "M1"),
+    // 集客広報 14 — オーガナイザー 2 人: 組織図でチームの中が 2 グループに横に分かれ、
+    // 各グループの下に自分の班が横に並ぶ(白木 → 広報班・デザイン班 / 岡田 → SNS班・LP班)。
+    mk("member_e1", "白木 彩", "オーガナイザー", "added", ["team_pr"], 37, null, "メディア情報学科", "3年"),
+    mk("member_e10", "岡田 真琴", "オーガナイザー", "added", ["team_pr"], 38, null, "メディア情報学科", "3年"),
+    mk("member_e2", "石井 里奈", "広報リーダー", "added", ["team_pr"], 39, null, "メディア情報学科", "2年", null, "member_e1"),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 40, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
+    mk("member_e4", "藤田 直人", "メンバー", "added", ["team_pr"], 41, null, "メディア情報学科", "1年", null, "member_e2"),
+    mk("member_e7", "村上 千尋", "メンバー", "added", ["team_pr"], 42, null, "メディア情報学科", "2年", null, "member_e2"),
+    mk("member_e5", "中田 桜", "デザインリーダー", "added", ["team_pr"], 43, null, "メディア情報学科", "3年", null, "member_e1"),
+    mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 44, null, "メディア情報学科", "2年", null, "member_e5"),
+    mk("member_e13", "宮本 楓", "メンバー", "added", ["team_pr"], 45, null, "メディア情報学科", "1年", null, "member_e5"),
+    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 46, null, "メディア情報学科", "2年", null, "member_e10"),
+    mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 47, null, "メディア情報学科", "1年", null, "member_e8"),
+    mk("member_e11", "小野 葵", "LPリーダー", "added", ["team_pr"], 48, null, "メディア情報学科", "2年", null, "member_e10"),
+    mk("member_e12", "松井 陽", "メンバー", "added", ["team_pr"], 49, null, "メディア情報学科", "1年", null, "member_e11"),
     // 辞退 — 名簿一覧では既定で隠れ、辞退者フィルタでのみ表示される確認用。
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 47),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 50),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 48, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 51, null, "情報工学科", "1年"),
   ];
 
-  // ネットワークは本番と同じく役職(position)未設定。最後の2人だけ position=member。
+  // 本番と同じく、役職(position)を明示していない人が多い(役割の文言から推定される)。
   for (const mem of members) {
-    if (!mem.id.startsWith("member_n")) continue;
-    mem.position = mem.id === "member_n13" || mem.id === "member_n14" ? "member" : null;
+    if (/^member_(n|l|s[5-9]|s10|o[78]|h[4-7]|c)/.test(mem.id)) mem.position = null;
   }
 
   // フリガナ(読み仮名)の seed。参加届からの流入を模して 姓/名 の分割カナを各メンバーへ付与し、
@@ -4449,27 +4451,40 @@ function createMembersStore() {
     member_1: ["たかおか", "こたろう"],
     member_h2: ["くろかわ", "まこと"],
     member_h3: ["かない", "りょう"],
+    member_h4: ["みうら", "たかし"],
+    member_h5: ["はらだ", "あや"],
+    member_h6: ["ひらの", "さとし"],
+    member_h7: ["ふくだ", "はる"],
+    member_c1: ["ほしの", "まさき"],
     member_d1: ["あらき", "だいち"],
     member_d2: ["あとじ", "けん"],
     member_d3: ["いけだ", "まなぶ"],
     member_d4: ["うえだ", "たくま"],
     member_d5: ["えんどう", "りょうこ"],
-    member_d6: ["おかもと", "りょう"],
-    member_d7: ["かとう", "ちなつ"],
     member_o1: ["くめ", "ひろし"],
     member_o2: ["なかむら", "れん"],
     member_o3: ["おおの", "つばさ"],
-    member_o4: ["きのした", "ゆう"],
     member_o5: ["ささき", "まこと"],
-    member_o6: ["しまだ", "たく"],
+    member_o7: ["やすだ", "ひかる"],
+    member_o8: ["やまぐち", "ちさと"],
     member_s1: ["よしおか", "せいいち"],
     member_s2: ["まえだ", "なおき"],
     member_s3: ["まつしま", "はな"],
     member_s4: ["もり", "けんた"],
+    member_s5: ["いまい", "みほ"],
+    member_s6: ["うちだ", "こうへい"],
+    member_s7: ["おおた", "さき"],
+    member_s8: ["きくち", "はやと"],
+    member_s9: ["くどう", "あかね"],
+    member_s10: ["こんどう", "ゆうき"],
     member_v1: ["しみず", "ようすけ"],
     member_2: ["さとう", "はなこ"],
     member_v3: ["たぐち", "りょうた"],
-    member_v4: ["たに", "まお"],
+    member_n1: ["おおにし", "おさむ"],
+    member_n3: ["かわぐち", "しゅん"],
+    member_n4: ["きたむら", "かえで"],
+    member_l1: ["さかい", "りえ"],
+    member_l2: ["しばた", "さとる"],
     member_e1: ["しらき", "あや"],
     member_e2: ["いしい", "りな"],
     member_3: ["すずき", "いちろう"],
@@ -4482,6 +4497,7 @@ function createMembersStore() {
     member_e10: ["おかだ", "まこと"],
     member_e11: ["おの", "あおい"],
     member_e12: ["まつい", "よう"],
+    member_e13: ["みやもと", "かえで"],
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };
