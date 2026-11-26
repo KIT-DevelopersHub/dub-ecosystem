@@ -1,5 +1,5 @@
-/* これまでの組織図(#890 時点・本番と同じ見た目)。新しい表示(OrgChartView)と切り替えて使う。
-   origin/main の members.module.css から組織図の部分だけを写したもの。 */
+/* これまでの組織図(#890 より前 = 889f34d4 時点)。新しい表示(OrgChartView)と切り替えて使う。
+   #890 直前の members.module.css から組織図の部分だけを写したもの(チーム内は縦に積む)。 */
 
 /* ══ 組織図ビュー — PDF「全体組織体制図」の構図を再現 ══════════════════════
    統括の横長ダークネイビー箱 → コネクタ線 → チーム色の縦カラム
@@ -73,7 +73,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 0;
+  min-width: max-content;
   padding-top: var(--dub-space-2);
 }
 
@@ -84,8 +84,7 @@
   border-radius: 12px;
   padding: 10px 26px 12px;
   text-align: center;
-  min-width: min(620px, 100%);
-  box-sizing: border-box;
+  min-width: 620px;
   box-shadow: 0 3px 8px rgba(30, 58, 95, 0.22);
 }
 .topTitle {
@@ -137,8 +136,7 @@
 /* コネクタ */
 .connector {
   position: relative;
-  width: 100%;
-  height: 22px;
+  height: 30px;
 }
 .connector .vtop {
   position: absolute;
@@ -165,19 +163,16 @@
 }
 
 /* チームカラム */
-/* チームは画面幅で折り返す。班を持つチームは中身の幅まで広がる。 */
 .teamsRow {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--dub-space-4);
+  gap: 13px;
   justify-content: center;
-  align-items: flex-start;
-  width: 100%;
+  align-items: stretch;
 }
 .orgCol {
-  flex: 0 1 200px;
-  min-width: 170px;
-  max-width: 240px;
+  flex: 1 1 0;
+  min-width: 150px;
+  max-width: 220px;
   border-radius: 10px;
   overflow: hidden;
   border: 1.6px solid color-mix(in srgb, var(--team, #64748b) 45%, #fff);
@@ -204,67 +199,10 @@
 }
 .colBody {
   flex: 1;
-  padding: var(--dub-space-3);
+  padding: 8px 8px 8px;
   display: flex;
   flex-direction: column;
-  gap: var(--dub-space-2);
-}
-
-/* 班が 2 つ以上のチーム: 班の数ぶんの幅をカードに取り、班を横 1 列に並べる。
-   中身の幅(max-content)任せにすると、配下の居ない班は細く見積もられて縦に積まれる。
-   画面より広い時だけ 100% に収め、班は折り返す。 */
-.orgCol.orgColWide {
-  --squad-w: 190px;
-  flex: 0 0 auto;
-  width: min(
-    100%,
-    calc(var(--squads) * var(--squad-w) + (var(--squads) - 1) * var(--dub-space-3) + 2 * var(--dub-space-3) + 4px)
-  );
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-/* ── 班 ─────────────────────────────────────────────────────────────
-   チームカードの中に横並び(狭い画面では折り返し)。班名 → リーダー(横並び) → 配下。 */
-.squadRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--dub-space-3);
-  margin-top: var(--dub-space-2);
-}
-.squad {
-  flex: 1 1 170px;
-  min-width: 170px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-2);
-  padding: var(--dub-space-3);
-  border-radius: 8px;
-  border: 1.4px solid color-mix(in srgb, var(--team, #64748b) 32%, #fff);
-  background: color-mix(in srgb, var(--team, #64748b) 4%, #fff);
-}
-.squadName {
-  font-size: 12px;
-  font-weight: 800;
-  color: color-mix(in srgb, var(--team, #64748b) 85%, #000);
-  padding-bottom: var(--dub-space-1);
-  border-bottom: 1px solid color-mix(in srgb, var(--team, #64748b) 22%, #fff);
-}
-.squadLeaders {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--dub-space-2);
-}
-.squadLeaders > .nodeItem {
-  flex: 1 1 120px;
-}
-.squadMembers {
-  padding-left: var(--dub-space-2);
-  border-left: 2px solid color-mix(in srgb, var(--team, #64748b) 30%, #fff);
+  gap: 4px;
 }
 
 /* ── leaderId 親子ツリー ─────────────────────────────────────────────

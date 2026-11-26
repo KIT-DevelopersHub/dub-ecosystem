@@ -566,7 +566,7 @@ describe("MembersPage", () => {
   });
 });
 
-// 組織図タブの表示切り替え: 新しい表示(既定) / これまでの表示(#890 時点)。選択は localStorage に覚える。
+// 組織図タブの表示切り替え: 新しい表示(既定) / これまでの表示(#890 より前)。選択は localStorage に覚える。
 describe("MembersOrgChartPage — 表示の切り替え", () => {
   const base = { ...P0, orgId: "o", department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t", status: "added" as const, position: null, teamIds: ["pr"] };
   const overview: MembersOverview = {
@@ -593,17 +593,25 @@ describe("MembersOrgChartPage — 表示の切り替え", () => {
     expect(within(screen.getByTestId("members-orggroup-O1")).getByTestId("members-orgsquad-L1")).toBeInTheDocument();
   });
 
-  it("「これまでの表示」に切り替えると #890 時点の組織図になり、選択を覚える", async () => {
+  it("「これまでの表示」に切り替えると #890 より前の組織図(チーム内は縦に積む)になり、選択を覚える", async () => {
     render(wrap(<MembersOrgChartPage />, api()));
     await screen.findByTestId("members-orgchart");
     await userEvent.click(screen.getByTestId("members-orgchart-view-legacy"));
     const chart = screen.getByTestId("members-orgchart");
     expect(chart.getAttribute("data-view")).toBe("legacy");
-    // これまでの表示: オーガナイザーのグループは無く、班はチームのカードに横並び。
+    // これまでの表示: グループも班も無く、チームのカラムにオーガナイザー → 配下のリーダーを縦に積む。
     expect(screen.queryByTestId("members-orggroup-O1")).not.toBeInTheDocument();
-    const row = screen.getByTestId("members-orgsquads-pr");
-    expect([...row.children].map((e) => e.getAttribute("data-testid"))).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
-    expect(within(screen.getByTestId("members-orgcol-pr")).getByTestId("members-orgchip-O1")).toBeInTheDocument();
+    expect(screen.queryByTestId("members-orgsquads-pr")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("members-orgsquad-L1")).not.toBeInTheDocument();
+    const col = screen.getByTestId("members-orgcol-pr");
+    const order = within(col)
+      .getAllByTestId(/^members-orgchip-/)
+      .map((e) => e.getAttribute("data-testid"));
+    expect(order).toEqual(["members-orgchip-O1", "members-orgchip-L1", "members-orgchip-O2", "members-orgchip-L2"]);
+    // L1 は O1 の、L2 は O2 の配下としてぶら下がる(縦のツリー)。
+    const itemOf = (id: string): HTMLElement => screen.getByTestId(`members-orgchip-${id}`).closest("li") as HTMLElement;
+    expect(within(itemOf("O1")).getByTestId("members-orgchip-L1")).toBeInTheDocument();
+    expect(within(itemOf("O2")).getByTestId("members-orgchip-L2")).toBeInTheDocument();
     expect(globalThis.localStorage.getItem(ORG_CHART_VIEW_KEY)).toBe("legacy");
 
     await userEvent.click(screen.getByTestId("members-orgchart-view-new"));

@@ -1,15 +1,16 @@
-// これまでの組織図(#890 時点・本番と同じ見た目)。組織図タブの表示切り替えの「これまでの表示」。
-// origin/main の OrgChartView.tsx をそのまま写したもの(新しい表示は OrgChartView.tsx)。
-// 組織図ビュー — 代表(横長ダークネイビー箱) → チーム色のカード → カードの中に「班」を横並び。
-//   班 = チーム内のリーダー(position=leader、無ければ roleTitle から推定)と、leaderId を上へ
-//   たどってそのリーダーに行き着くメンバー。リーダーの leaderId が同じチームの別リーダーを指す
-//   場合は同じ班の共同リーダーとして並べる。班名は専用の項目が無いので、先頭リーダーの役割
-//   (「広報リーダー」→「広報班」)、取れない・重なる時は姓(「石井班」)から作る。
-//   班に入らない人(オーガナイザー・リーダー未設定)はカード上部に従来の親子ツリーで出す。
-//   リーダーが居ないチームは従来どおり leaderId の親子ツリーだけを描く。
+// これまでの組織図(#890 より前 = 889f34d4 時点)。組織図タブの表示切り替えの「これまでの表示」。
+// #890 直前の OrgChartView.tsx を写したもの。チームは縦カラム、カラム内はオーガナイザー・リーダー・
+// メンバーを leaderId の親子ツリーで縦に積む(新しい表示は OrgChartView.tsx)。
+// 組織図ビュー — 「誰がどのリーダーの配下か」が一目で分かる階層ツリー。
+//   代表(横長ダークネイビー箱) → コネクタ線 → チーム色の縦カラム(統括チームも1列として並ぶ)。
+//   各カラムの中は roleTitle の段ではなく leaderId の親子関係でネストして描く:
+//     オーガナイザー → その配下のリーダー → 各リーダーの配下メンバー、を接続線＋
+//     インデントでぶら下げる。これで「複数リーダーが居るチームでも、どのメンバーが
+//     どのリーダーの下に付くか」が構造として即座に読める（FBの主眼）。
+//   tier(役割段) は色の濃淡/枠の強さで補助表現し、上下関係そのものはネストで表す。
 import { useRef, type CSSProperties } from "react";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
-import { tierOf as roleTierOf, type Tier } from "./orgChartOrder.ts";
+import { tierOf, type Tier } from "./orgChartOrder.ts";
 import { activityRank, statusGroup, statusLabel } from "./memberStatus.ts";
 import { ORG_CHART_PAGE_CSS, useFitChartToPrintedPage } from "./orgChartPrint.ts";
 import styles from "./orgChartLegacy.module.css";
@@ -33,11 +34,6 @@ function isCorporateTeam(t: MemberTeam): boolean {
 function representativesOf(hqMembers: OrgMember[]): OrgMember[] {
   const rank = (m: OrgMember): number => (/副代表/.test(m.roleTitle ?? "") ? 1 : 0);
   return hqMembers.filter((m) => /代表/.test(m.roleTitle ?? "")).sort((a, b) => rank(a) - rank(b) || bySortOrder(a, b));
-}
-
-/** 役職は position(明示)を優先し、無ければ roleTitle から推定する。 */
-function tierOf(m: OrgMember): Tier {
-  return m.position ?? roleTierOf(m);
 }
 
 const TIER_RANK: Record<Tier, number> = { organizer: 0, leader: 1, member: 2 };
@@ -88,79 +84,6 @@ function buildTeamTree(members: OrgMember[]): TreeNode[] {
   return tree;
 }
 
-type Squad = { id: string; name: string; leaders: OrgMember[]; tree: TreeNode[] };
-
-/** 班名の候補: 「広報リーダー」→「広報班」。役割から取れなければ姓。 */
-function squadBaseName(head: OrgMember): string {
-  const base = (head.roleTitle ?? "").replace(/リーダー|leader/gi, "").trim();
-  return base ? `${base}班` : surnameSquadName(head);
-}
-function surnameSquadName(head: OrgMember): string {
-  return `${head.name.split(/[\s\u3000]+/)[0] || head.name}班`;
-}
-
-/**
- * 1チーム分を「班に入らない人」と「班」の並びに分ける。
- * - 班の先頭 = リーダーのうち、leaderId をたどって同じチームのリーダーに当たらない人。
- * - 共同リーダー = leaderId が同じチームのリーダーを指すリーダー(先頭の班に入る)。
- * - メンバー = leaderId を上へたどり、最初に当たったリーダーの班へ。当たらなければ班の外。
- * 循環は seen で打ち切る。リーダーが居なければ squads は空(従来の描画)。
- */
-function buildTeamSquads(members: OrgMember[]): { rest: TreeNode[]; squads: Squad[] } {
-  const byId = new Map(members.map((m) => [m.id, m]));
-  const isLeader = (m: OrgMember): boolean => tierOf(m) === "leader";
-  const leaders = members.filter(isLeader);
-  if (leaders.length === 0) return { rest: buildTeamTree(members), squads: [] };
-
-  const headOf = (l: OrgMember): OrgMember => {
-    const seen = new Set([l.id]);
-    let cur = l;
-    for (;;) {
-      const up = byId.get(cur.leaderId ?? "");
-      if (!up || !isLeader(up) || seen.has(up.id)) return cur;
-      seen.add(up.id);
-      cur = up;
-    }
-  };
-  const firstLeaderOf = (m: OrgMember): OrgMember | undefined => {
-    const seen = new Set([m.id]);
-    let id = m.leaderId ?? null;
-    while (id && !seen.has(id)) {
-      seen.add(id);
-      const up = byId.get(id);
-      if (!up) return undefined;
-      if (isLeader(up)) return up;
-      id = up.leaderId ?? null;
-    }
-    return undefined;
-  };
-
-  const groups = new Map<string, { head: OrgMember; leaders: OrgMember[]; members: OrgMember[] }>();
-  for (const l of [...leaders].sort(byActivityThenTier)) {
-    const head = headOf(l);
-    const g = groups.get(head.id) ?? { head, leaders: [], members: [] };
-    g.leaders.push(l);
-    groups.set(head.id, g);
-  }
-  const rest: OrgMember[] = [];
-  for (const m of members) {
-    if (isLeader(m)) continue;
-    const lead = tierOf(m) === "organizer" ? undefined : firstLeaderOf(m);
-    if (lead) groups.get(headOf(lead).id)!.members.push(m);
-    else rest.push(m);
-  }
-
-  const ordered = [...groups.values()].sort((a, b) => byActivityThenTier(a.head, b.head));
-  const names = ordered.map((g) => squadBaseName(g.head));
-  const squads = ordered.map((g, i) => {
-    const dup = names.filter((n) => n === names[i]).length > 1;
-    // 先頭リーダーを最初に、共同リーダーは活動順。
-    const ls = [g.head, ...g.leaders.filter((l) => l.id !== g.head.id)];
-    return { id: g.head.id, name: dup ? surnameSquadName(g.head) : names[i]!, leaders: ls, tree: buildTeamTree(g.members) };
-  });
-  return { rest: buildTeamTree(rest), squads };
-}
-
 /** 1人分のノード。tier で見た目の強さを、status でバッジ/淡色を出し分ける。 */
 function OrgNode({ node }: { node: TreeNode }): JSX.Element {
   const { m, children } = node;
@@ -194,74 +117,42 @@ function OrgNode({ node }: { node: TreeNode }): JSX.Element {
   );
 }
 
-function TreeList({ nodes }: { nodes: TreeNode[] }): JSX.Element | null {
-  if (nodes.length === 0) return null;
-  return (
-    <ul className={styles.tree}>
-      {nodes.map((n) => (
-        <OrgNode key={n.m.id} node={n} />
-      ))}
-    </ul>
-  );
-}
-
-function SquadBox({ squad }: { squad: Squad }): JSX.Element {
-  return (
-    <section className={styles.squad} data-testid={`members-orgsquad-${squad.id}`} aria-label={squad.name}>
-      <div className={styles.squadName}>{squad.name}</div>
-      <ul className={styles.squadLeaders} data-testid={`members-orgsquad-leaders-${squad.id}`}>
-        {squad.leaders.map((l) => (
-          <OrgNode key={l.id} node={{ m: l, children: [] }} />
-        ))}
-      </ul>
-      {squad.tree.length > 0 ? (
-        <div className={styles.squadMembers}>
-          <TreeList nodes={squad.tree} />
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] }): JSX.Element {
   const color = team.color ?? "#64748b";
-  const { rest, squads } = buildTeamSquads(members);
+  const tree = buildTeamTree(members);
   const tent = members.filter((m) => statusGroup(m.status) === "pending").length;
-  const cls = [styles.orgCol, squads.length > 1 ? styles.orgColWide : ""].filter(Boolean).join(" ");
 
   return (
-    <div
-      className={cls}
-      style={{ ["--team" as string]: color, ["--squads" as string]: squads.length } as CSSProperties}
-      data-testid={`members-orgcol-${team.id}`}
-    >
+    <div className={styles.orgCol} style={{ ["--team" as string]: color } as CSSProperties} data-testid={`members-orgcol-${team.id}`}>
       <div className={styles.colHead}>
         <div className={styles.colName}>{team.name}</div>
         {team.description ? <div className={styles.colDesc}>{team.description}</div> : null}
       </div>
       <div className={styles.colBody}>
-        <TreeList nodes={rest} />
-        {squads.length > 0 ? (
-          <div className={styles.squadRow} data-testid={`members-orgsquads-${team.id}`}>
-            {squads.map((sq) => (
-              <SquadBox key={sq.id} squad={sq} />
-            ))}
-          </div>
-        ) : null}
+        <ul className={styles.tree}>
+          {tree.map((n) => (
+            <OrgNode key={n.m.id} node={n} />
+          ))}
+        </ul>
         <div className={styles.colCount}>
-          計{members.length}名{squads.length > 0 ? ` ／ ${squads.length}班` : ""}
-          {tent > 0 ? `（うち打診中${tent}）` : ""}
+          計{members.length}名{tent > 0 ? `（うち打診中${tent}）` : ""}
         </div>
       </div>
     </div>
   );
 }
 
-/** 代表箱からチームの並びへ下りる線。チームは画面幅で折り返すので、列ごとの分岐線は引かない。 */
-function Connector(): JSX.Element {
+/** N列に分岐するコネクタ線（縦→横バー→各列への縦ドロップ）。 */
+function Connector({ n }: { n: number }): JSX.Element {
+  const edge = (100 / (2 * n)).toFixed(3);
+  const drops = Array.from({ length: n }, (_, i) => (((2 * i + 1) / (2 * n)) * 100).toFixed(3));
   return (
-    <div className={styles.connector} aria-hidden>
+    <div className={styles.connector} style={{ width: "100%" }} aria-hidden>
       <div className={styles.vtop} />
+      <div className={styles.hbar} style={{ left: `${edge}%`, right: `${edge}%` }} />
+      {drops.map((d) => (
+        <div key={d} className={styles.vdrop} style={{ left: `${d}%` }} />
+      ))}
     </div>
   );
 }
@@ -300,7 +191,7 @@ export function OrgChartLegacyView({ teams: allTeams, members }: { teams: Member
       <div className={styles.orgHead}>
         <div className={styles.orgTitle}>全体組織体制図</div>
         <div className={styles.orgSub}>
-          チームの中に班を並べ、班ごとにリーダーと配下メンバーを表示します
+          各リーダーの下に配下メンバーをぶら下げて表示します（誰がどのリーダーの配下かが一目で分かります）
         </div>
         <div className={styles.orgLegend}>
           <span className={styles.li}>
@@ -346,9 +237,9 @@ export function OrgChartLegacyView({ teams: allTeams, members }: { teams: Member
             </div>
           ) : null}
 
-          {reps.length > 0 && columns.length > 0 ? <Connector /> : null}
+          {reps.length > 0 && columns.length > 0 ? <Connector n={columns.length} /> : null}
 
-          <div className={styles.teamsRow} data-testid="fe2-orgchart-subgroups">
+          <div className={styles.teamsRow}>
             {columns.map(({ team, members: cm }) => (
               <TeamColumn key={team.id} team={team} members={cm} />
             ))}
