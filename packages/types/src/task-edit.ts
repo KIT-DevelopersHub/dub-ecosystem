@@ -21,9 +21,9 @@ export interface TaskEditSubject {
 }
 
 /**
- * The acting user. `teamIds` = the teams they belong to. task-service derives it from the
- * caller's identity roles (`role_auto_team_<teamId>`, member.teamIdOfRoleId); FE4 from
- * `GET /members/me/mention-teams` `myTeamIds`. Omitted ⇒ no team grants.
+ * The acting user. `teamIds` = the teams they belong to: `myTeamIds` of member-service
+ * `GET /members/me/mention-teams` (名簿 team links) — task-service and FE4 both read it.
+ * Omitted ⇒ no team grants.
  */
 export interface TaskEditor {
   userId: UserId;

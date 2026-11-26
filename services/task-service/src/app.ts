@@ -155,7 +155,8 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
    * of the task's team) or creator, else `task:edit_all`. Rule lives in @dub/types
    * `task.canEditTask` (FE4 renders the same). Service principals (github-sync) edit
    * everything, as at the entry layer. Cheapest first: row-only check → edit_all (auth-client
-   * cache) → the caller's teams (one identity `GET /users/:id`, only for a task with a team).
+   * cache) → the caller's teams (one member-service `GET /members/me/mention-teams`, only for
+   * a task that has a team).
    */
   const assertCanEditTask = async (c: Context, t: task.Task): Promise<void> => {
     const principal = principalOf(c);
@@ -163,7 +164,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (task.canEditTask(t, { userId: principal.userId }, false)) return;
     if (await holdsKey(c, task.TASK_EDIT_ALL_KEY)) return;
     if (task.taskTeamIds(t).length > 0) {
-      const teamIds = await deps.identity.teamIdsOf(ctxOf(c), principal.userId);
+      const teamIds = await deps.member.myTeamIds(ctxOf(c));
       if (task.isTaskAssignee(t, { userId: principal.userId, teamIds })) return;
     }
     throw errors.forbidden("permission denied: task:edit_all", {

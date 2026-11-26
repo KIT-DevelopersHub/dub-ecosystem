@@ -7,7 +7,7 @@ import type { PermissionGranter } from "@dub/policy-gate";
 import type { AppConfig } from "../src/env";
 import type { Deps } from "../src/deps";
 import type { TaskRepo, InsertTaskInput, InsertAttachmentInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
-import type { EventClient, EventRef, IdentityClient } from "../src/clients";
+import type { EventClient, EventRef, IdentityClient, MemberClient } from "../src/clients";
 import type { EventPublisher, Auditor } from "../src/events";
 
 interface Rec extends task.Task {
@@ -297,12 +297,15 @@ export class FakeIdentityClient implements IdentityClient {
   async userExists(_ctx: RequestContext, userId: string): Promise<boolean> {
     return !this.unknown.has(userId);
   }
-  /** userId -> team ids (#881 team members edit their team's tasks). */
+}
+
+/** #881: userId -> team ids, as member-service `GET /members/me/mention-teams` returns them. */
+export class FakeMemberClient implements MemberClient {
   teams = new Map<string, string[]>();
-  teamLookups = 0;
-  async teamIdsOf(_ctx: RequestContext, userId: string): Promise<string[]> {
-    this.teamLookups++;
-    return this.teams.get(userId) ?? [];
+  lookups = 0;
+  async myTeamIds(ctx: RequestContext): Promise<string[]> {
+    this.lookups++;
+    return this.teams.get(ctx.userId ?? "") ?? [];
   }
 }
 
@@ -324,6 +327,7 @@ export interface TestHarness {
   authz: FakeGranter;
   eventClient: FakeEventClient;
   identity: FakeIdentityClient;
+  member: FakeMemberClient;
   idempotency: FakeIdempotencyStore;
   config: AppConfig;
 }
@@ -341,9 +345,10 @@ export function makeHarness(): TestHarness {
   const authz = new FakeGranter();
   const eventClient = new FakeEventClient();
   const identity = new FakeIdentityClient();
+  const member = new FakeMemberClient();
   const idempotency = new FakeIdempotencyStore();
-  const deps: Deps = { config, repo, events, audit, authz: authz.granter, eventClient, identity, idempotency };
-  return { deps, repo, events, audit, authz, eventClient, identity, idempotency, config };
+  const deps: Deps = { config, repo, events, audit, authz: authz.granter, eventClient, identity, member, idempotency };
+  return { deps, repo, events, audit, authz, eventClient, identity, member, idempotency, config };
 }
 
 // ---- request builders ----

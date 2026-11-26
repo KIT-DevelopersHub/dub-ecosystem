@@ -5,7 +5,7 @@ import { createServiceClient, type RequestContext } from "@dub/http";
 import { isDubError } from "@dub/errors";
 import { createAuthClient } from "@dub/auth-client";
 import type { PermissionGranter } from "@dub/policy-gate";
-import { member, type event, type identity } from "@dub/types";
+import type { event, identity } from "@dub/types";
 
 // ---- event-service: eventId existence + archived state ----
 export interface EventRef {
@@ -34,11 +34,6 @@ export function createServiceBindingEventClient(binding: Fetcher): EventClient {
 // ---- identity-roster: assignee existence ----
 export interface IdentityClient {
   userExists(ctx: RequestContext, userId: string): Promise<boolean>;
-  /**
-   * #881: the teams `userId` belongs to, from their identity roles (member-service syncs a
-   * `role_auto_team_<teamId>` role per 名簿 team). One `GET /users/:id` per call.
-   */
-  teamIdsOf(ctx: RequestContext, userId: string): Promise<string[]>;
 }
 
 export function createServiceBindingIdentityClient(binding: Fetcher): IdentityClient {
@@ -53,14 +48,25 @@ export function createServiceBindingIdentityClient(binding: Fetcher): IdentityCl
         throw err;
       }
     },
-    async teamIdsOf(ctx, userId) {
-      try {
-        const u = await client.get<identity.IdentityUserDetail>(ctx, `/users/${userId}`);
-        return (u.roleIds ?? []).map(member.teamIdOfRoleId).filter((id): id is string => id !== null);
-      } catch (err) {
-        if (isDubError(err) && err.status === 404) return [];
-        throw err;
-      }
+  };
+}
+
+// ---- member-service: the caller's teams (#881 team members edit their team's tasks) ----
+export interface MemberClient {
+  /**
+   * Teams of the acting user (`ctx.userId`): `myTeamIds` of member-service
+   * `GET /members/me/mention-teams` — the 名簿 team links, the same source FE4 / My Tasks read.
+   */
+  myTeamIds(ctx: RequestContext): Promise<string[]>;
+}
+
+export function createServiceBindingMemberClient(binding: Fetcher | undefined): MemberClient {
+  if (!binding) return { myTeamIds: async () => [] }; // unbound ⇒ no team grants (fail-closed)
+  const client = createServiceClient(binding, { service: "member-service", caller: "task-service" });
+  return {
+    async myTeamIds(ctx) {
+      const res = await client.get<{ myTeamIds?: string[] }>(ctx, "/members/me/mention-teams");
+      return res.myTeamIds ?? [];
     },
   };
 }

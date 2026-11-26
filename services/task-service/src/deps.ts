@@ -9,9 +9,11 @@ import type { PermissionGranter } from "@dub/policy-gate";
 import {
   createServiceBindingEventClient,
   createServiceBindingIdentityClient,
+  createServiceBindingMemberClient,
   createIdentityGranter,
   type EventClient,
   type IdentityClient,
+  type MemberClient,
 } from "./clients";
 import {
   createQueueEventPublisher,
@@ -32,6 +34,8 @@ export interface Deps {
   authz: PermissionGranter;
   eventClient: EventClient;
   identity: IdentityClient;
+  /** The caller's teams (#881). */
+  member: MemberClient;
   idempotency: IdempotencyStore;
 }
 
@@ -47,6 +51,7 @@ export function buildDeps(env: Env): Deps {
     authz: createIdentityGranter(env.SVC_IDENTITY, config.orgId),
     eventClient: createServiceBindingEventClient(env.SVC_EVENT),
     identity: createServiceBindingIdentityClient(env.SVC_IDENTITY),
+    member: createServiceBindingMemberClient(env.SVC_MEMBER),
     idempotency: createD1IdempotencyStore(db),
   };
 }
