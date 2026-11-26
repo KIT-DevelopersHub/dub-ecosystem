@@ -3,12 +3,12 @@
   "slug": "org-chart-nested",
   "worker": "dub-demo-org-chart-nested",
   "url": "https://dub-demo-org-chart-nested.developershub-site.workers.dev",
-  "deployedSha": "da45bac2",
+  "deployedSha": "4fb20d53",
   "branch": "fix/org-chart-nested-horizontal",
   "actor": "ko-tarou",
   "markers": ["members-orgunits-","members-orggroup"],
   "live": true,
-  "verifiedAt": "2026-11-26T14:31:13Z",
-  "updatedAt": "2026-11-26T14:31:13Z",
-  "note": "org chart: recursive horizontal units (fix/org-chart-nested-horizontal)"
+  "verifiedAt": "2026-11-26T14:38:17Z",
+  "updatedAt": "2026-11-26T14:38:17Z",
+  "note": "org chart: recursive horizontal units + prod-sized roster seed"
 }
