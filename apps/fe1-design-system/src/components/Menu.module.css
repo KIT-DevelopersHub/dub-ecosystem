@@ -6,6 +6,7 @@
 /* Icon-only trigger. Matches the header AppLauncher/bell controls (40px square,
  * ghost, hover fill, active-when-open) so every header icon reads as one set. */
 .iconTrigger {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -130,4 +131,26 @@
   .triggerLabel {
     max-width: 9rem;
   }
+}
+
+/* Attention dot (badge). Top-right of the trigger; after the label in an item.
+ * Ringed with the surface colour so it stays legible over the hover fill. */
+.dot {
+  position: absolute;
+  top: var(--dub-space-1);
+  right: var(--dub-space-1);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dub-color-danger-500);
+  box-shadow: 0 0 0 2px var(--dub-color-surface-base);
+  pointer-events: none;
+}
+.itemDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--dub-color-danger-500);
 }
