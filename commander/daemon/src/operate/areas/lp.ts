@@ -129,6 +129,11 @@ export const LP: AreaSpec = {
     },
     {
       service: T,
+      route: "POST /lp/tickets/orders/:id/refund",
+      reason: "チケット注文を Stripe で返金し券を無効にする取り消せない操作（lp:publish 詳細キー）。返金はオーナーが LP管理 で手で行う",
+    },
+    {
+      service: T,
       route: "POST /lp/tickets/coupons",
       reason: "無料券のクーポンコードを発行する操作（コードは券と同じ価値・lp:publish 詳細キー）。発行はオーナーが LP管理 で手で行う",
     },
