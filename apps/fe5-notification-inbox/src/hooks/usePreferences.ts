@@ -82,8 +82,8 @@ export function usePreferences(): UsePreferencesResult {
       },
       entries,
     )
-      .then(() => toast.show("success", "Notification settings saved."))
-      .catch(() => toast.show("error", "Could not save settings. Please try again."))
+      .then(() => toast.show("success", "通知設定を保存しました。"))
+      .catch(() => toast.show("error", "設定を保存できませんでした。もう一度お試しください。"))
       .finally(() => setSaving(false));
   }, [api, baseline, merged, toast]);
 

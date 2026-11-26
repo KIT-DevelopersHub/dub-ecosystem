@@ -19,16 +19,16 @@ export interface NotificationTypeDisplay {
 // Ordered most-generic-first; resolution picks the longest match regardless of
 // array order, but keeping it readable helps maintenance.
 export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
-  { pattern: "*", label: "Notification", icon: "info", group: "system" },
-  { pattern: "task.*", label: "Task", icon: "task", group: "task" },
-  { pattern: "task.assigned", label: "Task assigned to you", icon: "task", group: "task" },
-  { pattern: "task.due_soon", label: "Task due soon", icon: "alert", group: "task" },
-  { pattern: "task.completed", label: "Task completed", icon: "check", group: "task" },
-  { pattern: "event.*", label: "Event", icon: "calendar", group: "event" },
-  { pattern: "event.invited", label: "Event invitation", icon: "calendar", group: "event" },
-  { pattern: "event.reminder", label: "Event reminder", icon: "calendar", group: "event" },
-  { pattern: "system.*", label: "System", icon: "info", group: "system" },
-  { pattern: "system.announcement", label: "Announcement", icon: "megaphone", group: "system" },
+  { pattern: "*", label: "通知", icon: "info", group: "system" },
+  { pattern: "task.*", label: "タスク", icon: "task", group: "task" },
+  { pattern: "task.assigned", label: "タスクが割り当てられました", icon: "task", group: "task" },
+  { pattern: "task.due_soon", label: "タスクの期限が近づいています", icon: "alert", group: "task" },
+  { pattern: "task.completed", label: "タスクが完了しました", icon: "check", group: "task" },
+  { pattern: "event.*", label: "イベント", icon: "calendar", group: "event" },
+  { pattern: "event.invited", label: "イベントへの招待", icon: "calendar", group: "event" },
+  { pattern: "event.reminder", label: "イベントのリマインダー", icon: "calendar", group: "event" },
+  { pattern: "system.*", label: "システム", icon: "info", group: "system" },
+  { pattern: "system.announcement", label: "お知らせ", icon: "megaphone", group: "system" },
   // Admin-facing operational types (Notification管理). Grouped under システム so the genre
   // filter classifies them without a new group; explicit patterns give a readable label
   // instead of the raw machine name.
@@ -38,7 +38,7 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   // NotificationGroup (the group enum stays task/event/system/release; チャット gets its
   // own CATEGORY/tab below instead) — grouped under システム here only for the preference
   // matrix's generic row label.
-  { pattern: "chat.*", label: "Chat", icon: "message-square", group: "system" },
+  { pattern: "chat.*", label: "チャット", icon: "message-square", group: "system" },
   { pattern: "chat.mention", label: "チャットでメンションされました", icon: "message-square", group: "system" },
   { pattern: "chat.dm", label: "ダイレクトメッセージ", icon: "message-square", group: "system" },
   // LP管理 (lp-analytics). スポンサー資料請求 → app:sponsor:edit holders (lpSponsor.LP_SPONSOR_NOTIFY_TYPE).
@@ -85,9 +85,9 @@ export function resolveTypeDisplay(type: NotificationType): ResolvedTypeDisplay 
 // The prefix-group filter options for the inbox filter bar (test 3).
 export const NOTIFICATION_GROUP_PREFIXES: { group: NotificationGroup; prefix: string; label: string }[] = [
   { group: "release", prefix: "release", label: "新機能" },
-  { group: "task", prefix: "task.", label: "Tasks" },
-  { group: "event", prefix: "event.", label: "Events" },
-  { group: "system", prefix: "system.", label: "System" },
+  { group: "task", prefix: "task.", label: "タスク" },
+  { group: "event", prefix: "event.", label: "イベント" },
+  { group: "system", prefix: "system.", label: "システム" },
 ];
 
 // Display order + section metadata for the grouped inbox. Notifications keep their
