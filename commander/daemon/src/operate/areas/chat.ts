@@ -392,6 +392,8 @@ export const CHAT: AreaSpec = {
     { service: S, route: "GET /chat/unfurl", reason: "外部 URL を取りに行くリンク展開で、Dub のデータではない" },
     { service: S, route: "GET /chat/unread", reason: "ボット自身の未読数で、Dub のデータではない" },
     { service: S, route: "POST /chat/channels/:id/read", reason: "ボット自身の既読位置の更新で、Dub のデータではない" },
+    { service: S, route: "GET /chat/times/preview", reason: "管理者が times を一括作成する前の確認画面用で、ボットの操作対象ではない" },
+    { service: S, route: "POST /chat/times/bulk", reason: "全メンバーの times チャンネルを一括作成する管理者向けの操作" },
     {
       service: S,
       route: "PATCH /chat/settings/deletion-policy",

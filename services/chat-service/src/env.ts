@@ -39,4 +39,12 @@ export interface Env {
   // ATTACHMENTS = R2 dub-file-attachments; absent => files are counted as skipped.
   SLACK_BOT_TOKEN?: string;
   ATTACHMENTS?: R2Bucket;
+
+  // times channels in chat (#850, src/times.ts). Plain vars, all optional:
+  //   CHAT_TIMES_PREFIX  channel name prefix (default "times-")
+  //   CHAT_TIMES_PRIVATE "true" = private channels (default public)
+  //   CHAT_TIMES_AUTO    "false" = no auto-create on member activation (default on)
+  CHAT_TIMES_PREFIX?: string;
+  CHAT_TIMES_PRIVATE?: string;
+  CHAT_TIMES_AUTO?: string;
 }
