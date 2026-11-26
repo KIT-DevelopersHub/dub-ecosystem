@@ -11,7 +11,7 @@ import { ordersCsv } from "./ticket-csv";
 import { EVENT_NAME, isTestOrder, orderNumber, renderBuyerMail, renderOpsMail, type RenderedMail, type TicketPass } from "./ticket-mail";
 import { ticketToken, verifyTicketToken } from "./ticket-token";
 import type { OutboundMail } from "./mailer";
-import type { AppDeps, OutboxKind, OutboxRow, OutboxUpdate, TicketOrderRow, TicketRow } from "./types";
+import type { AppDeps, CheckinRow, OutboxKind, OutboxRow, OutboxUpdate, TicketOrderRow, TicketRow } from "./types";
 
 const SITE = lp.LP_PUBLISH_SITE;
 
@@ -404,16 +404,29 @@ export class TicketDelivery {
     }
   }
 
-  /** Everything needed to rebuild the sale. Tokens are derived, never stored, so none can end up here. */
+  private async allCheckins(): Promise<CheckinRow[]> {
+    const out: CheckinRow[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const page: CheckinRow[] = await this.repo.listCheckinsForBackup(cursor, EXPORT_PAGE);
+      out.push(...page);
+      if (page.length < EXPORT_PAGE) return out;
+      const last = page[page.length - 1]!;
+      cursor = `${last.eventDay}~${last.ticketId}`;
+    }
+  }
+
+  /** Everything needed to rebuild the sale (and the 当日受付). Tokens are derived, never stored, so none can end up here. */
   private async snapshot(exportedAt: string) {
-    const [settings, types, coupons, orders, tickets] = await Promise.all([
+    const [settings, types, coupons, orders, tickets, checkins] = await Promise.all([
       this.repo.getTicketSettings(SITE),
       this.repo.listTicketTypes(SITE),
       this.repo.listCoupons(SITE),
       this.allOrders(),
       this.allTickets(),
+      this.allCheckins(),
     ]);
-    return { exportedAt, site: SITE, settings, types, coupons, orders, tickets };
+    return { exportedAt, site: SITE, settings, types, coupons, orders, tickets, checkins };
   }
 
   /** Once per JST day. true = it ran (the pass has fewer subrequests left for mail). */

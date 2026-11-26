@@ -4,6 +4,7 @@ import type { Fetcher } from "@cloudflare/workers-types";
 import { DubError, fromResponse, isErrorResponse, CommonErrorCodes } from "@dub/errors";
 import { HDR_IDEMPOTENCY_KEY } from "@dub/observability";
 import { DUB_HEADERS, INTERNAL_MARKER, type RequestContext } from "./context";
+import { SERVICE_BINDING_ORIGIN } from "./service-binding";
 
 export interface RetryPolicy {
   maxAttempts: number; // default 3 (1 try + 2 retries)
@@ -49,7 +50,7 @@ export interface ServiceClientOptions {
   timeoutMs?: number; // per attempt, default 5000
   retry?: Partial<RetryPolicy>;
   hooks?: HttpHooks;
-  baseUrl?: string; // default "https://svc" (Service Bindings ignore host)
+  baseUrl?: string; // default SERVICE_BINDING_ORIGIN (Service Bindings ignore host)
 }
 
 export interface CallOptions {
@@ -110,7 +111,7 @@ function buildUrl(baseUrl: string, path: string, query?: CallOptions["query"]): 
 const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "DELETE"]);
 
 export function createServiceClient(binding: Fetcher, opts: ServiceClientOptions): ServiceClient {
-  const baseUrl = opts.baseUrl ?? "https://svc";
+  const baseUrl = opts.baseUrl ?? SERVICE_BINDING_ORIGIN;
   const policy: RetryPolicy = { ...DEFAULT_RETRY, ...opts.retry };
   const perAttemptTimeout = opts.timeoutMs ?? 5000;
 

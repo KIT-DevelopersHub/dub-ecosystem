@@ -7,6 +7,7 @@ export {
   dubContext,
   type RequestContext,
 } from "./context";
+export { SERVICE_BINDING_HOST, SERVICE_BINDING_ORIGIN, isServiceBindingRequest } from "./service-binding";
 export {
   createServiceClient,
   retryFetch,
