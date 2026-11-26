@@ -44,5 +44,19 @@ service = "dub-audit-log"         # free-tier outbox drain -> POST /internal/aud
 # The freeq outbox is now drained centrally by the freeq-drain worker (the ONE freeq cron),
 # freeing a slot on the Workers FREE plan's 5-cron account cap.
 
+# --- AI digest + Q&A (#879). Feature flag OFF until the Mac mini arrives. ---
+# EventDigestHub = DO-alarm scheduler (no new Cron: the account's 5-cron cap is full)
+# + the relay the Mac mini dials OUT to. Inert while EVENT_AI_DIGEST_ENABLED != "1":
+# the alarm is never armed and the agent upgrade is refused. Enabling steps:
+# tools/event-digest-agent/README.md.
+[[durable_objects.bindings]]
+name = "DIGEST_HUB"
+class_name = "EventDigestHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["EventDigestHub"]   # SQLite-backed DO is available on the Workers Free plan
+
 [vars]
 DUB_DEFAULT_ORG_ID = "org_devhub"
+EVENT_AI_DIGEST_ENABLED = "0"   # #879: OFF until the Mac mini is installed

@@ -16,6 +16,9 @@ export interface EventRow {
   phase: event.EventPhase;
   startsAt: common.ISODateTime | null;
   endsAt: common.ISODateTime | null;
+  /** 会場 / 定員 — structured, source of truth (0005). Optional so old literals compile. */
+  venue?: string | null;
+  capacity?: number | null;
   archivedAt: common.ISODateTime | null;
   version: number;
   createdBy: common.UserId;
@@ -334,4 +337,6 @@ export interface AppDeps {
   now: () => string;
   newEventId: () => common.EventId;
   newActionId: () => common.ActionId;
+  /** AI digest + Q&A (#879). Absent => feature OFF (same as enabled:false). */
+  digest?: import("./digest/types").DigestDeps;
 }

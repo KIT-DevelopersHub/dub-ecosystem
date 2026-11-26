@@ -24,6 +24,7 @@ import { createGlobalContentSearch } from "./globalContentSearch.ts";
 import { ColorSettingsDialog } from "./ColorSettingsDialog.tsx";
 import { ImpersonationBanner } from "./ImpersonationBanner.tsx";
 import { HeaderAccountSwitcher } from "./HeaderAccountSwitcher.tsx";
+import { ProfileReminderBanner, useMissingProfileKeys } from "./ProfileReminder.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
@@ -212,6 +213,9 @@ export function AppShellLayout({
   const mailCap = useAppCapability("mail");
   const showMailSettings = showAccount && mailCap.canView && can("mail:read");
   const mailApi = useMemo(() => (api ? createMailApi(api) : null), [api]);
+  // #849 プロフィール未入力のリマインド: バナー + ⚙ とアカウント設定の点。全部入力済みなら空。
+  const missingProfile = useMissingProfileKeys(showAccount ? api : undefined);
+  const profileIncomplete = missingProfile.length > 0;
 
   // The ⚙ menu's contents — a short list of self-service行き先, each a single row that
   // either opens a dialog or fires an action:
@@ -232,6 +236,7 @@ export function AppShellLayout({
       icon: "user",
       onSelect: () => setAcctOpen(true),
       testId: "fe2-account-settings-open",
+      badge: profileIncomplete,
     });
   }
   if (showMailSettings) {
@@ -337,6 +342,8 @@ export function AppShellLayout({
               align="end"
               iconOnly
               items={settingsItems}
+              badge={profileIncomplete}
+              badgeLabel="プロフィールに未入力の項目があります"
             />
           ) : null}
         </>
@@ -348,6 +355,7 @@ export function AppShellLayout({
   const header = (
     <>
       {api ? <ImpersonationBanner api={api} /> : null}
+      {showAccount ? <ProfileReminderBanner missing={missingProfile} onOpenSettings={() => setAcctOpen(true)} /> : null}
       {pageHeader}
     </>
   );

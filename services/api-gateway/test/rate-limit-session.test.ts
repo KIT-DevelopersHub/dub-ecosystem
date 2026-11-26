@@ -1,10 +1,14 @@
 // #856: the limiter keys credentialed requests per SESSION (not per source IP), keeps a
 // high per-IP ceiling over them, and falls back to a per-IP bucket for anonymous calls.
 import { describe, it, expect } from "vitest";
+import { Hono } from "hono";
 import { createApp } from "../src/app";
+import type { GatewayEnv } from "../src/env";
+import type { GatewayVariables } from "../src/context";
 import {
   createInMemoryRateLimiter,
   DEFAULT_RATE_LIMIT_POLICY,
+  rateLimitMiddleware,
   rateLimitPolicyFromEnv,
   sessionKey,
   type RateLimitPolicy,
@@ -13,10 +17,13 @@ import { makeEnv, execCtx, errOf, fakeKv } from "./helpers";
 
 const VENUE_IP = "198.51.100.10";
 
-function appWith(policy?: RateLimitPolicy) {
+function memoryLimiter() {
   const clock = 7_000_000;
-  const limiter = createInMemoryRateLimiter({ windowMs: 60_000, now: () => clock });
-  return createApp({ rateLimiter: limiter, ...(policy ? { rateLimitPolicy: policy } : {}) });
+  return createInMemoryRateLimiter({ windowMs: 60_000, now: () => clock });
+}
+
+function appWith(policy?: RateLimitPolicy) {
+  return createApp({ rateLimiter: memoryLimiter(), ...(policy ? { rateLimitPolicy: policy } : {}) });
 }
 
 function req(opts: { ip?: string; bearer?: string; cookie?: string } = {}): Request {
@@ -64,15 +71,27 @@ describe("per-session limiting", () => {
 
 describe("shared venue IP (conference Wi-Fi)", () => {
   it("with the default policy, 30 members x 60 requests from one IP all pass (old limit: 100 total)", async () => {
-    const app = appWith(); // policy from env → defaults
+    // 1800 requests: run them through the limiter middleware alone (same code path and
+    // env-default policy createApp mounts) and one member's 60 at a time concurrently.
+    // The full createApp stack per request made this time out on loaded CI (#891).
+    const app = new Hono<{ Bindings: GatewayEnv; Variables: GatewayVariables }>()
+      .use("*", rateLimitMiddleware(memoryLimiter())) // no policy → rateLimitPolicyFromEnv
+      .get("/healthz", (c) => c.text("ok"));
     const env = makeEnv();
     const statuses = new Set<number>();
     for (let u = 0; u < 30; u++) {
-      for (let i = 0; i < 60; i++) {
-        statuses.add((await app.fetch(req({ bearer: `member-${u}` }), env, execCtx)).status);
-      }
+      const batch = await Promise.all(
+        Array.from({ length: 60 }, () => app.fetch(req({ bearer: `member-${u}` }), env, execCtx)),
+      );
+      for (const res of batch) statuses.add(res.status);
     }
     expect([...statuses]).toEqual([200]);
+  });
+
+  it("createApp without a policy override applies the default per-session budget", async () => {
+    const res = await appWith().fetch(req({ bearer: "member-0" }), makeEnv(), execCtx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ratelimit-limit")).toBe(String(DEFAULT_RATE_LIMIT_POLICY.perSession));
   });
 
   it("a heavy member on the shared IP is throttled alone; the others keep working", async () => {

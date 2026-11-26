@@ -459,6 +459,7 @@ export interface MenuItem {
   testId?: string;
   tone?: "default" | "danger"; // "danger" styles destructive/離脱 actions (e.g. logout)
   dividerBefore?: boolean; // render a separator above this item (group離脱 actions)
+  badge?: boolean; // attention dot after the label (e.g. 未入力の項目がある アカウント設定)
 }
 export interface MenuProps extends TestableProps {
   label: string; // trigger button text (also the aria-label when iconOnly)
@@ -471,6 +472,10 @@ export interface MenuProps extends TestableProps {
   // AppLauncher/bell controls) instead of a labelled Button. `icon` is required
   // and `label` becomes the button's aria-label; the chevron is dropped.
   iconOnly?: boolean;
+  // Attention dot on the trigger (e.g. an item inside needs the user). `badgeLabel`
+  // is appended to the trigger's aria-label so the dot is not colour-only.
+  badge?: boolean;
+  badgeLabel?: string;
 }
 
 // Toast contract is authoritative here (凍結案 1-4-3). FE2 re-exports useToast;

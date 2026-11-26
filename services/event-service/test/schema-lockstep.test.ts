@@ -10,6 +10,8 @@ import {
   EVENT_DETAILS_SCHEMA_MIGRATION,
   EVENT_SECTION_LAYOUT_SCHEMA_MIGRATION,
   EVENT_PAGE_LAYOUT_SCHEMA_MIGRATION,
+  EVENT_VENUE_CAPACITY_SCHEMA_MIGRATION,
+  EVENT_AI_DIGEST_SCHEMA_MIGRATION,
 } from "../src/schema";
 
 // From services/event-service/ up to the repo root, then into infra.
@@ -61,5 +63,15 @@ describe("schema.ts <-> physical migration lockstep", () => {
   it("event-page-layout schema const equals infra/d1/migrations/event/0004_event_page_layout.sql", () => {
     const physical = readFileSync(PHYSICAL_PAGE_LAYOUT_SQL_PATH, "utf8");
     expect(normalizeDdl(EVENT_PAGE_LAYOUT_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
+  });
+
+  it("venue/capacity schema const equals infra/d1/migrations/event/0005_event_venue_capacity.sql", () => {
+    const physical = readFileSync(new URL("../../../infra/d1/migrations/event/0005_event_venue_capacity.sql", import.meta.url), "utf8");
+    expect(normalizeDdl(EVENT_VENUE_CAPACITY_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
+  });
+
+  it("ai-digest schema const equals infra/d1/migrations/event/0006_event_ai_digest.sql", () => {
+    const physical = readFileSync(new URL("../../../infra/d1/migrations/event/0006_event_ai_digest.sql", import.meta.url), "utf8");
+    expect(normalizeDdl(EVENT_AI_DIGEST_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
   });
 });

@@ -42,6 +42,8 @@ export function useUpdateEvent(eventId: common.EventId) {
         phase: vars.phase ?? prev.phase,
         startsAt: vars.startsAt !== undefined ? vars.startsAt : prev.startsAt,
         endsAt: vars.endsAt !== undefined ? vars.endsAt : prev.endsAt,
+        venue: vars.venue !== undefined ? vars.venue : (prev.venue ?? null),
+        capacity: vars.capacity !== undefined ? vars.capacity : (prev.capacity ?? null),
       };
     },
     successMessage: "保存しました",
@@ -162,5 +164,28 @@ export function useArchiveAction(eventId: common.EventId) {
       toast.show({ kind: "success", title: "アクションをアーカイブしました" });
     },
     onError: (err) => toast.show({ kind: "error", title: normalizeError(err).message }),
+  });
+}
+
+// ---- AI digest (#879): 「今すぐ要約」 (admin) and the Q&A box. Non-optimistic: the
+// result is produced server-side (and may be 「停止中」), nothing to predict locally.
+export function useRunEventDigest(eventId: common.EventId) {
+  const api = useEventApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<event.RunEventDigestResponse, unknown, void>({
+    mutationFn: () => api.runEventDigest(eventId),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: eventKeys.digest(eventId) });
+      toast.show({ kind: "success", title: res.ran ? "AI のまとめを更新しました" : "前回から変わったところはありません" });
+    },
+    onError: (err) => toast.show({ kind: "error", title: normalizeError(err).message }),
+  });
+}
+
+export function useAskEvent(eventId: common.EventId) {
+  const api = useEventApi();
+  return useMutation<event.AskEventResponse, unknown, string>({
+    mutationFn: (question) => api.askEvent(eventId, { question }),
   });
 }

@@ -165,9 +165,12 @@ const READS = [
   "GET /events/:id",
   "GET /events/:id/actions",
   "GET /events/:id/details",
+  "GET /events/:id/digest",
   "GET /events/:id/page-layout",
   "GET /events/:id/participants",
   "GET /events/:id/section-layout",
+  // Q&A is a read (the answer only cites what the collectors may read). #879
+  "POST /events/:id/ask",
 ];
 // event:write writes — everything an 編集 role can do short of archiving an event.
 const WRITES = [
@@ -180,8 +183,9 @@ const WRITES = [
   "PUT /events/:id/page-layout",
   "PUT /events/:id/section-layout",
 ];
-// The one route demanding event:admin.
-const ADMIN_ONLY = ["DELETE /events/:id"];
+// The routes demanding event:admin: archive, and 「今すぐ要約」 (#879: fans out reads to
+// other apps under the caller and spends the Mac mini's time).
+const ADMIN_ONLY = ["DELETE /events/:id", "POST /events/:id/digest/run"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /health"];
 
@@ -199,7 +203,7 @@ describe("role x endpoint matrix (frozen)", () => {
     // 0002, so archiving an event IS open to organizers. See ROLE_KEYS above.
     organizer: FULL_SURFACE,
     member: READ_ONLY,
-    // No event:admin => archiving an event is the one thing this role cannot do.
+    // No event:admin => archiving an event and 「今すぐ要約」 are what this role cannot do.
     "edit-tier-without-event-admin": READ_WRITE,
     "disabled-tier-with-legacy-event-keys": NONE,
     "view-tier-with-legacy-write-key": READ_ONLY,

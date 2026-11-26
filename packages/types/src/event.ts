@@ -24,10 +24,18 @@ export interface DubEvent extends Versioned {
   phase: EventPhase;
   startsAt: ISODateTime | null;
   endsAt: ISODateTime | null;
+  /** 会場 — the structured venue (source of truth; AI digests only read it). Additive. */
+  venue?: string | null;
+  /** 定員 — capacity in people (integer, 0..EVENT_CAPACITY_MAX). Additive. */
+  capacity?: number | null;
   archivedAt: ISODateTime | null;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
+
+/** Bounds for the structured venue / capacity fields (server validation + FE form). */
+export const EVENT_VENUE_MAX_LENGTH = 200;
+export const EVENT_CAPACITY_MAX = 100_000;
 
 export interface DubAction extends Versioned {
   id: ActionId;
@@ -62,6 +70,8 @@ export interface CreateEventRequest {
   description?: string;
   startsAt?: ISODateTime;
   endsAt?: ISODateTime;
+  venue?: string | null;
+  capacity?: number | null;
 }
 export interface UpdateEventRequest extends Versioned {
   title?: string;
@@ -69,6 +79,8 @@ export interface UpdateEventRequest extends Versioned {
   phase?: EventPhase; // validated against EVENT_PHASE_TRANSITIONS
   startsAt?: ISODateTime | null;
   endsAt?: ISODateTime | null;
+  venue?: string | null;
+  capacity?: number | null;
 }
 export interface ListEventsQuery extends CursorQuery {
   phase?: EventPhase;
@@ -120,3 +132,102 @@ type _EventWireKeysAreTyped =
     : never;
 const _eventWireKeyGuard: _EventWireKeysAreTyped = true;
 void _eventWireKeyGuard;
+
+// ── AI digest + Q&A (#879) ───────────────────────────────────────────────────
+// SINGLE source of truth for the digest wire shapes; event-service returns them and
+// fe3 reads them. The digest is READ-ONLY over other apps: it never writes back, and
+// the event's own fields (startsAt / venue / capacity) stay the source of truth — a
+// mismatch is reported as a discrepancy, never "fixed" by the AI.
+
+/** Where a digest line came from. Closed set: adding a source = contract change. */
+export type EventDigestSourceKind =
+  | "event"
+  | "actions"
+  | "tasks"
+  | "tickets"
+  | "lp"
+  | "sponsors"
+  | "meetings"
+  | "chat"
+  | "mail"
+  | "drive";
+
+export const EVENT_DIGEST_SOURCE_KINDS: readonly EventDigestSourceKind[] = [
+  "event",
+  "actions",
+  "tasks",
+  "tickets",
+  "lp",
+  "sponsors",
+  "meetings",
+  "chat",
+  "mail",
+  "drive",
+];
+
+/** One digest sentence. `link` is mandatory: a line without a source is never shown. */
+export interface EventDigestLine {
+  text: string;
+  source: EventDigestSourceKind;
+  /** In-app path (`/tasks/<id>`, `/chat?eventId=…`) or an absolute https URL. */
+  link: string;
+}
+
+/** The event's own value disagrees with what a source says (e.g. LP date ≠ startsAt). */
+export interface EventDigestDiscrepancy {
+  field: "startsAt" | "venue" | "capacity";
+  eventValue: string;
+  sourceValue: string;
+  source: EventDigestSourceKind;
+  link: string;
+}
+
+export interface EventDigest {
+  eventId: EventId;
+  lines: EventDigestLine[];
+  discrepancies: EventDigestDiscrepancy[];
+  /** Provider/model id that wrote the text (e.g. "fake", "local:inkling-2-mini"). */
+  model: string;
+  trigger: "manual" | "schedule";
+  generatedAt: ISODateTime;
+}
+
+/** disabled = feature flag off; offline = provider (Mac mini) not connected. */
+export type EventAiProviderStatus = "disabled" | "offline" | "online";
+
+/**
+ * What can be shown without any LLM while the digest is OFF: the event's own facts and
+ * actions as cited lines, plus deterministic 食い違い. Built on read, never stored.
+ */
+export interface EventDigestPreview {
+  lines: EventDigestLine[];
+  discrepancies: EventDigestDiscrepancy[];
+  collectedAt: ISODateTime;
+}
+
+export interface GetEventDigestResponse {
+  enabled: boolean;
+  provider: { id: string; status: EventAiProviderStatus };
+  digest: EventDigest | null;
+  /** Present while enabled=false (no LLM involved). Absent/null otherwise. */
+  preview?: EventDigestPreview | null;
+}
+
+export interface RunEventDigestResponse {
+  /** false when nothing changed since the last run (no LLM call, no D1 write). */
+  ran: boolean;
+  changedSources: EventDigestSourceKind[];
+  digest: EventDigest | null;
+}
+
+export interface AskEventRequest {
+  question: string;
+}
+export const EVENT_ASK_QUESTION_MAX = 500;
+
+export interface AskEventResponse {
+  status: "answered" | "offline" | "disabled";
+  answer: string | null;
+  /** Every answer carries its sources; empty when not answered. */
+  sources: { label: string; link: string }[];
+}
