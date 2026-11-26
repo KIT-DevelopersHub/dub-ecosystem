@@ -73,6 +73,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     listTicketOrders: unused,
     exportTicketOrders: async () => new Blob(["x"]),
     approveTicketOrder: unused,
+    refundTicketOrder: unused,
     listTicketCoupons: unused,
     createTicketCoupon: unused,
     setTicketCouponActive: unused,
@@ -86,6 +87,9 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     saveSiteConfigDraft: unused,
     resetSiteConfigDraft: unused,
     publishSiteConfig: unused,
+    checkinTicket: unused,
+    undoTicketCheckin: unused,
+    listTicketCheckins: unused,
     ...overrides,
   };
 }

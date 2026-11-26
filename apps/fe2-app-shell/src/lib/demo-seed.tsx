@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 
@@ -86,6 +86,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // LP管理: チケットの当日受付（受付タブを demo で出すため）。
+  "lp:checkin",
   // カレンダー: 予定の登録（予定を作成ボタン）。
   "calendar:schedule_edit",
   // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
@@ -5475,6 +5477,7 @@ function createLpStore() {
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
 //   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
 //   POST  /api/v1/lp/tickets/orders/:id/approve        needs_review -> paid (409 otherwise)
+//   POST  /api/v1/lp/tickets/orders/:id/refund         paid|needs_review -> refunded ({ result, order }; 0 円 = cancelled)
 //   GET   /api/v1/lp/tickets/coupons     newest first; used = held tickets (paid / pending / needs_review)
 //   POST  /api/v1/lp/tickets/coupons     { ticketTypeId, maxUses 1..1000, label? <=60, expiresAt? future }  201
 //   PATCH /api/v1/lp/tickets/coupons/:id { active }   no delete (orders reference coupons)
@@ -5650,6 +5653,25 @@ function createLpTicketsStore() {
     cp("cpn_press", "PRESS5YTN2", "メディア招待", 5, true, "2026-10-10T14:59:59.000Z", "2026-10-02T01:00:00.000Z"),
   ];
   const couponOf: Record<string, string> = { ord_011: "cpn_speakers", ord_005: "cpn_sponsor_a" };
+  // 当日受付の記録（demo はメモリだけ）。券は支払い済み/返金済みの注文から 1 席 1 枚で導く。
+  let checkins: { ticketId: string; eventDay: string; checkedInAt: string; checkedInBy: string }[] = [];
+  const demoTodayJst = (): string =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const demoTickets = () =>
+    orders
+      .filter((o) => o.status === "paid" || o.status === "refunded")
+      .flatMap((o) =>
+        o.items
+          .flatMap((it) => Array.from({ length: it.quantity }, () => it))
+          .map((it, n) => ({
+            ticketId: `${o.id}-${n + 1}`,
+            orderRef: o.id.slice(-8).toUpperCase(),
+            ticketTypeName: it.ticketTypeName,
+            dayLabel: it.dayLabel,
+            buyerName: o.buyerName,
+            valid: o.status === "paid",
+          })),
+      );
   const orders: DemoTicketOrder[] = seedOrders.map(([id, lines, buyerName, status, createdAt, aff, att], i) => {
     const couponId = couponOf[id] ?? null;
     const items = lines.map(([typeId, quantity]) => {
@@ -5871,6 +5893,70 @@ function createLpTicketsStore() {
       o.status = "paid";
       o.paidAt = o.paidAt ?? new Date().toISOString();
       return json(o);
+    }
+
+    // デモは Stripe を持たないので、有料も即「返金済み」（本番は Stripe の返金完了で反映）。
+    const refundMatch = method === "POST" ? /^\/api\/v1\/lp\/tickets\/orders\/([^/]+)\/refund$/.exec(pathname) : null;
+    if (refundMatch) {
+      const o = orders.find((x) => x.id === decodeURIComponent(refundMatch[1]!));
+      if (!o) return json({ error: { code: "NOT_FOUND", message: "order not found" } }, 404);
+      if (o.status !== "paid" && o.status !== "needs_review") {
+        return json({ error: { code: "LP_TICKET_REFUND_REFUSED", message: "この注文は返金・取消できません", details: { reason: "not_refundable" } } }, 409);
+      }
+      if (!lpTickets.isLpTicketRefundOpen(new Date().toISOString())) {
+        return json({ error: { code: "LP_TICKET_REFUND_REFUSED", message: "返金・取消の受付は開催最終日で終了しました", details: { reason: "refund_window_closed" } } }, 409);
+      }
+      o.status = "refunded";
+      return json({ result: o.amountJpy === 0 ? "cancelled" : "refunded", order: o });
+    }
+
+    // 当日受付（lp:checkin）。実サーバー（services/lp-tickets/src/checkin.ts）と同じ判定を簡略に。
+    //   券 ID = `<注文 ID>-<枚目>`（demo の手入力はこれ。例 ord_002-1）。QR の URL（…/t/<id>.<sig>）も読む。
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/checkin") {
+      const day = typeof req.eventDay === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.eventDay) ? req.eventDay : demoTodayJst();
+      let code = typeof req.code === "string" ? req.code.normalize("NFKC").trim() : "";
+      const at = code.lastIndexOf("/t/");
+      if (at >= 0) code = code.slice(at + 3).split(/[/?#]/)[0] ?? "";
+      code = code.split(".")[0] ?? "";
+      const none = { checkedInAt: null, checkedInBy: null, dayCheck: null };
+      const t = demoTickets().find((x) => x.ticketId.toLowerCase() === code.toLowerCase());
+      if (!t) return json({ result: "unknown", eventDay: day, ticket: null, ...none });
+      const ticket = { ticketId: t.ticketId, orderRef: t.orderRef, ticketTypeName: t.ticketTypeName, dayLabel: t.dayLabel, holderName: null, buyerName: t.buyerName };
+      if (!t.valid) return json({ result: "void", eventDay: day, ticket, ...none });
+      const md = `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+      const dated = /\d{1,2}\/\d{1,2}/.exec(t.dayLabel)?.[0];
+      const dayCheck = !t.dayLabel ? "all_days" : !dated ? "unverified" : dated === md ? "match" : null;
+      if (!dayCheck) return json({ result: "wrong_day", eventDay: day, ticket, ...none });
+      const prior = checkins.find((c) => c.ticketId === t.ticketId && c.eventDay === day);
+      if (prior) return json({ result: "already", eventDay: day, ticket, checkedInAt: prior.checkedInAt, checkedInBy: prior.checkedInBy, dayCheck });
+      const now = new Date().toISOString();
+      checkins.push({ ticketId: t.ticketId, eventDay: day, checkedInAt: now, checkedInBy: "usr_demo_admin" });
+      return json({ result: "ok", eventDay: day, ticket, checkedInAt: now, checkedInBy: "usr_demo_admin", dayCheck });
+    }
+
+    const undoMatch = method === "DELETE" ? /^\/api\/v1\/lp\/tickets\/checkin\/([^/]+)$/.exec(pathname) : null;
+    if (undoMatch) {
+      const ticketId = decodeURIComponent(undoMatch[1]!);
+      const day = url.searchParams.get("day") || demoTodayJst();
+      const before = checkins.length;
+      checkins = checkins.filter((c) => !(c.ticketId === ticketId && c.eventDay === day));
+      return json({ ticketId, eventDay: day, removed: checkins.length < before });
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/checkins") {
+      const day = url.searchParams.get("day") || demoTodayJst();
+      const byId = new Map(demoTickets().map((t) => [t.ticketId, t]));
+      const items = checkins
+        .filter((c) => c.eventDay === day)
+        .sort((a, b) => (a.checkedInAt < b.checkedInAt ? 1 : -1))
+        .map((c) => {
+          const t = byId.get(c.ticketId)!;
+          return { ...c, orderRef: t.orderRef, ticketTypeName: t.ticketTypeName, dayLabel: t.dayLabel, holderName: null, buyerName: t.buyerName };
+        });
+      const counts = new Map<string, number>();
+      for (const c of checkins) counts.set(c.eventDay, (counts.get(c.eventDay) ?? 0) + 1);
+      const days = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([eventDay, count]) => ({ eventDay, count }));
+      return json({ eventDay: day, count: items.length, days, items, nextCursor: null });
     }
 
     return null;

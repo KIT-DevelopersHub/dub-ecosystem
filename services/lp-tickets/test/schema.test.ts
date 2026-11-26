@@ -7,7 +7,7 @@ import { memoryD1 } from "../../../infra/d1/src/node-d1";
 import { applyAll } from "../../../infra/d1/src/apply";
 import { collectSqlDir } from "../../../infra/d1/src/collect";
 import { verifySchema } from "../../../infra/d1/src/verify-schema";
-import { CHECKIN_SQL, DELIVERY_SQL, INIT_SQL } from "./harness";
+import { CHECKIN_SQL, DELIVERY_SQL, INIT_SQL, REFUND_MAIL_SQL } from "./harness";
 
 const TABLES = ["lp_ticket_settings", "lp_ticket_types", "lp_ticket_orders", "lp_ticket_order_items", "lp_ticket_coupons"];
 const DELIVERY_TABLES = ["lp_ticket_jobs", "lp_ticket_outbox", "lp_tickets"];
@@ -43,7 +43,7 @@ describe("db/0001_init.sql", () => {
   it("the deploy schema gate reads this directory and finds nothing missing", async () => {
     const dir = fileURLToPath(new URL("../db", import.meta.url));
     const migrations = collectSqlDir(dir, "lp");
-    expect(migrations.map((m) => m.id)).toEqual(["0001_init", "0002_delivery", "0003_checkin"]);
+    expect(migrations.map((m) => m.id)).toEqual(["0001_init", "0002_delivery", "0003_checkin", "0004_refund_mail"]);
     const empty = await verifySchema(memoryD1().db, migrations, { readOnly: true });
     expect(empty.missingTables.filter((t) => t !== "dub_migrations").sort()).toEqual([...TABLES, ...DELIVERY_TABLES, ...CHECKIN_TABLES].sort());
     expect(empty.missingColumns).toEqual([]);
@@ -107,6 +107,51 @@ describe("db/0001_init.sql", () => {
     expect(after.lp_ticket_orders!.columns.at(-1)).toMatchObject({ name: "receipt_name", notnull: 0, dflt_value: null });
     expect(await all(db, "SELECT open_registration FROM lp_ticket_types")).toEqual([{ open_registration: null }]);
     expect(await all(db, "SELECT id, holder_name FROM lp_tickets")).toEqual([{ id: "o-1", holder_name: null }]);
+  });
+
+  it("0004 rebuilds lp_ticket_outbox on a 0003 DB: rows, columns, UNIQUE and indexes kept; only the kind CHECK widens", async () => {
+    const { db } = memoryD1();
+    await db.exec(INIT_SQL);
+    await db.exec(DELIVERY_SQL);
+    await db.exec(CHECKIN_SQL);
+    const outboxShape = async () => ({
+      columns: await all(db, `SELECT cid, name, type, "notnull", dflt_value, pk FROM pragma_table_info('lp_ticket_outbox') ORDER BY cid`),
+      indexes: ((await all(db, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'lp_ticket_outbox' AND sql IS NOT NULL ORDER BY name")) as {
+        name: string;
+        sql: string;
+      }[]).map((i) => ({ name: i.name, sql: i.sql.replace(/\s+/g, " ").replace(" IF NOT EXISTS", "") })),
+      uniques: await all(db, `SELECT "unique", origin, partial FROM pragma_index_list('lp_ticket_outbox') ORDER BY origin, "unique"`),
+    });
+    const insert = async (id: string, order: string, kind: string, status = "pending") =>
+      db
+        .prepare(
+          "INSERT INTO lp_ticket_outbox (id, order_id, kind, status, attempts, next_attempt_at, last_error, sent_at, created_at) VALUES (?, ?, ?, ?, 2, 'n', 'e', NULL, 'c')",
+        )
+        .bind(id, order, kind, status)
+        .run();
+    await insert("o1:buyer_confirmation", "o1", "buyer_confirmation", "sent");
+    await insert("o1:ops_copy", "o1", "ops_copy", "failed");
+    await insert("o2:buyer_confirmation", "o2", "buyer_confirmation");
+    await expect(insert("o1:buyer_refund", "o1", "buyer_refund")).rejects.toThrow(/CHECK/);
+    const rows = "SELECT * FROM lp_ticket_outbox ORDER BY id";
+    const before = { shape: await outboxShape(), rows: await all(db, rows) };
+    await db.exec(REFUND_MAIL_SQL);
+    expect(await outboxShape()).toEqual(before.shape);
+    expect(await all(db, rows)).toEqual(before.rows);
+    await insert("o1:buyer_refund", "o1", "buyer_refund");
+    await expect(insert("o1:x", "o1", "nope")).rejects.toThrow(/CHECK/);
+    await expect(insert("o1:dup", "o1", "buyer_refund")).rejects.toThrow(/UNIQUE/);
+    // 2 回目も同じ結果（行も形も変わらない）。退避テーブルは残らない。
+    const once = await all(db, rows);
+    await db.exec(REFUND_MAIL_SQL);
+    expect(await all(db, rows)).toEqual(once);
+    expect(await outboxShape()).toEqual(before.shape);
+    expect(await all(db, "SELECT name FROM sqlite_master WHERE name LIKE 'lp_ticket_outbox_%' AND type = 'table'")).toEqual([]);
+    // デプロイ前のゲートから見て何も足りない物は無い（列は増えない）。
+    const dir = fileURLToPath(new URL("../db", import.meta.url));
+    const res = await verifySchema(db, collectSqlDir(dir, "lp"), { readOnly: true });
+    expect(res.missingTables.filter((t) => t !== "dub_migrations")).toEqual([]);
+    expect(res.missingColumns).toEqual([]);
   });
 
   it("lp_ticket_checkins: one check-in per ticket per event day (a pass checks in on each day once)", async () => {

@@ -133,6 +133,10 @@ deploy member-service  services/member-service/wrangler.free.toml
 deploy drive-share-service services/drive-share-service/wrangler.free.toml
 deploy chat-service    services/chat-service/wrangler.free.toml
 deploy mail-gateway    services/mail-gateway/wrangler.free.toml
+# mail-automation (自動返信) binds mail-gateway (just above), identity-roster and event-service;
+# freeq-drain binds it (SVC_MAIL_AUTOMATION) so it must land before freeq-drain. It was never in
+# this script, so prod ran an Aug-2026 build that 400'd every evt.mail-automation row (#836).
+deploy mail-automation services/mail-automation/wrangler.free.toml
 deploy deploy-service  services/deploy-service/wrangler.free.toml
 deploy github-sync     services/github-sync/wrangler.free.toml
 deploy audit-log       services/audit-log/wrangler.free.toml
