@@ -15,3 +15,6 @@ next-env.d.ts
 /.bundle-cache/
 /.bundle-out/
 /.wrangler/
+
+# Lighthouse CI reports (lighthouserc.json)
+/.lighthouseci/

@@ -1,0 +1,71 @@
+name: LP Lighthouse
+
+# 北陸ITカンファレンス LP (apps/lp-conference-next) の Lighthouse 点数が落ちていないかを見る。
+# 通常の PR では走らせない（重いので）: main への push（LP を変えた時）と、
+# PR に `lighthouse` ラベルを付けた時・手動実行だけ。
+# しきい値（カテゴリ点・指標・転送量の予算）は apps/lp-conference-next/lighthouserc.json。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/lp-conference-next/**"
+      - "packages/types/src/lp.ts"
+      - ".github/workflows/lp-lighthouse.yml"
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+
+concurrency:
+  group: lp-lighthouse-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    name: lighthouse · ${{ matrix.form }}
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'lighthouse')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        form: [mobile, desktop]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @dub/lp-conference-next...
+
+      - name: Build LP (static export)
+        run: pnpm --filter @dub/lp-conference-next build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Lighthouse CI (3 runs, median)
+        working-directory: apps/lp-conference-next
+        run: |
+          extra=""
+          if [ "${{ matrix.form }}" = desktop ]; then extra="--collect.settings.preset=desktop"; fi
+          npx --yes @lhci/cli@0.14.0 autorun $extra
+
+      - name: Upload reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lp-lighthouse-${{ matrix.form }}
+          path: apps/lp-conference-next/.lighthouseci
+          retention-days: 14
+          if-no-files-found: ignore
+          include-hidden-files: true
