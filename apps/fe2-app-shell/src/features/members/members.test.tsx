@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,7 @@ import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../au
 import { createMembersApi, type MembersApi } from "./membersApi.tsx";
 import { MembersApiProvider } from "./MembersProvider.tsx";
 import { MembersPage } from "./MembersPage.tsx";
-import { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
+import { MembersOrgChartPage, ORG_CHART_VIEW_KEY } from "./MembersOrgChartPage.tsx";
 import { MemberRosterPage } from "./MemberRosterPage.tsx";
 import type { MembersOverview } from "./contracts.ts";
 import { member } from "@dub/types";
@@ -563,6 +563,72 @@ describe("MembersPage", () => {
     for (const id of ["K", "Y", "H"]) expect(within(hqCol).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
     const cols = [...screen.getByTestId("members-orgchart").querySelectorAll("[data-testid^='members-orgcol-']")];
     expect(cols.map((c) => c.getAttribute("data-testid"))).toEqual(["members-orgcol-dev", "members-orgcol-hq"]);
+  });
+});
+
+// 組織図タブの表示切り替え: 新しい表示(既定) / これまでの表示(#890 時点)。選択は localStorage に覚える。
+describe("MembersOrgChartPage — 表示の切り替え", () => {
+  const base = { ...P0, orgId: "o", department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t", status: "added" as const, position: null, teamIds: ["pr"] };
+  const overview: MembersOverview = {
+    teams: [{ id: "pr", key: "pr", name: "集客広報", color: "#db2777", description: null }],
+    members: [
+      { ...base, id: "O1", name: "大西 修", roleTitle: "オーガナイザー", leaderId: null, sortOrder: 1 },
+      { ...base, id: "O2", name: "片山 美咲", roleTitle: "オーガナイザー", leaderId: null, sortOrder: 2 },
+      { ...base, id: "L1", name: "川口 隼", roleTitle: "広報リーダー", leaderId: "O1", sortOrder: 3 },
+      { ...base, id: "L2", name: "北村 楓", roleTitle: "SNSリーダー", leaderId: "O2", sortOrder: 4 },
+    ],
+  };
+  const api = (): MembersApi => makeApi({ getOverview: () => Promise.resolve(overview) });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    globalThis.localStorage.clear();
+  });
+
+  it("既定は新しい表示(グループの中に班)で、切り替えの「新しい表示」が選ばれている", async () => {
+    render(wrap(<MembersOrgChartPage />, api()));
+    const chart = await screen.findByTestId("members-orgchart");
+    expect(chart.getAttribute("data-view")).toBe("new");
+    expect(screen.getByRole("tablist", { name: "組織図の表示" })).toBeInTheDocument();
+    expect(screen.getByTestId("members-orgchart-view-new").getAttribute("aria-selected")).toBe("true");
+    expect(within(screen.getByTestId("members-orggroup-O1")).getByTestId("members-orgsquad-L1")).toBeInTheDocument();
+  });
+
+  it("「これまでの表示」に切り替えると #890 時点の組織図になり、選択を覚える", async () => {
+    render(wrap(<MembersOrgChartPage />, api()));
+    await screen.findByTestId("members-orgchart");
+    await userEvent.click(screen.getByTestId("members-orgchart-view-legacy"));
+    const chart = screen.getByTestId("members-orgchart");
+    expect(chart.getAttribute("data-view")).toBe("legacy");
+    // これまでの表示: オーガナイザーのグループは無く、班はチームのカードに横並び。
+    expect(screen.queryByTestId("members-orggroup-O1")).not.toBeInTheDocument();
+    const row = screen.getByTestId("members-orgsquads-pr");
+    expect([...row.children].map((e) => e.getAttribute("data-testid"))).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
+    expect(within(screen.getByTestId("members-orgcol-pr")).getByTestId("members-orgchip-O1")).toBeInTheDocument();
+    expect(globalThis.localStorage.getItem(ORG_CHART_VIEW_KEY)).toBe("legacy");
+
+    await userEvent.click(screen.getByTestId("members-orgchart-view-new"));
+    expect(screen.getByTestId("members-orgchart").getAttribute("data-view")).toBe("new");
+    expect(globalThis.localStorage.getItem(ORG_CHART_VIEW_KEY)).toBe("new");
+  });
+
+  it("前回「これまでの表示」を選んだ人には、その表示で開く", async () => {
+    globalThis.localStorage.setItem(ORG_CHART_VIEW_KEY, "legacy");
+    render(wrap(<MembersOrgChartPage />, api()));
+    expect((await screen.findByTestId("members-orgchart")).getAttribute("data-view")).toBe("legacy");
+    expect(screen.getByTestId("members-orgchart-view-legacy").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("localStorage が使えなくても新しい表示で開き、切り替えもできる", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    render(wrap(<MembersOrgChartPage />, api()));
+    expect((await screen.findByTestId("members-orgchart")).getAttribute("data-view")).toBe("new");
+    await userEvent.click(screen.getByTestId("members-orgchart-view-legacy"));
+    expect(screen.getByTestId("members-orgchart").getAttribute("data-view")).toBe("legacy");
   });
 });
 

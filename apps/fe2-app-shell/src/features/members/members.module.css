@@ -138,6 +138,14 @@
 .orgChart {
   color: #1f2933;
 }
+/* 組織図タブの右上: 表示の切り替え + 印刷。 */
+.orgViewActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--dub-space-3);
+}
 .orgHead {
   margin-bottom: var(--dub-space-3);
 }

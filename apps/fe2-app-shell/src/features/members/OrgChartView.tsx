@@ -369,7 +369,7 @@ export function OrgChartView({ teams: allTeams, members }: { teams: MemberTeam[]
   const totalTent = active.length - totalConfirmed;
 
   return (
-    <div ref={chartRef} className={styles.orgChart} data-testid="members-orgchart">
+    <div ref={chartRef} className={styles.orgChart} data-testid="members-orgchart" data-view="new">
       <style>{ORG_CHART_PAGE_CSS}</style>
       <div className={styles.orgHead}>
         <div className={styles.orgTitle}>全体組織体制図</div>
