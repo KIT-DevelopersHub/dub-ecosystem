@@ -72,8 +72,8 @@ export const TASK: AreaSpec = {
       reversible: false,
       risk: "mid",
       description: "タスクを新しく作成する",
-      hint: "body.title 必須(1〜200字)。eventId 省略でイベントに紐づかないタスク。priority は low|medium|high|urgent（既定 medium）。状態は常に todo。日時は ISO8601。parentTaskId を付けるなら teamId は親と同じにする。応答の id が新タスクの id",
-      impact: "{count}件のタスクが作られ、イベントの関係者のタスク一覧に表示されます。担当者を指定するとその人にメール通知が届きます。この画面からは削除できません（内容は後から更新できます）。",
+      hint: "body.title 必須(1〜200字)。担当も必須: assigneeId（人）か assigneeTeamId（チーム）のどちらか1つ（無いと400）。eventId 省略でイベントに紐づかないタスク。priority は low|medium|high|urgent（既定 medium）。状態は常に todo。日時は ISO8601。parentTaskId を付けるなら teamId は親と同じにする。応答の id が新タスクの id",
+      impact: "{count}件のタスクが作られ、イベントの関係者のタスク一覧に表示されます。担当者（人）にはメール通知が届きます。この画面からは削除できません（内容は後から更新できます）。",
       body: {
         allowed: ["title", "eventId", "description", "priority", "assigneeId", "assigneeTeamId", "teamId", "parentTaskId", "wbs", "startAt", "dueAt"],
         required: ["title"],
@@ -92,7 +92,7 @@ export const TASK: AreaSpec = {
       reversible: true,
       risk: "mid",
       description: "タスクのタイトル・内容・状態・担当・日程などを更新する",
-      hint: "body.version は直前に tasks.get で読んだ値。status 遷移: todo→in_progress|blocked|done|cancelled / in_progress→todo|blocked|done|cancelled / blocked→todo|in_progress|cancelled / done→in_progress / cancelled→todo。origin=github のタスクは title・description・status・priority・assigneeId・dueAt を変えられない。null で項目を空にできる",
+      hint: "body.version は直前に tasks.get で読んだ値。status 遷移: todo→in_progress|blocked|done|cancelled / in_progress→todo|blocked|done|cancelled / blocked→todo|in_progress|cancelled / done→in_progress / cancelled→todo。origin=github のタスクは title・description・status・priority・assigneeId・dueAt を変えられない。null で項目を空にできるが、担当（assigneeId / assigneeTeamId）は両方を空にできない（400）。担当が空の古いタスクは同じ body で担当を指定しないと更新できない",
       impact: "{count}件のタスクが書き換わり、関係者の画面とガントチャートに反映されます。担当者を変えると新しい担当者にメール通知が届きます。変更前の値で再更新すれば元に戻せます。",
       body: {
         allowed: ["title", "description", "status", "priority", "assigneeId", "assigneeTeamId", "teamId", "parentTaskId", "wbs", "startAt", "dueAt", "version"],

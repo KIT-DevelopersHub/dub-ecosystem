@@ -65,8 +65,18 @@ describe("parseCursorQuery (raw string params)", () => {
 
 describe("validateCreateTaskRequest", () => {
   it("accepts a minimal valid body", () => {
-    const body = { eventId: "evt_1", title: "Do the thing" };
+    const body = { eventId: "evt_1", title: "Do the thing", assigneeId: "usr_1" };
     expect(validateCreateTaskRequest(body)).toBe(body);
+  });
+
+  it("accepts a team assignee instead of a person", () => {
+    const body = { eventId: "evt_1", title: "T", assigneeTeamId: "team_ops" };
+    expect(validateCreateTaskRequest(body)).toBe(body);
+  });
+
+  it("requires an assignee (person or team) — 担当は必須", () => {
+    const e = catchDub(() => validateCreateTaskRequest({ eventId: "evt_1", title: "T" }));
+    expect((e.details as FieldError[])).toContainEqual(expect.objectContaining({ field: "assigneeId", reason: "required" }));
   });
 
   it("accepts a full valid body", () => {
@@ -87,7 +97,7 @@ describe("validateCreateTaskRequest", () => {
       validateCreateTaskRequest({ title: "", priority: "critical", origin: "x", dueAt: 5 }),
     );
     expect(e.code).toBe(CommonErrorCodes.VALIDATION_FAILED);
-    expect(fields(e).sort()).toEqual(["dueAt", "eventId", "origin", "priority", "title"].sort());
+    expect(fields(e).sort()).toEqual(["assigneeId", "dueAt", "eventId", "origin", "priority", "title"].sort());
   });
 
   it("rejects a non-object root", () => {
@@ -111,6 +121,12 @@ describe("validateUpdateTaskRequest", () => {
   it("accepts explicit null for nullable patch fields", () => {
     const body = { version: 3, description: null, assigneeId: null, dueAt: null, status: "done" };
     expect(validateUpdateTaskRequest(body)).toBe(body);
+  });
+
+  it("rejects clearing both the person and the team in one PATCH", () => {
+    expect(fields(catchDub(() => validateUpdateTaskRequest({ version: 1, assigneeId: null, assigneeTeamId: null })))).toEqual([
+      "assigneeId",
+    ]);
   });
 
   it("rejects an invalid status enum", () => {

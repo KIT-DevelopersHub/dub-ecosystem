@@ -31,8 +31,9 @@ export interface Task extends Versioned {
   /**
    * Team assignee (担当チーム, #882). Additive/optional. Mutually exclusive with
    * `assigneeId`: the server clears one side whenever the other is set, so a task is
-   * assigned to a person XOR a team XOR nobody. Distinct from `teamId` (the owning
-   * team / gantt scope).
+   * assigned to a person XOR a team. 担当は必須: new tasks always have one; rows created
+   * before the rule may still have neither (read-only until an assignee is chosen).
+   * Distinct from `teamId` (the owning team / gantt scope).
    */
   assigneeTeamId?: TeamId | null;
   /** Owning team (canonical team.Team). Additive; null = unassigned to a team. */
@@ -82,6 +83,8 @@ export interface CreateTaskRequest {
   title: string;
   description?: string;
   priority?: TaskPriority; // default "medium"
+  /** 担当 (person). Exactly one of `assigneeId` / `assigneeTeamId` is required — neither ⇒
+   *  400 VALIDATION_FAILED `{ field: "assigneeId", reason: "required" }`. */
   assigneeId?: UserId;
   /** Team assignee (#882). Mutually exclusive with `assigneeId` (both set ⇒ 400). */
   assigneeTeamId?: TeamId | null;
@@ -103,7 +106,8 @@ export interface UpdateTaskRequest extends Versioned {
   priority?: TaskPriority;
   assigneeId?: UserId | null;
   /** Team assignee (#882). Setting a non-null value clears `assigneeId` (and vice-versa);
-   *  both non-null in one request ⇒ 400 `assignee_conflict`. */
+   *  both non-null in one request ⇒ 400 `assignee_conflict`. A PATCH that would leave the
+   *  task with neither ⇒ 400 `{ field: "assigneeId", reason: "required" }` (担当は必須). */
   assigneeTeamId?: TeamId | null;
   teamId?: TeamId | null;
   /** Planned start (開始日). Additive/optional; omit ⇒ unchanged, null ⇒ clear. */
