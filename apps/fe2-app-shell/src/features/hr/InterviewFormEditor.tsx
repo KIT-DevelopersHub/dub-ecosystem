@@ -12,7 +12,6 @@ import {
   Select,
   SortableList,
   Switch,
-  TextField,
   Textarea,
 } from "@dub/ui";
 import { hrForm } from "@dub/types";
@@ -110,9 +109,12 @@ export function InterviewFormEditor({ form, canWrite }: { form: hrForm.Interview
           質問は自由に追加・並べ替えできます。「応募者の項目」を選んだ質問の回答は応募者の表（氏名・メール・学科など）に入り、それ以外の回答は応募者の詳細に表示されます。
         </p>
         <FormField label="フォームのタイトル" htmlFor="hr-form-title" required {...(titleError ? { error: errorText("title", titleError.reason) } : {})}>
-          <TextField
+          <Textarea
             id="hr-form-title"
             testId="fe2-hr-form-title"
+            rows={1}
+            autoGrow
+            singleLine
             value={draft.title}
             onChange={(title) => setDraft((d) => ({ ...d, title }))}
             invalid={!!titleError}
@@ -124,6 +126,7 @@ export function InterviewFormEditor({ form, canWrite }: { form: hrForm.Interview
             id="hr-form-description"
             testId="fe2-hr-form-description"
             rows={3}
+            autoGrow
             value={draft.description ?? ""}
             onChange={(v) => setDraft((d) => ({ ...d, description: v }))}
             disabled={disabled}
@@ -178,9 +181,12 @@ export function InterviewFormEditor({ form, canWrite }: { form: hrForm.Interview
                 <div className={styles.questionBody}>
                   <div className={styles.questionRow}>
                     <FormField label={`質問 ${i + 1}`} htmlFor={`hr-form-q-${q.id}-label`} required {...(qError(i, "label") ? { error: qError(i, "label")! } : {})}>
-                      <TextField
+                      <Textarea
                         id={`hr-form-q-${q.id}-label`}
                         testId={`fe2-hr-form-q-${q.id}-label`}
+                        rows={1}
+                        autoGrow
+                        singleLine
                         value={q.label}
                         onChange={(label) => setQ(q.id, { label })}
                         placeholder="質問文"
@@ -201,8 +207,12 @@ export function InterviewFormEditor({ form, canWrite }: { form: hrForm.Interview
                     </FormField>
                   </div>
                   <FormField label="補足説明（任意）" htmlFor={`hr-form-q-${q.id}-desc`}>
-                    <TextField
+                    <Textarea
                       id={`hr-form-q-${q.id}-desc`}
+                      testId={`fe2-hr-form-q-${q.id}-desc`}
+                      rows={1}
+                      autoGrow
+                      singleLine
                       value={q.description ?? ""}
                       onChange={(v) => setQ(q.id, { description: v })}
                       disabled={disabled}
@@ -303,9 +313,12 @@ function OptionsEditor({
       <div className={styles.optionList} data-testid={`fe2-hr-form-q-${q.id}-options`}>
         {q.options.map((o, i) => (
           <div className={styles.optionRow} key={i}>
-            <TextField
+            <Textarea
               id={`hr-form-q-${q.id}-opt-${i}`}
               testId={`fe2-hr-form-q-${q.id}-opt-${i}`}
+              rows={1}
+              autoGrow
+              singleLine
               value={o}
               onChange={(v) => onChange(q.options.map((x, j) => (j === i ? v : x)))}
               disabled={disabled}

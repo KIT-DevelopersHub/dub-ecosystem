@@ -8,10 +8,11 @@
 import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp } from "@dub/types";
 import { ordersCsv } from "./ticket-csv";
-import { EVENT_NAME, isTestOrder, orderNumber, renderBuyerMail, renderOpsMail, type RenderedMail, type TicketPass } from "./ticket-mail";
-import { ticketToken, verifyTicketToken } from "./ticket-token";
+import { EVENT_NAME, isTestOrder, orderNumber, renderBuyerMail, renderOpsMail, renderRefundMail, type RenderedMail, type TicketPass } from "./ticket-mail";
+import { receiptAvailable } from "./ticket-receipt";
+import { receiptToken, ticketToken, verifyTicketToken } from "./ticket-token";
 import type { OutboundMail } from "./mailer";
-import type { AppDeps, OutboxKind, OutboxRow, OutboxUpdate, TicketOrderRow, TicketRow } from "./types";
+import type { AppDeps, CheckinRow, OutboxKind, OutboxRow, OutboxUpdate, TicketOrderRow, TicketRow } from "./types";
 
 const SITE = lp.LP_PUBLISH_SITE;
 
@@ -113,6 +114,24 @@ export function fulfilmentOf(order: TicketOrderRow, now: string): { tickets: Tic
   return { tickets, outbox };
 }
 
+/**
+ * 返金・取消のお知らせ（購入者あて）の outbox 行。markOrderRefunded が返金と同じトランザクションで入れる。
+ * id <orderId>:buyer_refund がそのまま Resend の Idempotency-Key になる。
+ */
+export function refundMailOf(orderId: string, now: string): OutboxRow {
+  return {
+    id: `${orderId}:buyer_refund`,
+    orderId,
+    kind: "buyer_refund",
+    status: "pending",
+    attempts: 0,
+    nextAttemptAt: now,
+    lastError: null,
+    sentAt: null,
+    createdAt: now,
+  };
+}
+
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -154,10 +173,19 @@ export class TicketDelivery {
     this.sendSoon(orderId);
   }
 
+  /**
+   * 返金・取消が確定した直後（markOrderRefunded(…, refundMailOf(…)) が true を返した側だけ）。
+   * お知らせは返金と同じトランザクションで outbox に入っているので、ここは購入確認と同じ「すぐ送る」だけ。
+   * 落ちた分は drain（reconcile の cron / DO alarm）が同じ backoff で送り直す。返金の経路は止めない。
+   */
+  onRefunded(orderId: string): void {
+    this.sendSoon(orderId);
+  }
+
   /** The buyer's mail right after payment. In a burst Resend answers 429 and the alarm takes over. */
   private sendSoon(orderId: string): void {
     const { defer, armReconcile } = this.deps;
-    if (!defer || this.deliverableKinds().length === 0) return;
+    if (!defer || this.drainKinds().length === 0) return;
     defer(
       this.drain({ orderId, limit: 2, budgetMs: DRAIN_BUDGET_MS })
         .then((r) => (r.retried > 0 ? armReconcile?.({ soon: true }) : undefined))
@@ -165,12 +193,19 @@ export class TicketDelivery {
     );
   }
 
+  /** Mails a new order owes that can go out now (the order-acceptance check counts these). */
   private deliverableKinds(): OutboxKind[] {
     if (!this.deps.mailer) return [];
     return [
       ...(this.deps.ticketTokenSecret ? (["buyer_confirmation"] as const) : []),
       ...(this.deps.ticketOpsEmail ? (["ops_copy"] as const) : []),
     ];
+  }
+
+  /** Everything the drain sends: the order mails plus the refund notice (needs only the mailer). */
+  private drainKinds(): OutboxKind[] {
+    if (!this.deps.mailer) return [];
+    return [...this.deliverableKinds(), "buyer_refund"];
   }
 
   private async passes(tickets: readonly TicketRow[]): Promise<TicketPass[]> {
@@ -184,13 +219,23 @@ export class TicketDelivery {
     );
   }
 
+  /** 有料の注文だけ。チケットの URL とは別のトークン（同行者に転送されても領収書は開けない）。 */
+  private async receiptUrl(order: TicketOrderRow): Promise<string | null> {
+    if (!receiptAvailable(order)) return null;
+    const base = this.deps.lpBaseUrl.replace(/\/+$/, "");
+    return `${base}/receipt/${await receiptToken(this.deps.ticketTokenSecret!, order.id)}`;
+  }
+
   private async mailFor(row: OutboxRow, order: TicketOrderRow, tickets: readonly TicketRow[]): Promise<OutboundMail | null> {
     let rendered: RenderedMail;
     let to: string;
-    if (row.kind === "buyer_confirmation") {
+    if (row.kind === "buyer_refund") {
+      rendered = renderRefundMail(order);
+      to = order.buyerEmail;
+    } else if (row.kind === "buyer_confirmation") {
       const valid = tickets.filter((t) => t.status === "valid");
       if (valid.length === 0) return null;
-      rendered = renderBuyerMail(order, await this.passes(valid));
+      rendered = renderBuyerMail(order, await this.passes(valid), await this.receiptUrl(order));
       to = order.buyerEmail;
     } else {
       rendered = renderOpsMail(order);
@@ -220,12 +265,17 @@ export class TicketDelivery {
     tickets: readonly TicketRow[],
   ): Promise<{ update: OutboxUpdate; stop?: boolean }> {
     if (!order) return { update: this.counted(row, "order_missing") };
-    if (order.status === "refunded") {
-      return {
-        update: { id: row.id, status: "failed", attempts: row.attempts, nextAttemptAt: row.nextAttemptAt, lastError: "order_refunded", sentAt: null },
-      };
+    const gone = (lastError: string): { update: OutboxUpdate } => ({
+      update: { id: row.id, status: "failed", attempts: row.attempts, nextAttemptAt: row.nextAttemptAt, lastError, sentAt: null },
+    });
+    if (row.kind === "buyer_refund") {
+      // refunded is final, so anything else means the row is stale: never tell a paying buyer "refunded".
+      if (order.status !== "refunded") return gone("order_not_refunded");
+    } else if (order.status === "refunded") {
+      return gone("order_refunded");
+    } else if (order.status !== "paid") {
+      return { update: this.later(row, OUTBOX_HOLD_MS, "order_on_hold") };
     }
-    if (order.status !== "paid") return { update: this.later(row, OUTBOX_HOLD_MS, "order_on_hold") };
     let mail: OutboundMail | null;
     try {
       mail = await this.mailFor(row, order, tickets);
@@ -296,7 +346,7 @@ export class TicketDelivery {
   /** Sends due rows, paced. Two drains at once split the rows between them: the claim hands each to one. */
   async drain(o: { orderId?: string; limit?: number; budgetMs?: number } = {}): Promise<DrainResult> {
     const result: DrainResult = { sent: 0, retried: 0, failed: 0 };
-    const kinds = this.deliverableKinds();
+    const kinds = this.drainKinds();
     if (kinds.length === 0) return result;
     const now = this.deps.now();
     const deadline = Date.parse(now) + (o.budgetMs ?? DRAIN_BUDGET_MS);
@@ -357,10 +407,11 @@ export class TicketDelivery {
       const due = await this.repo.outboxDue(this.plusMs(BACKLOG_WINDOW_MS));
       const buyers = due.get("buyer_confirmation") ?? 0;
       const ops = due.get("ops_copy") ?? 0;
-      if (!this.deps.mailer && buyers + ops > 0) log("error", "lp ticket mail pending: RESEND_API_KEY is not set", { buyers, ops });
+      const refunds = due.get("buyer_refund") ?? 0;
+      if (!this.deps.mailer && buyers + ops + refunds > 0) log("error", "lp ticket mail pending: RESEND_API_KEY is not set", { buyers, ops, refunds });
       if (!this.deps.ticketTokenSecret && buyers > 0) log("error", "lp ticket mail pending: TICKET_TOKEN_SECRET is not set", { buyers });
       if (!this.deps.ticketOpsEmail && ops > 0) log("error", "lp ticket ops copy pending: TICKET_OPS_EMAIL is not set", { ops });
-      sum.mailBacklog = this.deliverableKinds().reduce((n, k) => n + (due.get(k) ?? 0), 0);
+      sum.mailBacklog = this.drainKinds().reduce((n, k) => n + (due.get(k) ?? 0), 0);
     } catch (e) {
       log("error", "lp ticket drain failed", { error: String(e) });
     }
@@ -404,16 +455,29 @@ export class TicketDelivery {
     }
   }
 
-  /** Everything needed to rebuild the sale. Tokens are derived, never stored, so none can end up here. */
+  private async allCheckins(): Promise<CheckinRow[]> {
+    const out: CheckinRow[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const page: CheckinRow[] = await this.repo.listCheckinsForBackup(cursor, EXPORT_PAGE);
+      out.push(...page);
+      if (page.length < EXPORT_PAGE) return out;
+      const last = page[page.length - 1]!;
+      cursor = `${last.eventDay}~${last.ticketId}`;
+    }
+  }
+
+  /** Everything needed to rebuild the sale (and the 当日受付). Tokens are derived, never stored, so none can end up here. */
   private async snapshot(exportedAt: string) {
-    const [settings, types, coupons, orders, tickets] = await Promise.all([
+    const [settings, types, coupons, orders, tickets, checkins] = await Promise.all([
       this.repo.getTicketSettings(SITE),
       this.repo.listTicketTypes(SITE),
       this.repo.listCoupons(SITE),
       this.allOrders(),
       this.allTickets(),
+      this.allCheckins(),
     ]);
-    return { exportedAt, site: SITE, settings, types, coupons, orders, tickets };
+    return { exportedAt, site: SITE, settings, types, coupons, orders, tickets, checkins };
   }
 
   /** Once per JST day. true = it ran (the pass has fewer subrequests left for mail). */

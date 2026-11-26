@@ -215,6 +215,12 @@ export function useOptionalCanEdit(appId: string, permission: PermissionKey): bo
   return ctx.appLevel(appId) === policy.AppAccessLevel.Edit && ctx.can(permission);
 }
 
+/** Does this viewer hold `permission`? null outside <AuthProvider> (isolated feature tests). */
+export function useOptionalCan(permission: PermissionKey): boolean | null {
+  const ctx = useContext(AuthCtx);
+  return ctx ? ctx.can(permission) : null;
+}
+
 /** The viewer's display name + the shell api-client, for chrome that files a request as them. */
 export function useViewerApi(): { api: ApiClient; displayName: string | null } {
   const { api, state } = useAuthCtx();

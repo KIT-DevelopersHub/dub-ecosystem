@@ -9,6 +9,7 @@ import { dubContext, type RequestContext } from "@dub/http";
 import { dubErrorHandler, errors } from "@dub/errors";
 import { policyGate, type PolicyGateVars } from "@dub/policy-gate";
 import { POLICY_TABLE } from "./policy-table";
+import { CheckinService } from "./checkin";
 import { TicketService } from "./tickets";
 import type { AppDeps, ReqCtx } from "./types";
 
@@ -32,6 +33,7 @@ async function readJson(c: Context): Promise<unknown> {
 
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const tickets = new TicketService(deps);
+  const checkins = new CheckinService(deps);
   const app = new Hono<{ Variables: Vars }>();
 
   app.onError(dubErrorHandler({ service: "lp-tickets" }));
@@ -49,6 +51,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.post("/lp/internal/tickets/preview", async (c) => c.json(await tickets.checkPreview(await readJson(c))));
   app.post("/lp/internal/tickets/confirm", async (c) => c.json(await tickets.confirm(await readJson(c))));
   app.get("/lp/internal/tickets/pass/:token", async (c) => c.json(await tickets.pass(c.req.param("token"))));
+  // 領収書（注文ごとの署名トークン）。宛名は空の時だけ 1 回入れられる。
+  app.get("/lp/internal/tickets/receipt/:token", async (c) => c.json(await tickets.receipt(c.req.param("token"))));
+  app.post("/lp/internal/tickets/receipt/:token", async (c) =>
+    c.json(await tickets.setReceiptName(c.req.param("token"), await readJson(c))),
+  );
   app.post("/lp/internal/tickets/stripe-webhook", async (c) => {
     const raw = await c.req.text();
     return c.json(await tickets.webhook(raw, c.req.header("stripe-signature")));
@@ -78,6 +85,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
   // 要確認 -> 支払い済み の確定はお金と券を結び付ける操作なので、販売 on/off と同じ lp:publish。
   app.post("/lp/tickets/orders/:id/approve", async (c) => c.json(await tickets.approve(reqCtx(c), c.req.param("id"))));
+  // 返金（有料 = Stripe Refund）/ 取消（0 円）。お金を戻す操作なので同じく lp:publish。
+  app.post("/lp/tickets/orders/:id/refund", async (c) => c.json(await tickets.refund(reqCtx(c), c.req.param("id"))));
 
   // 無料券のクーポン: コードは券と同じ価値を持つので、一覧（コードが見える）も発行・停止も販売 on/off と同じ lp:publish。
   app.get("/lp/tickets/coupons", async (c) => c.json(await tickets.listCoupons()));
@@ -85,6 +94,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.patch("/lp/tickets/coupons/:id", async (c) =>
     c.json(await tickets.setCouponActive(reqCtx(c), c.req.param("id"), await readJson(c))),
   );
+
+  // 当日受付: 受付係に配る lp:checkin（LP管理の閲覧 + lp:checkin）。受付できなくても 200 で result に理由。
+  app.post("/lp/tickets/checkin", async (c) => c.json(await checkins.checkin(reqCtx(c), await readJson(c))));
+  app.delete("/lp/tickets/checkin/:ticketId", async (c) =>
+    c.json(await checkins.undo(c.req.param("ticketId"), c.req.query("day"))),
+  );
+  app.get("/lp/tickets/checkins", async (c) => c.json(await checkins.list(c.req.query())));
 
   return app;
 }

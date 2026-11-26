@@ -11,7 +11,7 @@ describe("resolveTypeDisplay", () => {
     expect(d.known).toBe(true);
     expect(d.icon).toBe("task");
     expect(d.group).toBe("task");
-    expect(d.label).toMatch(/assigned/i);
+    expect(d.label).toMatch(/割り当て/);
   });
 
   it("falls back to the group prefix label when only the prefix is known", () => {

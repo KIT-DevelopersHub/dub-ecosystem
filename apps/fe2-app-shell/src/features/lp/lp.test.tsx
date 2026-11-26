@@ -63,6 +63,7 @@ const linksStubs = {
   listTicketOrders: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   exportTicketOrders: async () => new Blob(["x"]),
   approveTicketOrder: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  refundTicketOrder: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   listTicketCoupons: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   createTicketCoupon: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   setTicketCouponActive: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
@@ -76,6 +77,9 @@ const linksStubs = {
   saveSiteConfigDraft: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   resetSiteConfigDraft: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   publishSiteConfig: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  checkinTicket: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  undoTicketCheckin: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  listTicketCheckins: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
 };
 
 const UNCONFIGURED_SITE = {

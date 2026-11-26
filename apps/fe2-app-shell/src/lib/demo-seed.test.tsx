@@ -192,7 +192,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 97-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 99-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -201,7 +201,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(97);
+    expect(catalog).toHaveLength(99);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -600,6 +600,27 @@ describe("chat channel delete + org-wide sections (demo store)", () => {
     await a.request({ method: "POST", path: "/api/v1/chat/channels/chn_team_ops/members", body: { userId: "usr_carol" } });
     await a.request<void>({ method: "DELETE", path: "/api/v1/chat/channels/chn_team_ops/members/usr_bob" });
     expect((await members()).map((m) => m.userId)).toEqual(["usr_demo", "usr_carol"]);
+  });
+});
+
+describe("times チャンネル (#850, Dub chat)", () => {
+  interface Item { userId: string; channelName: string | null; channelId: string | null; status: string }
+  it("previews without creating, then creates one owned chat channel per active member", async () => {
+    const a = api();
+    const p = await a.request<{ items: Item[]; recordedCount: number }>({ method: "GET", path: "/api/v1/chat/times/preview" });
+    expect(p.items.length).toBeGreaterThan(0);
+    expect(p.items.every((i) => i.status === "planned" && i.channelName?.startsWith("times-"))).toBe(true);
+    const listNames = async () => (await a.request<{ name: string }[]>({ method: "GET", path: "/api/v1/chat/channels" })).map((c) => c.name);
+    expect((await listNames()).some((n) => n.startsWith("times-"))).toBe(false);
+    let remaining = 1;
+    for (let i = 0; remaining > 0 && i < 20; i++) {
+      remaining = (await a.request<{ results: Item[]; remaining: number }>({ method: "POST", path: "/api/v1/chat/times/bulk", body: {} })).remaining;
+    }
+    const names = (await listNames()).filter((n) => n.startsWith("times-"));
+    expect(names).toHaveLength(p.items.length);
+    expect(new Set(names).size).toBe(names.length);
+    const again = await a.request<{ items: Item[]; recordedCount: number }>({ method: "GET", path: "/api/v1/chat/times/preview" });
+    expect(again).toMatchObject({ items: [], recordedCount: p.items.length });
   });
 });
 

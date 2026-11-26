@@ -52,9 +52,13 @@ export interface GatewayEnv {
   // Login URL written into the account-issue mail (handlers/account-mail.ts). Default
   // = @dub/types common.PUBLIC_APP_BASE_URL (app.developershub.jp has no DNS yet).
   APP_BASE_URL?: string;
-  // Rate-limit policy tuning (both optional; defaults 100 / 60_000 ms). Env-tunable
-  // without a contract change — clients depend only on the wire signals (§7).
-  RATE_LIMIT_MAX?: string;
+  // Rate-limit policy tuning (all optional). Env-tunable without a contract change —
+  // clients depend only on the wire signals (§7). Defaults: rate-limit.ts
+  // DEFAULT_RATE_LIMIT_POLICY (600 / 300 / 6000 per 60_000 ms).
+  RATE_LIMIT_USER_MAX?: string; // per session credential
+  RATE_LIMIT_IP_MAX?: string; // per IP, requests WITHOUT a credential
+  RATE_LIMIT_IP_CEILING?: string; // per IP, all credentialed requests combined
+  RATE_LIMIT_MAX?: string; // legacy alias of RATE_LIMIT_IP_MAX (used when that is unset)
   RATE_LIMIT_WINDOW_MS?: string;
 }
 

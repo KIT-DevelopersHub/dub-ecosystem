@@ -143,3 +143,174 @@ export interface LpTicketCouponInput {
   /** ISO・未来 */
   expiresAt?: string;
 }
+
+// ---- 領収書（公開 LP の /receipt/<token>。トークンは注文ごとの HMAC 署名で、チケット URL とは別） ----
+
+/** 宛名の上限文字数（LP のフォームと lp-tickets の検証で共有）。 */
+export const LP_TICKET_RECEIPT_NAME_MAX = 60;
+
+/** issued = 有効な領収書 / refunded = 返金済みで無効（表示はするが「無効」と明記）。 */
+export type LpTicketReceiptStatus = "issued" | "refunded";
+
+/** 発行者。未設定の項目は null（LP は「未設定」と明示して出す。勝手に埋めない）。 */
+export interface LpTicketReceiptIssuer {
+  name: string;
+  event: string;
+  email: string;
+  url: string;
+  /** 所在地。null = 未設定。 */
+  address: string | null;
+  /** 適格請求書発行事業者の登録番号（T + 13 桁）。null = 登録なし（消費税額の内訳も出さない）。 */
+  invoiceRegistrationNo: string | null;
+}
+
+/** GET/POST /lp/internal/tickets/receipt/:token（LP Worker が HTML にする）。有料で支払い済み・返金済みの注文だけ。 */
+export interface LpTicketReceipt {
+  orderNumber: string;
+  status: LpTicketReceiptStatus;
+  /** null = 宛名なし（LP で 1 回だけ入れられる）。 */
+  receiptName: string | null;
+  items: LpTicketOrderItem[];
+  /** 合計（税込）。 */
+  amountJpy: number;
+  /** うち消費税（10%）。登録番号が無い時は null。 */
+  taxJpy: number | null;
+  /** 支払日時（ISO）。 */
+  paidAt: string;
+  /** Stripe の決済手段（"card" / "paypay" など）。不明は null。 */
+  paymentMethod: string | null;
+  /** テスト注文（実際の請求なし）。領収書としては無効。 */
+  test: boolean;
+  issuer: LpTicketReceiptIssuer;
+}
+
+/** POST /lp/internal/tickets/receipt/:token — 宛名が未設定の時だけ 1 回入れられる（2 回目は 409）。 */
+export interface LpTicketReceiptNameInput {
+  /** 1..LP_TICKET_RECEIPT_NAME_MAX 字 */
+  receiptName: string;
+}
+
+/**
+ * POST /api/v1/lp/tickets/orders/:id/refund の結果（app:lp:edit + lp:publish）。
+ * - refunded: 有料。Stripe の返金が完了し、注文は返金済み・チケットは無効（void）になった。
+ * - refund_pending: 有料。Stripe が返金を受け付けたが未完了（PayPay など）。完了は charge.refunded の webhook で反映される。
+ * - cancelled: 無料（0 円）注文の取消。その場で返金済み・チケットは無効になる。
+ * void のチケットは当日受付でも「無効」として扱う。
+ */
+export type LpTicketRefundResult = "refunded" | "refund_pending" | "cancelled";
+
+export interface LpTicketRefundResponse {
+  result: LpTicketRefundResult;
+  order: LpTicketOrder;
+}
+
+/**
+ * 返金/取消できない時の details.reason。
+ * 409: not_refundable（支払い済み/要確認でない）・refund_window_closed（返金期限 = 開催最終日の JST 23:59:59 を過ぎた）・
+ *      dispute_open（チャージバック審理中）・
+ *      payment_intent_missing（Stripe の決済が紐付いていない）・stripe_mode_mismatch（テスト注文と本番キー等の食い違い）・
+ *      refund_rejected（Stripe が返金を断った）
+ * 503: payment_not_configured（Stripe 未設定）
+ */
+export type LpTicketRefundErrorReason =
+  | "not_refundable"
+  | "refund_window_closed"
+  | "dispute_open"
+  | "payment_intent_missing"
+  | "stripe_mode_mismatch"
+  | "refund_rejected"
+  | "payment_not_configured";
+
+/** 開催日（JST の 'YYYY-MM-DD'・日付順）。LP の構造化データ（StructuredData.tsx）と同じ日付。 */
+export const LP_TICKET_EVENT_DAYS: readonly string[] = ["2027-09-13", "2027-09-14"];
+
+/**
+ * 返金・取消の期限 = 開催最終日の当日まで（JST）。この時刻（最終日の翌日 0:00 JST）以降は返金できない。
+ * API（409 refund_window_closed）と fe2（ボタンを出さない）の両方がここを見る。
+ */
+export const LP_TICKET_REFUND_CLOSES_AT: string = new Date(
+  Date.parse(`${LP_TICKET_EVENT_DAYS[LP_TICKET_EVENT_DAYS.length - 1]}T00:00:00+09:00`) + 24 * 60 * 60 * 1000,
+).toISOString();
+
+/** now（ISO）に返金・取消できるか。開催最終日の JST 23:59:59.999 までは true。 */
+export function isLpTicketRefundOpen(nowIso: string, closesAt: string = LP_TICKET_REFUND_CLOSES_AT): boolean {
+  return Date.parse(nowIso) < Date.parse(closesAt);
+}
+
+// ---- 当日受付（チェックイン）: 権限 lp:checkin ----
+
+/**
+ * ok = 今受付した / already = この開催日はもう受付済み / void = 返金・取消済みの券（または未確定の注文）/
+ * wrong_day = Day 券をその券の日以外に読んだ / unknown = 券が見つからない・コードが読めない。
+ */
+export type LpTicketCheckinResult = "ok" | "already" | "void" | "wrong_day" | "unknown";
+
+/**
+ * 券種と開催日の照合結果。all_days = 通し券（dayLabel 空）/ match = dayLabel の日付が開催日と一致 /
+ * unverified = dayLabel から日付が読めず照合できなかった（受付は通す・画面で注意を出す）。
+ */
+export type LpTicketCheckinDayCheck = "all_days" | "match" | "unverified";
+
+/** POST /api/v1/lp/tickets/checkin */
+export interface LpTicketCheckinInput {
+  /** QR の中身（チケット URL `…/t/<token>`）・トークン・チケット ID（手入力）のどれか。 */
+  code: string;
+  /** 開催日 'YYYY-MM-DD'（JST）。省略 = 今日（JST）。 */
+  eventDay?: string;
+}
+
+/** 受付で見せる券の情報。holderName が null なら buyerName を名札に使う。 */
+export interface LpTicketCheckinTicket {
+  ticketId: string;
+  /** 注文番号（注文 ID の末尾 8 文字・大文字）。メールと同じ表記。 */
+  orderRef: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  holderName: string | null;
+  buyerName: string;
+}
+
+/** POST /api/v1/lp/tickets/checkin の応答。受付できなくても 200 で result に理由が入る。 */
+export interface LpTicketCheckinResponse {
+  result: LpTicketCheckinResult;
+  eventDay: string;
+  /** unknown のときだけ null。 */
+  ticket: LpTicketCheckinTicket | null;
+  /** ok = 今回の時刻 / already = 最初に受付した時刻。それ以外は null。 */
+  checkedInAt: string | null;
+  checkedInBy: string | null;
+  /** ok / already / wrong_day のとき。 */
+  dayCheck: LpTicketCheckinDayCheck | null;
+}
+
+/** 受付一覧の 1 行。 */
+export interface LpTicketCheckin {
+  ticketId: string;
+  eventDay: string;
+  checkedInAt: string;
+  checkedInBy: string;
+  orderRef: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  holderName: string | null;
+  buyerName: string;
+}
+
+/** GET /api/v1/lp/tickets/checkins?day=&cursor= — 新しい順。 */
+export interface LpTicketCheckinsPage {
+  eventDay: string;
+  /** その開催日の受付数。 */
+  count: number;
+  /** 受付のある開催日ごとの受付数（日付順）。 */
+  days: { eventDay: string; count: number }[];
+  items: LpTicketCheckin[];
+  nextCursor: string | null;
+}
+
+/** DELETE /api/v1/lp/tickets/checkin/:ticketId?day= — 受付の取り消し（読み間違え用）。 */
+export interface LpTicketCheckinUndoResponse {
+  ticketId: string;
+  eventDay: string;
+  /** false = もともと受付されていなかった（何もしていない）。 */
+  removed: boolean;
+}

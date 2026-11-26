@@ -1,5 +1,5 @@
-// Minimal Stripe client (no SDK): Checkout Session create/retrieve over fetch (form-encoded)
-// + webhook signature check. fetch is injectable so tests never hit the network.
+// Minimal Stripe client (no SDK): Checkout Session create/retrieve + Refund create over fetch
+// (form-encoded) + webhook signature check. fetch is injectable so tests never hit the network.
 import { errors } from "@dub/errors";
 
 const API = "https://api.stripe.com/v1";
@@ -43,11 +43,39 @@ export interface CheckoutSession {
 /** Expansion that exposes the used payment method type on a retrieved session. */
 export const SESSION_EXPAND = "payment_intent.payment_method";
 
+export interface Refund {
+  id: string;
+  /** "succeeded" | "pending" | "requires_action" | "failed" | "canceled" */
+  status: string | null;
+  amount: number | null;
+}
+
+export interface RefundInput {
+  paymentIntentId: string;
+  /** Same key = same refund at Stripe (24h), so a double click or a retry never refunds twice. */
+  idempotencyKey: string;
+  /** Logged on the Refund (metadata.order_id). */
+  orderId: string;
+}
+
+/** Stripe answered 4xx (e.g. charge_already_refunded, charge_disputed). Not retryable as is. */
+export class StripeRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(`stripe request rejected: ${status}${code ? ` ${code}` : ""}`);
+    this.name = "StripeRequestError";
+  }
+}
+
 export interface StripeClient {
   /** true = live key (sk_live_ / rk_live_). Events/sessions of the other mode are ignored. */
   readonly livemode: boolean;
   createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSession>;
   getCheckoutSession(id: string): Promise<CheckoutSession>;
+  /** Full refund of a PaymentIntent. 4xx -> StripeRequestError; network / 5xx -> upstreamUnavailable. */
+  createRefund(input: RefundInput): Promise<Refund>;
 }
 
 /** sk_live_ / rk_live_ = real charges. sk_test_ / rk_test_ = sandbox. */
@@ -90,6 +118,15 @@ export function toCheckoutSession(raw: unknown): CheckoutSession {
   };
 }
 
+export function toRefund(raw: unknown): Refund {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: typeof r.id === "string" ? r.id : "",
+    status: typeof r.status === "string" ? r.status : null,
+    amount: typeof r.amount === "number" ? r.amount : null,
+  };
+}
+
 function usedPaymentMethodType(pi: unknown): string | null {
   if (!pi || typeof pi !== "object") return null;
   const pm = (pi as Record<string, unknown>).payment_method;
@@ -99,12 +136,13 @@ function usedPaymentMethodType(pi: unknown): string | null {
 }
 
 export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, init) => fetch(i, init)): StripeClient {
-  const call = async (
+  const request = async (
     method: "GET" | "POST",
     path: string,
     form?: URLSearchParams,
     idempotencyKey?: string,
-  ): Promise<CheckoutSession> => {
+    rejectClientErrors = false,
+  ): Promise<unknown> => {
     let res: Response;
     try {
       res = await fetchFn(`${API}${path}`, {
@@ -119,9 +157,25 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
     } catch (cause) {
       throw errors.upstreamUnavailable("stripe", cause);
     }
+    if (rejectClientErrors && res.status >= 400 && res.status < 500) {
+      let code: string | null = null;
+      try {
+        const body = (await res.json()) as { error?: { code?: unknown } };
+        code = typeof body.error?.code === "string" ? body.error.code : null;
+      } catch {
+        // no JSON body: the status alone is enough
+      }
+      throw new StripeRequestError(res.status, code);
+    }
     if (!res.ok) throw errors.upstreamUnavailable("stripe", new Error(`stripe ${method} ${path}: ${res.status}`));
-    return toCheckoutSession(await res.json());
+    return res.json();
   };
+  const call = async (
+    method: "GET" | "POST",
+    path: string,
+    form?: URLSearchParams,
+    idempotencyKey?: string,
+  ): Promise<CheckoutSession> => toCheckoutSession(await request(method, path, form, idempotencyKey));
 
   return {
     livemode: isLiveKey(secretKey),
@@ -151,6 +205,13 @@ export function createStripeClient(secretKey: string, fetchFn: FetchFn = (i, ini
     getCheckoutSession(id) {
       const q = new URLSearchParams({ "expand[]": SESSION_EXPAND });
       return call("GET", `/checkout/sessions/${encodeURIComponent(id)}?${q.toString()}`);
+    },
+    async createRefund(i) {
+      const f = new URLSearchParams();
+      f.set("payment_intent", i.paymentIntentId);
+      f.set("reason", "requested_by_customer");
+      f.set("metadata[order_id]", i.orderId);
+      return toRefund(await request("POST", "/refunds", f, i.idempotencyKey, true));
     },
   };
 }

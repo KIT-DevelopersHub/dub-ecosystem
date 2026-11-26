@@ -98,6 +98,46 @@ describe("HomeScreen", () => {
     expect(screen.getByTestId("fe2-home-task-segbar")).toBeInTheDocument();
   });
 
+  it("shows unmeasured free-tier metrics as 取得できません, never 0% (#859)", async () => {
+    // usage-meter answered (no partial error) but could not measure any Cloudflare metric
+    // (e.g. staging without a Cloudflare analytics token) → every pct is null.
+    const home: gateway.BffHomeResponse = {
+      ...OK_HOME,
+      usageSummary: {
+        metrics: [
+          { key: "kv_reads_day", label: "KV 読み取り(日)", pct: null },
+          { key: "workers_requests_day", label: "Workers リクエスト(日)", pct: null },
+        ],
+        worst: null,
+      },
+    };
+    render(wrap(<HomeScreen api={makeApi(home)} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-usage-kv_reads_day-unavailable")).toBeInTheDocument());
+    expect(screen.getByTestId("fe2-usage-kv_reads_day")).toHaveTextContent("取得できません");
+    expect(screen.getByTestId("fe2-usage-kv_reads_day")).not.toHaveTextContent("%");
+    expect(screen.getByTestId("fe2-usage-workers_requests_day")).toHaveTextContent("取得できません");
+    expect(screen.getByTestId("fe2-kpi-freetier-value")).toHaveTextContent("—");
+    expect(screen.getByTestId("fe2-kpi-freetier-value")).not.toHaveTextContent("0%");
+    expect(screen.getByTestId("fe2-kpi-freetier")).toHaveTextContent("取得できません");
+  });
+
+  it("headlines the worst MEASURED metric when only some are unavailable", async () => {
+    const home: gateway.BffHomeResponse = {
+      ...OK_HOME,
+      usageSummary: {
+        metrics: [
+          { key: "kv_reads_day", label: "KV 読み取り(日)", pct: null },
+          { key: "emails_month", label: "メール送信(月)", pct: 12.0 },
+        ],
+        worst: { key: "emails_month", label: "メール送信(月)", pct: 12.0 },
+      },
+    };
+    render(wrap(<HomeScreen api={makeApi(home)} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-freetier-value")).toHaveTextContent("12%"));
+    expect(screen.getByTestId("fe2-usage-emails_month")).toHaveTextContent("12.0%");
+    expect(screen.getByTestId("fe2-usage-kv_reads_day")).toHaveTextContent("取得できません");
+  });
+
   it("shows the empty state when there are no unread notifications", async () => {
     render(wrap(<HomeScreen api={makeApi({ ...OK_HOME, unreadCount: 0 })} />));
     await waitFor(() => expect(screen.getByTestId("fe2-home-unread-empty")).toBeInTheDocument());

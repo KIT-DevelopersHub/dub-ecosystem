@@ -79,14 +79,27 @@ describe("taskSegmentsFromCounts", () => {
 });
 
 describe("free-tier projection", () => {
-  it("maps null pct to 0 and sorts most-stressed first", () => {
+  it("keeps an unmeasured (null) pct as null — never 0 — and sorts it last", () => {
     const metrics = freeTierFromMetrics([
       { key: "a", label: "A", pct: 12.3 },
       { key: "b", label: "B", pct: null },
+      { key: "z", label: "Z", pct: 0 },
       { key: "c", label: "C", pct: 88.0 },
     ]);
-    expect(metrics.map((m) => m.key)).toEqual(["c", "a", "b"]);
-    expect(metrics.find((m) => m.key === "b")!.pct).toBe(0);
+    expect(metrics.map((m) => m.key)).toEqual(["c", "a", "z", "b"]);
+    expect(metrics.find((m) => m.key === "b")!.pct).toBeNull();
+  });
+  it("worstFreeTier ignores unmeasured metrics and is null when none were measured", () => {
+    const partial = freeTierFromMetrics([
+      { key: "a", label: "A", pct: null },
+      { key: "c", label: "C", pct: 3.5 },
+    ]);
+    expect(worstFreeTier(partial)).toMatchObject({ key: "c", pct: 3.5 });
+    const none = freeTierFromMetrics([
+      { key: "a", label: "A", pct: null },
+      { key: "b", label: "B", pct: null },
+    ]);
+    expect(worstFreeTier(none)).toBeNull();
   });
   it("worstFreeTier returns the single most-stressed metric, or null when empty", () => {
     const metrics = freeTierFromMetrics([
@@ -95,7 +108,7 @@ describe("free-tier projection", () => {
     ]);
     const worst = worstFreeTier(metrics);
     expect(worst?.key).toBe("c");
-    for (const m of metrics) expect(worst!.pct).toBeGreaterThanOrEqual(m.pct);
+    for (const m of metrics) expect(worst!.pct).toBeGreaterThanOrEqual(m.pct ?? 0);
     expect(worstFreeTier([])).toBeNull();
   });
 });
