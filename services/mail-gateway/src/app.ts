@@ -269,6 +269,7 @@ export function createApp() {
         ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
         ...(q.q !== undefined ? { q: q.q } : {}),
         ...(q.withTotal === false ? { withTotal: false } : {}),
+        filters: q.filters,
       });
       for (const m of folderPage.items) hideArchiveCc(m, archiveOf(c));
       markBlocked(folderPage.items, await loadMatcher(dbOf(c), viewer));
@@ -336,6 +337,7 @@ export function createApp() {
       limit: q.limit,
       ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
       ...(q.q !== undefined ? { q: q.q } : {}),
+      filters: q.filters,
     });
     for (const m of page.items) hideArchiveCc(m, archiveOf(c));
     return c.json(page satisfies common.Paginated<mail.MailSentListItem>);

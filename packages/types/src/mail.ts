@@ -22,6 +22,36 @@ export interface ListMailMessagesQuery extends CursorQuery {
   // ADDITIVE (folder views): false skips the view's `total` COUNT(*) (response omits it). Clients
   // that already hold GET /mail/counts (same per-view totals) use this on background re-syncs.
   withTotal?: boolean;
+  // ADDITIVE (filters, #899): narrow the list on top of `q` / `folder`. All optional and ANDed.
+  // GET /sent takes the same keys (a sent message is never unread: unread=1 returns nothing).
+  /** "1" = only unread (conversation-level in a folder view), "0" = only read. */
+  unread?: "1" | "0";
+  /** Sender address, exact (case-insensitive). Sent: the From we sent as. */
+  from?: string;
+  /** Recipient address (To or Cc), exact (case-insensitive). */
+  to?: string;
+  /** "1" = only the viewer's starred conversations. */
+  starred?: "1";
+  /** "1" = only messages with a file attachment (inline images excluded). */
+  hasAttachment?: "1";
+  /** ISO8601: received (Sent: sent) at or after this instant. */
+  after?: string;
+  /** ISO8601: received (Sent: sent) strictly before this instant. */
+  before?: string;
+  /** Address the mail arrived at (a delivery's envelope / team list). Sent: the From. */
+  mailbox?: string;
+}
+
+/** Parsed form of the #899 filter keys (what the gateway hands to the repo). */
+export interface MailListFilters {
+  unread?: boolean;
+  from?: string;
+  to?: string;
+  starred?: true;
+  hasAttachment?: true;
+  after?: ISODateTime;
+  before?: ISODateTime;
+  mailbox?: string;
 }
 
 /** Server-side mailbox views for GET /mail/messages?folder=. `all` = every view except
@@ -54,7 +84,7 @@ export type MailFolderCounts = Record<Exclude<MailFolderView, "all">, MailFolder
 // separately spec'd — documenting it is a noted follow-up). See
 // docs/api-contracts/_wire-contract-enforcement.md.
 export const MAIL_WIRE = {
-  listMailMessages: { method: "GET", path: "/messages", query: ["cursor", "folder", "limit", "q", "threadId", "withTotal"] },
+  listMailMessages: { method: "GET", path: "/messages", query: ["after", "before", "cursor", "folder", "from", "hasAttachment", "limit", "mailbox", "q", "starred", "threadId", "to", "unread", "withTotal"] },
 } as const;
 
 // Compile-time tie: every query key the descriptor lists must be a real key of the typed
