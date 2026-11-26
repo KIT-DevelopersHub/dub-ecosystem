@@ -585,7 +585,6 @@
 /* @dub/ui DatePicker draws its own icon; keep Chromium's native one clickable but invisible. */
 .dateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
 .timeField { width: 84px; }
-.durationField { width: 120px; }
 .labelField { width: 220px; max-width: 100%; }
 .whenDash { color: var(--dub-color-text-secondary); }
 .formError { color: var(--dub-color-danger-600); font-size: var(--dub-font-size-xs); }
@@ -726,3 +725,15 @@
   font-size: var(--dub-font-size-xs);
   line-height: 1.6;
 }
+
+/* Meeting form: up to three fields per row, wraps on narrow dialogs.
+   Own names: reusing .formRow/.dateField overrode the event form's icon grid. */
+.meetingFormRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--dub-space-4);
+}
+
+/* @dub/ui DatePicker draws its own icon; hide Chromium's native one (kept clickable). */
+.meetingDateField { display: block; }
+.meetingDateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }

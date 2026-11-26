@@ -1,8 +1,9 @@
-// The one ミーティング form: 作成 > ミーティング and ミーティングを編集 all
-// render this inside the 作成 dialog's layout (icon rows, like EventForm). It registers a real
-// meeting (Google Calendar + Meet + invites) through toMeetingRequest — the payload is unchanged.
-import { useId, useMemo, useState, type ReactNode } from "react";
-import { Button, Checkbox, DatePicker, Icon, Select, TextField, Textarea, isSubmitEnter } from "@dub/ui";
+// The one ミーティング form (作成 > ミーティング and ミーティングを編集): the former
+// 「ミーティングを設定」 dialog's body, field for field (labels, order, help texts, defaults).
+// It registers a real meeting (Google Calendar + Meet + invites) through toMeetingRequest.
+// Rendered inside a @dub/ui Modal portal, so only global @dub/tokens variables are used for colors.
+import { useMemo, useState, type ReactNode } from "react";
+import { Button, Checkbox, DatePicker, FormField, Icon, Select, TextField, Textarea } from "@dub/ui";
 import { ChipSelect, type ChipSelectOption } from "@dub/app-ui";
 import { meeting as meetingValues, type meeting } from "@dub/types";
 import {
@@ -10,6 +11,7 @@ import {
   targetValue,
   DURATION_OPTIONS,
   TIME_OPTIONS,
+  emptyMeetingForm,
   toMeetingRequest,
   validateMeetingForm,
   type MeetingFormErrors,
@@ -19,6 +21,16 @@ import { recurrenceLabel } from "./meeting-occurrences";
 import styles from "./calendar.module.css";
 
 const RECURRENCES = ["none", "weekly", "biweekly", "monthly_weekday"] as const;
+
+const hintStyle = {
+  margin: 0,
+  padding: "var(--dub-space-3) var(--dub-space-4)",
+  borderRadius: "var(--dub-radius-md)",
+  background: "var(--dub-color-info-50, #eff8ff)",
+  color: "var(--dub-color-text-secondary)",
+  fontSize: "var(--dub-font-size-sm)",
+  lineHeight: 1.6,
+} as const;
 
 function durationLabel(min: number): string {
   if (min < 60) return `${min}分`;
@@ -48,14 +60,6 @@ function targetOptions(targets: readonly meeting.MeetingTarget[], people: readon
   ];
 }
 
-function FieldError({ text, testId }: { text: string | undefined; testId: string }): JSX.Element | null {
-  return text ? (
-    <p role="alert" className={styles.formError} data-testid={testId}>
-      {text}
-    </p>
-  ) : null;
-}
-
 export function MeetingForm({
   form,
   onChange,
@@ -65,6 +69,8 @@ export function MeetingForm({
   targetsLoading = false,
   accountEmail,
   kindSwitch,
+  notice,
+  blocked = false,
   saving = false,
   onSubmit,
   onCancel,
@@ -81,12 +87,15 @@ export function MeetingForm({
   accountEmail: string | null;
   /** The 作成 dialog's 種類 switch (absent when editing). */
   kindSwitch?: ReactNode;
+  /** Why 登録 is unavailable (shared account not connected / no calendar access). */
+  notice?: ReactNode;
+  /** The shared account is not ready: the form shows, 登録 stays disabled (the former button was). */
+  blocked?: boolean;
   /** A meeting is still being registered: no second one meanwhile. */
   saving?: boolean;
   onSubmit: (body: meeting.CreateMeetingRequest) => void;
   onCancel: () => void;
 }): JSX.Element {
-  const id = useId();
   const tid = "calendar-meeting-form";
   const [errors, setErrors] = useState<MeetingFormErrors>({});
 
@@ -107,189 +116,113 @@ export function MeetingForm({
   };
 
   const submit = () => {
+    if (saving || blocked) return;
     const e = validateMeetingForm(form);
     setErrors(e);
-    if (saving || Object.values(e).some(Boolean)) return;
+    if (Object.values(e).some(Boolean)) return;
     onSubmit(toMeetingRequest(form));
   };
 
-  const anchor = form.date;
-  const whenError = errors.date ?? errors.time ?? errors.durationMinutes;
+  const anchor = form.date || emptyMeetingForm().date;
 
   return (
-    <form
-      className={styles.form}
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-      data-testid={tid}
-    >
-      <label htmlFor={`${id}-title`} className={styles.srOnly}>
-        タイトル
-      </label>
-      <span
-        // Own Enter handling so an IME 確定 Enter never submits the form.
-        onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
-          e.preventDefault();
-          if (isSubmitEnter(e)) submit();
-        }}
-      >
-        <TextField
-          id={`${id}-title`}
-          size="lg"
-          placeholder="タイトルを追加（例: 全体定例）"
-          value={form.title}
-          onChange={(v) => set("title", v)}
-          invalid={!!errors.title}
-          testId={`${tid}-title`}
-        />
-      </span>
-      <FieldError text={errors.title} testId={`${tid}-title-error`} />
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-5)" }} data-testid={tid}>
       {kindSwitch}
+      {notice}
+      <p style={hintStyle} data-testid={`${tid}-hint`}>
+        共有アカウント（{accountEmail ?? "未接続"}）で Google カレンダーに登録し、Meet を発行して対象のメンバーを招待します。メンバーが増減すると招待も自動で追従します。
+      </p>
 
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="clock" />
-        </span>
-        <div className={styles.whenBlock}>
-          <div className={styles.whenFields}>
-            <label htmlFor={`${id}-date`} className={styles.srOnly}>
-              日付
-            </label>
-            <span className={styles.dateField}>
-              <DatePicker id={`${id}-date`} value={form.date || null} onChange={(v) => set("date", v ?? "")} testId={`${tid}-date`} />
-            </span>
-            <label htmlFor={`${id}-time`} className={styles.srOnly}>
-              開始時刻
-            </label>
-            <span className={styles.timeField}>
-              <Select id={`${id}-time`} value={form.time || null} onChange={(v) => set("time", v)} options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))} testId={`${tid}-time`} />
-            </span>
-            <label htmlFor={`${id}-duration`} className={styles.srOnly}>
-              所要時間
-            </label>
-            <span className={styles.durationField}>
-              <Select
-                id={`${id}-duration`}
-                value={String(form.durationMinutes)}
-                onChange={(v) => set("durationMinutes", Number(v))}
-                options={DURATION_OPTIONS.map((d) => ({ value: String(d), label: durationLabel(d) }))}
-                testId={`${tid}-duration`}
-              />
-            </span>
-          </div>
-          <FieldError text={whenError} testId={`${tid}-when-error`} />
+      <FormField label="タイトル" htmlFor={`${tid}-title`} required error={errors.title}>
+        <TextField id={`${tid}-title`} value={form.title} onChange={(v) => set("title", v)} placeholder="例: 全体定例" testId={`${tid}-title`} />
+      </FormField>
+
+      <FormField
+        label="対象"
+        htmlFor={`${tid}-target`}
+        required
+        error={errors.targets}
+        help="全体・ロール・メンバーを入力して追加できます（複数可）。どれかに含まれる人を全員招待します"
+      >
+        <ChipSelect
+          id={`${tid}-target`}
+          testId={`${tid}-target`}
+          aria-label="対象を追加"
+          value={form.targets.map(targetValue)}
+          onChange={(vs) => set("targets", vs.map(targetFromValue).filter((t): t is meeting.MeetingTargetRef => t !== null))}
+          options={options}
+          fallbackOption={fallbackOption}
+          loading={targetsLoading}
+          invalid={!!errors.targets}
+          placeholder="ロールやメンバーの名前を入力"
+        />
+      </FormField>
+
+      <div className={styles.meetingFormRow}>
+        <div className={styles.meetingDateField}>
+          <FormField label="日付" htmlFor={`${tid}-date`} required error={errors.date}>
+            <DatePicker id={`${tid}-date`} value={form.date || null} onChange={(v) => set("date", v ?? "")} testId={`${tid}-date`} />
+          </FormField>
         </div>
-      </div>
-
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="refresh" />
-        </span>
-        <div className={styles.repeatField}>
-          <div className={styles.whenFields}>
-            <label htmlFor={`${id}-recurrence`} className={styles.srOnly}>
-              繰り返し
-            </label>
-            <span className={styles.repeatSelect}>
-              <Select<meeting.MeetingRecurrence>
-                id={`${id}-recurrence`}
-                value={form.recurrence}
-                onChange={(v) => set("recurrence", v)}
-                options={RECURRENCES.map((r) => ({ value: r, label: recurrenceLabel(r, anchor) }))}
-                testId={`${tid}-recurrence`}
-              />
-            </span>
-            {form.recurrence !== "none" && (
-              <>
-                <label htmlFor={`${id}-until`} className={styles.whenDash}>
-                  終了日
-                </label>
-                <span className={styles.dateField}>
-                  <DatePicker id={`${id}-until`} value={form.until || null} min={form.date || undefined} onChange={(v) => set("until", v ?? "")} testId={`${tid}-until`} />
-                </span>
-              </>
-            )}
-          </div>
-          {form.recurrence !== "none" && <p className={styles.rowNote}>終了日が空欄なら終了しません</p>}
-          <FieldError text={errors.recurrence ?? errors.until} testId={`${tid}-until-error`} />
-        </div>
-      </div>
-
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="users" />
-        </span>
-        <div className={styles.repeatField}>
-          <label htmlFor={`${id}-target`} className={styles.srOnly}>
-            対象
-          </label>
-          <ChipSelect
-            id={`${id}-target`}
-            testId={`${tid}-target`}
-            aria-label="対象を追加"
-            value={form.targets.map(targetValue)}
-            onChange={(vs) => set("targets", vs.map(targetFromValue).filter((t): t is meeting.MeetingTargetRef => t !== null))}
-            options={options}
-            fallbackOption={fallbackOption}
-            loading={targetsLoading}
-            invalid={!!errors.targets}
-            placeholder="ロールやメンバーの名前を入力"
+        <FormField label="開始時刻" htmlFor={`${tid}-time`} required error={errors.time}>
+          <Select id={`${tid}-time`} value={form.time || null} onChange={(v) => set("time", v)} options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))} testId={`${tid}-time`} />
+        </FormField>
+        <FormField label="所要時間" htmlFor={`${tid}-duration`} required error={errors.durationMinutes}>
+          <Select
+            id={`${tid}-duration`}
+            value={String(form.durationMinutes)}
+            onChange={(v) => set("durationMinutes", Number(v))}
+            options={DURATION_OPTIONS.map((d) => ({ value: String(d), label: durationLabel(d) }))}
+            testId={`${tid}-duration`}
           />
-          <p className={styles.rowNote}>全体・ロール・メンバーを追加できます（複数可）。どれかに含まれる人を全員招待します</p>
-          <FieldError text={errors.targets} testId={`${tid}-target-error`} />
-        </div>
+        </FormField>
       </div>
 
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="list" />
-        </span>
-        <div className={styles.repeatField}>
-          <label htmlFor={`${id}-description`} className={styles.srOnly}>
-            メモ
-          </label>
-          <Textarea id={`${id}-description`} placeholder="説明を追加" rows={2} value={form.description} onChange={(v) => set("description", v)} testId={`${tid}-description`} />
-          <p className={styles.rowNote}>Google カレンダーの予定の説明欄に入ります</p>
-        </div>
-      </div>
-
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="check" />
-        </span>
-        <div className={styles.repeatField}>
-          <Checkbox
-            id={`${id}-track`}
-            testId={`${tid}-track`}
-            checked={form.trackAttendance}
-            label={form.targets.some((t) => t.kind === "all") ? "全体定例として出席を取る" : "チーム定例として出席を取る"}
-            onChange={(v) => set("trackAttendance", v)}
+      <div className={styles.meetingFormRow}>
+        <FormField label="繰り返し" htmlFor={`${tid}-recurrence`} error={errors.recurrence}>
+          <Select<meeting.MeetingRecurrence>
+            id={`${tid}-recurrence`}
+            value={form.recurrence}
+            onChange={(v) => set("recurrence", v)}
+            options={RECURRENCES.map((r) => ({ value: r, label: recurrenceLabel(r, anchor) }))}
+            testId={`${tid}-recurrence`}
           />
-          <p className={styles.rowNote}>Dub（ダッシュボードの「定例に参加」）から Meet に入った人を出席として記録します。出席は 人事 → 出席 で確認できます</p>
-        </div>
+        </FormField>
+        {form.recurrence !== "none" ? (
+          <div className={styles.meetingDateField}>
+            <FormField label="終了日（任意）" htmlFor={`${tid}-until`} error={errors.until} help="空欄なら終了しません">
+              <DatePicker id={`${tid}-until`} value={form.until || null} min={form.date || undefined} onChange={(v) => set("until", v ?? "")} testId={`${tid}-until`} />
+            </FormField>
+          </div>
+        ) : null}
       </div>
 
-      <div className={styles.formRow}>
-        <span className={styles.formRowIcon}>
-          <Icon name="info" />
-        </span>
-        <p className={styles.rowNote} data-testid={`${tid}-hint`}>
-          共有アカウント（{accountEmail ?? "未接続"}）で Google カレンダーに登録し、Meet を発行して対象のメンバーを招待します。メンバーが増減すると招待も自動で追従します。
-        </p>
-      </div>
+      <FormField label="メモ" htmlFor={`${tid}-description`} help="Google カレンダーの予定の説明欄に入ります">
+        <Textarea id={`${tid}-description`} value={form.description} onChange={(v) => set("description", v)} rows={3} testId={`${tid}-description`} />
+      </FormField>
+
+      <FormField
+        label="出席"
+        htmlFor={`${tid}-track`}
+        help="オンにすると、Dub（ダッシュボードの「定例に参加」）から Meet に入った人を出席として記録します。出席は 人事 → 出席 で確認できます。"
+      >
+        <Checkbox
+          id={`${tid}-track`}
+          testId={`${tid}-track`}
+          checked={form.trackAttendance}
+          label={form.targets.some((t) => t.kind === "all") ? "全体定例として出席を取る" : "チーム定例として出席を取る"}
+          onChange={(v) => set("trackAttendance", v)}
+        />
+      </FormField>
 
       <div className={styles.formFooter}>
-        <span className={styles.spacer} />
         <Button variant="ghost" onClick={onCancel} testId={`${tid}-cancel`}>
           キャンセル
         </Button>
-        <Button type="submit" disabled={saving} loading={saving} testId={`${tid}-submit`}>
-          {saving ? "作成中…" : editing ? "保存" : "登録"}
+        <Button variant="primary" onClick={submit} disabled={saving || blocked} loading={saving} testId={`${tid}-submit`}>
+          {editing ? "保存" : "登録"}
         </Button>
       </div>
-    </form>
+    </div>
   );
 }

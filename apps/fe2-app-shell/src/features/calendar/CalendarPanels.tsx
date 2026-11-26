@@ -474,7 +474,7 @@ export function EventDialog({
     <Modal
       open
       onClose={onClose}
-      title={editing ? "予定を編集" : meetingTab ? "ミーティングを作成" : "予定を作成"}
+      title={editing ? "予定を編集" : meetingTab ? "定例ミーティングを設定" : "予定を作成"}
       size="md"
       testId={editing ? "calendar-edit-dialog" : "calendar-create-panel"}
     >

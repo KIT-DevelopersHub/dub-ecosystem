@@ -231,6 +231,8 @@ export function CalendarScreen(): JSX.Element {
   const accountReady = !!account?.email && account.calendarReady;
   /** 繰り返し in the 作成 dialog: only where a 定例ミーティング can be set up. */
   const repeatOffered = access.canEdit && accountReady;
+  /** 作成: 予定 write permission, or meetings_edit alone (the dialog then opens on the ミーティング tab). */
+  const canCreate = canWrite || access.canEdit;
   const firstKey = dayKeyOf(days[0]!);
   const lastKey = dayKeyOf(days[days.length - 1]!);
   const meetingOcc = useMemo(() => {
@@ -491,17 +493,22 @@ export function CalendarScreen(): JSX.Element {
   };
   const openCreate = (draft: EventDraft, ghost: SlotGhost | null = null) => {
     if (canWrite) setPanel({ kind: "create", draft, ghost, recurrence: "none", meeting: null });
+    else if (access.canEdit) {
+      const d = withKind(draft, "meeting");
+      setPanel({ kind: "create", draft: d, ghost, recurrence: "none", meeting: meetingFormForTab(d) });
+    }
   };
   const openCreateDialog = () => openCreate(nextHourDraft(anchorDay));
-  /** A 作成 draft change. The ミーティング tab is the only way to create a meeting (#884): it starts
-   *  from the former 「ミーティングを設定」 defaults, or from the typed 予定 when 繰り返し was chosen. */
+  /** A 作成 draft change. The ミーティング tab is the only way to create a meeting (#884): for anyone
+   *  with meetings_edit (connected account or not) it is the former 「ミーティングを設定」 form, starting
+   *  from its defaults, or from the typed 予定 when 繰り返し was chosen. */
   const changeCreateDraft = (p: Extract<Panel, { kind: "create" }>, draft: EventDraft) =>
     setPanel({
       ...p,
       draft,
       meeting:
         p.meeting ??
-        (repeatOffered && draft.kind === "meeting"
+        (access.canEdit && draft.kind === "meeting"
           ? p.recurrence !== "none"
             ? meetingFormFromDraft(draft, p.recurrence, targets)
             : meetingFormForTab(draft)
@@ -606,17 +613,18 @@ export function CalendarScreen(): JSX.Element {
       else if (k === "j" || k === "n") setAnchorDay((a) => shiftAnchor(view, a, 1));
       else if (k === "k" || k === "p") setAnchorDay((a) => shiftAnchor(view, a, -1));
       else if (VIEW_KEYS[k]) setView(VIEW_KEYS[k]!);
-      else if (k === "c" && canWrite) {
+      else if (k === "c" && canCreate) {
         e.preventDefault();
         openCreate(nextHourDraft(anchorDay));
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [panel, view, today, anchorDay, canWrite, selectedMeeting, meetingMove, dragging]);
+  }, [panel, view, today, anchorDay, canCreate, selectedMeeting, meetingMove, dragging]);
 
-  const meetingNotice = !access.canView ? null : meetingsQ.isError ? (
-    <div className={styles.meetingNotice} role="alert" data-testid="calendar-meetings-error">
+  /** Why meetings cannot be registered right now (sidebar, and the ミーティング tab where 登録 is off). */
+  const meetingNoticeFor = (tid: string) => !access.canView ? null : meetingsQ.isError ? (
+    <div className={styles.meetingNotice} role="alert" data-testid={`${tid}-error`}>
       ミーティングを取得できませんでした。
       <Button variant="secondary" size="sm" onClick={() => meetingsQ.refetch()}>
         再試行
@@ -626,7 +634,7 @@ export function CalendarScreen(): JSX.Element {
     <div
       className={styles.meetingNotice}
       role="status"
-      data-testid={account.email ? "calendar-meetings-reconnect" : "calendar-meetings-no-account"}
+      data-testid={account.email ? `${tid}-reconnect` : `${tid}-no-account`}
     >
       {account.email
         ? "共有 Google アカウントにカレンダー権限がありません。Drive共有 > 設定 で再接続してください。"
@@ -635,12 +643,13 @@ export function CalendarScreen(): JSX.Element {
         variant="secondary"
         size="sm"
         onClick={() => window.location.assign(DRIVE_SETTINGS_URL)}
-        testId="calendar-meetings-open-drive-settings"
+        testId={`${tid}-open-drive-settings`}
       >
         Drive共有 の設定を開く
       </Button>
     </div>
   ) : null;
+  const meetingNotice = meetingNoticeFor("calendar-meetings");
 
   let body: JSX.Element;
   if (isPending) {
@@ -729,7 +738,7 @@ export function CalendarScreen(): JSX.Element {
             {narrow ? formatRangeTitleShort(view, anchorDay) : formatRangeTitle(view, anchorDay)}
           </span>
           <span className={styles.spacer} />
-          {narrow && canWrite && (
+          {narrow && canCreate && (
             <IconButton
               name="plus"
               variant="primary"
@@ -759,7 +768,7 @@ export function CalendarScreen(): JSX.Element {
                 <Button
                   iconLeft={<Icon name="plus" />}
                   onClick={openCreateDialog}
-                  disabled={!canWrite}
+                  disabled={!canCreate}
                   testId="calendar-create"
                 >
                   作成
@@ -919,7 +928,7 @@ export function CalendarScreen(): JSX.Element {
             onClose={close}
             saving={createMut.isPending}
             {...(repeatOffered ? { repeat: { value: panel.recurrence, onChange: (recurrence) => setPanel({ ...panel, recurrence }) } } : {})}
-            {...(repeatOffered && panel.meeting
+            {...(access.canEdit && panel.meeting
               ? {
                   meetingForm: (kindSwitch: ReactNode) => (
                     <MeetingForm
@@ -932,6 +941,9 @@ export function CalendarScreen(): JSX.Element {
                       accountEmail={account?.email ?? null}
                       // Tabs other than ミーティング need 予定 write permission.
                       kindSwitch={canWrite ? kindSwitch : null}
+                      // Not connected yet: same fields, 登録 off and why (the former button was disabled).
+                      notice={accountReady ? null : meetingNoticeFor("calendar-meeting-form")}
+                      blocked={!accountReady}
                       saving={createMeeting.isPending}
                       onSubmit={(body) => submitMeeting(body, null)}
                       onCancel={close}
