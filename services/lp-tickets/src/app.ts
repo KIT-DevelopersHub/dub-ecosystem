@@ -85,6 +85,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
   // 要確認 -> 支払い済み の確定はお金と券を結び付ける操作なので、販売 on/off と同じ lp:publish。
   app.post("/lp/tickets/orders/:id/approve", async (c) => c.json(await tickets.approve(reqCtx(c), c.req.param("id"))));
+  // 返金（有料 = Stripe Refund）/ 取消（0 円）。お金を戻す操作なので同じく lp:publish。
+  app.post("/lp/tickets/orders/:id/refund", async (c) => c.json(await tickets.refund(reqCtx(c), c.req.param("id"))));
 
   // 無料券のクーポン: コードは券と同じ価値を持つので、一覧（コードが見える）も発行・停止も販売 on/off と同じ lp:publish。
   app.get("/lp/tickets/coupons", async (c) => c.json(await tickets.listCoupons()));

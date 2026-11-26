@@ -22,6 +22,7 @@ const PUBLISH = [
   "POST /lp/tickets/cta",
   "POST /lp/tickets/enabled",
   "POST /lp/tickets/orders/:id/approve",
+  "POST /lp/tickets/orders/:id/refund",
 ];
 // 当日受付: LP管理の閲覧 + lp:checkin（edit は要らない）。
 const CHECKIN = ["DELETE /lp/tickets/checkin/:ticketId", "GET /lp/tickets/checkins", "POST /lp/tickets/checkin"];
