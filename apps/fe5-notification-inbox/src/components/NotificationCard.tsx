@@ -16,6 +16,7 @@
 
 import type { KeyboardEvent, ReactNode } from "react";
 import { Button, Icon } from "@dub/ui";
+import { mail } from "@dub/types";
 import type { InboxItem } from "../contracts/notification-api";
 import { formatRelativeTime } from "../lib/relative-time";
 import styles from "./NotificationCard.module.css";
@@ -46,6 +47,8 @@ export function itemLinkUrl(item: InboxItem): string | null {
       return `/files/${item.resourceId}`;
     case "channel": // chat.mention / chat.dm (resourceId = channelId, fe6-chat's own segment name)
       return `/chat/channels/${item.resourceId}`;
+    case mail.MAIL_RECEIVED_RESOURCE_TYPE: // 新着メール (mail-gateway) → そのメールを開く
+      return `/mail?${mail.MAIL_OPEN_QUERY_PARAM}=${encodeURIComponent(item.resourceId)}`;
     case "lp_sponsor_inquiry": // LP の資料請求 (lp-analytics) → LP管理 > スポンサー募集の一覧
       return "/lp/sponsors";
     default:

@@ -4,6 +4,7 @@ import {
   BROWSER_NOTIFY_PREF_KEY,
   createMentionNotifier,
   getBrowserNotifyEnabled,
+  browserNoticeFor,
   mentionNotice,
   setBrowserNotifyEnabled,
 } from "../src/lib/browser-notify";
@@ -51,6 +52,15 @@ describe("createMentionNotifier", () => {
     expect(notify.mock.calls[0]![0].id).toBe("n2");
     await notifier.check();
     expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("also notifies new mail (#869)", async () => {
+    const { notifier, notify, setItems } = setup([]);
+    await notifier.check();
+    setItems([mention("m1", { type: "mail.received", title: "山田 さんからメールが届きました", body: "打ち合わせ", resourceType: "mail_message", resourceId: "mailin_1" })]);
+    await notifier.check();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(browserNoticeFor(notify.mock.calls[0]![0])).toEqual({ title: "山田 さんからメールが届きました", body: "打ち合わせ", tag: "dub-notif-m1" });
   });
 
   it("ignores non-mention notifications", async () => {

@@ -6,7 +6,7 @@ import { ToastProvider } from "@dub/ui";
 import type { gateway } from "@dub/types";
 import { ApiError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
-import { AccountSettingsDialog } from "./AccountSettingsDialog.tsx";
+import { AccountSettingsDialog, mailNotifyEnabled } from "./AccountSettingsDialog.tsx";
 
 const ME: gateway.MeResponse = {
   user: { id: "usr_1", displayName: "Kota", avatarUrl: null, email: "kota@developershub.jp" },
@@ -31,12 +31,13 @@ const PART: SelfParticipation = {
 
 function setup(
   updateProfile: ApiClient["auth"]["updateProfile"],
-  opts: { updateSelfParticipation?: ApiClient["auth"]["updateSelfParticipation"] } = {},
+  opts: { updateSelfParticipation?: ApiClient["auth"]["updateSelfParticipation"]; request?: ApiClient["request"] } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(queryKeys.me, ME);
   const updateSelfParticipation = opts.updateSelfParticipation ?? vi.fn((p: Partial<SelfParticipation>) => Promise.resolve({ ...PART, ...p }));
   const shellApi = {
+    request: opts.request ?? vi.fn(() => Promise.resolve({ entries: [] })),
     auth: {
       updateProfile,
       changePassword: vi.fn(() => Promise.resolve()),
@@ -266,5 +267,34 @@ describe("AccountSettingsDialog — ブラウザ通知", () => {
     expect(toggle.checked).toBe(false);
     expect(localStorage.getItem("dub.browserNotify.enabled")).toBeNull();
     expect(screen.getByTestId("fe2-account-browser-notify-help")).toHaveTextContent("ブロックされています");
+  });
+});
+
+describe("新着メールの通知 (#869)", () => {
+  it("resolves the effective flag like the server: exact > prefix > * > default on", () => {
+    expect(mailNotifyEnabled(null)).toBe(true);
+    expect(mailNotifyEnabled({ entries: [{ type: "*", channels: [] }] })).toBe(false);
+    expect(mailNotifyEnabled({ entries: [{ type: "*", channels: [] }, { type: "mail.received", channels: ["in_app"] }] })).toBe(true);
+    expect(mailNotifyEnabled({ entries: [{ type: "mail.received", channels: [] }] })).toBe(false);
+  });
+
+  it("turns mail notifications off optimistically and saves the preference", async () => {
+    const request = vi.fn((input: { method: string }) => Promise.resolve(input.method === "GET" ? { entries: [{ type: "*", channels: ["in_app", "push"] }] } : {}));
+    setup(vi.fn(), { request: request as unknown as ApiClient["request"] });
+    const toggle = (await screen.findByTestId("fe2-account-mail-notify-toggle")) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await userEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith({ method: "PATCH", path: "/api/v1/notifications/preferences", body: { entries: [{ type: "mail.received", channels: [] }] } }),
+    );
+  });
+
+  it("rolls back when the save fails", async () => {
+    const request = vi.fn((input: { method: string }) => (input.method === "GET" ? Promise.resolve({ entries: [] }) : Promise.reject(new Error("down"))));
+    setup(vi.fn(), { request: request as unknown as ApiClient["request"] });
+    const toggle = (await screen.findByTestId("fe2-account-mail-notify-toggle")) as HTMLInputElement;
+    await userEvent.click(toggle);
+    await waitFor(() => expect(toggle.checked).toBe(true));
   });
 });

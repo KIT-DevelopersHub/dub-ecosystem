@@ -370,6 +370,15 @@ export interface MailDraft extends MailDraftInput {
 }
 export const MAIL_DRAFT_LIMIT = 200;
 
+// ---- new-mail notification (#869) ----
+// mail-gateway POSTs one notification per owned delivery (notification-service /notify).
+// The inbox item links back with resourceType MAIL_RECEIVED_RESOURCE_TYPE / resourceId =
+// the inbound row id (MailMessage.id); the client opens it at /mail?open=<id>.
+export const MAIL_RECEIVED_NOTIFY_TYPE = "mail.received";
+export const MAIL_RECEIVED_RESOURCE_TYPE = "mail_message";
+/** Query parameter of /mail that opens the conversation holding that message id. */
+export const MAIL_OPEN_QUERY_PARAM = "open";
+
 // ---- sender block list (この送信者をブロック, 0021) ----
 // Personal (per mailbox owner) list of blocked sender addresses / whole domains. Blocking
 // never deletes mail: blocked messages stay stored and are only flagged `blocked` on read.

@@ -6,6 +6,8 @@
 // Both are auth:"required" so an unauthenticated visitor is bounced to /login by
 // the shell — no per-request token, the session authorizes everything.
 import type { ComponentType } from "react";
+import { useRouterState } from "@tanstack/react-router";
+import { mail } from "@dub/types";
 import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { GmailApp } from "./gmail/GmailApp.tsx";
@@ -27,11 +29,17 @@ export interface MailNavEntry {
   icon: IconName;
 }
 
+/** /mail?open=<message id> (新着メールの通知から) opens that conversation. */
+function GmailRoute(): JSX.Element {
+  const openMessageId = useRouterState({ select: (s) => new URLSearchParams(s.location.searchStr ?? "").get(mail.MAIL_OPEN_QUERY_PARAM) });
+  return <GmailApp {...(openMessageId ? { openMessageId } : {})} />;
+}
+
 export const mailRoutes: MailSourceRoute[] = [
   // /mail renders the Gmail-style 3-pane experience (list ↔ reading pane, left
   // folder/label nav, floating compose). It carries its own compose affordance,
   // so no navigation to a separate compose route is needed.
-  { path: "/mail", lazy: () => Promise.resolve({ Component: GmailApp }), auth: "required", requiredPermissions: ["mail:read"] },
+  { path: "/mail", lazy: () => Promise.resolve({ Component: GmailRoute }), auth: "required", requiredPermissions: ["mail:read"] },
   // API-wired folder pair (Inbox / Sent) sharing the MailFolderTabs switch. These read
   // the live gateway (GET /mail/messages, GET /mail/sent) so sent mail is visible; the
   // /mail 3-pane GmailApp above stays the rich client-side experience.
