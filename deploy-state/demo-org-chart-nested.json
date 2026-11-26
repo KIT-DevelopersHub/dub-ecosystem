@@ -3,12 +3,12 @@
   "slug": "org-chart-nested",
   "worker": "dub-demo-org-chart-nested",
   "url": "https://dub-demo-org-chart-nested.developershub-site.workers.dev",
-  "deployedSha": "67a1a177",
+  "deployedSha": "454578b8",
   "branch": "fix/org-chart-nested-horizontal",
   "actor": "ko-tarou",
-  "markers": ["members-orgunits-","members-orggroup"],
+  "markers": ["members-orgchart-view-legacy","members-orggroup","members-orgunits-"],
   "live": true,
-  "verifiedAt": "2026-11-26T15:16:02Z",
-  "updatedAt": "2026-11-26T15:16:02Z",
-  "note": "org chart: teams in a row, left-to-right tree inside"
+  "verifiedAt": "2026-11-26T15:27:56Z",
+  "updatedAt": "2026-11-26T15:27:56Z",
+  "note": "org chart: new/legacy view switch"
 }
