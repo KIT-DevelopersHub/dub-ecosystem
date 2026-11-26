@@ -48,7 +48,8 @@ describe("[case8] rate limiting", () => {
     let clock = 1_000_000;
     const limiter = createInMemoryRateLimiter({ limit: 2, windowMs: 1000, now: () => clock });
     const app = createApp({ rateLimiter: limiter });
-    const env = makeEnv();
+    // unauthenticated request → per-IP anonymous bucket (legacy RATE_LIMIT_MAX alias)
+    const env = makeEnv({ RATE_LIMIT_MAX: "2" });
     const hit = () => app.fetch(new Request("https://x/healthz"), env, execCtx);
 
     expect((await hit()).status).toBe(200);

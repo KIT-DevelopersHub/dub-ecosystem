@@ -129,6 +129,11 @@ export const LP: AreaSpec = {
     },
     {
       service: T,
+      route: "POST /lp/tickets/orders/:id/refund",
+      reason: "チケット注文を Stripe で返金し券を無効にする取り消せない操作（lp:publish 詳細キー）。返金はオーナーが LP管理 で手で行う",
+    },
+    {
+      service: T,
       route: "POST /lp/tickets/coupons",
       reason: "無料券のクーポンコードを発行する操作（コードは券と同じ価値・lp:publish 詳細キー）。発行はオーナーが LP管理 で手で行う",
     },
@@ -141,6 +146,16 @@ export const LP: AreaSpec = {
       service: T,
       route: "POST /lp/tickets/preview-token",
       reason: "LP管理プレビューでテスト購入するための一時トークン発行で、Dub のデータではない",
+    },
+    {
+      service: T,
+      route: "POST /lp/tickets/checkin",
+      reason: "当日受付（参加者を入場済みにする・lp:checkin 詳細キー）。受付係が会場で参加者の QR を読んで行う",
+    },
+    {
+      service: T,
+      route: "DELETE /lp/tickets/checkin/:ticketId",
+      reason: "当日受付の取り消し（lp:checkin 詳細キー）。読み間違えに気付いた受付係が会場で行う",
     },
     {
       service: S,
@@ -157,6 +172,7 @@ export const LP: AreaSpec = {
     { service: T, route: "GET /lp/tickets/orders" },
     { service: T, route: "GET /lp/tickets/orders/export" },
     { service: T, route: "GET /lp/tickets/coupons" },
+    { service: T, route: "GET /lp/tickets/checkins" },
     // 登壇者募集の設定・応募一覧も未開放。
     { service: S, route: "GET /lp/proposals" },
     { service: S, route: "POST /lp/proposals/fields" },

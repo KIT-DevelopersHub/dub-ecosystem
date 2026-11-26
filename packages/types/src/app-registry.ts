@@ -119,9 +119,9 @@ export const APP_MANIFEST = [
     detailPermissions: ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit", "file:read", "file:write", "file:admin"] },
   // LP管理 reads infra:read, but infra:* governs the whole デプロイ/DNS surface (not just LP),
   // so those keys stay in 「その他」 instead of being scoped to this app's 詳細 dialog.
-  // lp:publish (switch the version live on the public site) is LP管理's own 詳細 knob.
+  // lp:publish (switch the version live on the public site) and lp:checkin (当日受付) are LP管理's own 詳細 knobs.
   { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" },
-    detailPermissions: ["lp:publish"] },
+    detailPermissions: ["lp:publish", "lp:checkin"] },
   // identity:admin is claimed by 運営メンバー's 詳細設定 (名簿・ロールの話は名簿アプリの中)。
   // ロール管理 itself has no knob beyond 無効/閲覧/編集 — that 3 段階 is its whole settings surface.
   { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" },

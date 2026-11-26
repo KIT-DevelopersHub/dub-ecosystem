@@ -14,6 +14,7 @@
 import type { Fetcher } from "@cloudflare/workers-types";
 import type { Deliver, OutboxRow } from "@dub/freeq";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
+import { SERVICE_BINDING_ORIGIN } from "@dub/http";
 import type { Env, ServiceBindingName } from "./env";
 
 export const AUDIT_ASYNC_PATH = "/internal/audit-async";
@@ -35,7 +36,9 @@ export interface DeliverRoute {
   kind: "deliver";
   binding: ServiceBindingName;
   path: string;
-  origin: string; // arbitrary; Service Bindings ignore the host, but fetch() needs a URL
+  // No per-route origin: every delivery uses SERVICE_BINDING_ORIGIN (@dub/http), the same
+  // host consumers that also serve workers.dev check for. A per-route "https://<name>"
+  // used to be free text here and gantt-service 404'd it for weeks (#836).
   // Staleness TTL for USER-FACING side effects (inbox/push/email, auto-reply mail). A row
   // older than this is retired as `failed` ("expired: ...") instead of delivered, so a drain
   // that stalls and later recovers can never mail/push people about weeks-old events.
@@ -66,43 +69,37 @@ export const DELIVER_TIMEOUT_MS = 15 * 1000;
 // route DELIVER; everything else DEFERS (durable, never acked).
 export const ROUTES: Readonly<Record<string, Route>> = {
   // audit fan-out -> audit-log async ingest (AuditRecordEnvelopeV1, forwarded verbatim).
-  "audit.record": { kind: "deliver", binding: "SVC_AUDIT_LOG", path: AUDIT_ASYNC_PATH, origin: "https://audit-log" },
+  "audit.record": { kind: "deliver", binding: "SVC_AUDIT_LOG", path: AUDIT_ASYNC_PATH },
 
   // domain events -> the consumer's /internal/events-async landing route (DubEventEnvelope,
   // forwarded verbatim). LIVE consumers only (route grepped-confirmed present):
   // notification now exposes /internal/events-async, so evt.notification (chat @mention,
   // notification.requested, public inquiry, mail.*, ops alerts, ...) is DELIVERED and
   // becomes inbox notifications instead of sitting pending forever on the free tier.
-  // origin MUST be "https://svc": notification enables workers.dev (realtime WS) and gates
-  // its header-trusting HTTP API (incl. /internal/events-async) to service-binding callers
-  // (host "svc"). A non-svc host is rejected as a spoofable public request. Service
-  // bindings ignore the host for routing, so "svc" delivers correctly over the binding.
+  // Delivered at SERVICE_BINDING_ORIGIN: notification (and gantt) enable workers.dev and
+  // gate their header-trusting HTTP API to service-binding callers (host "svc").
   "evt.notification": {
     kind: "deliver",
     binding: "SVC_NOTIFICATION",
     path: EVENTS_ASYNC_PATH,
-    origin: "https://svc",
     maxAgeMs: NOTIFICATION_MAX_AGE_MS,
   },
-  "evt.task": { kind: "deliver", binding: "SVC_TASK", path: EVENTS_ASYNC_PATH, origin: "https://task-service" },
-  "evt.gantt": { kind: "deliver", binding: "SVC_GANTT", path: EVENTS_ASYNC_PATH, origin: "https://gantt-service" },
-  "evt.file-meta": { kind: "deliver", binding: "SVC_FILE_META", path: EVENTS_ASYNC_PATH, origin: "https://file-meta" },
-  "evt.github-sync": { kind: "deliver", binding: "SVC_GITHUB_SYNC", path: EVENTS_ASYNC_PATH, origin: "https://github-sync" },
-  "evt.mobile-bff": { kind: "deliver", binding: "SVC_MOBILE_BFF", path: EVENTS_ASYNC_PATH, origin: "https://mobile-bff" },
+  "evt.task": { kind: "deliver", binding: "SVC_TASK", path: EVENTS_ASYNC_PATH },
+  "evt.gantt": { kind: "deliver", binding: "SVC_GANTT", path: EVENTS_ASYNC_PATH },
+  "evt.file-meta": { kind: "deliver", binding: "SVC_FILE_META", path: EVENTS_ASYNC_PATH },
+  "evt.github-sync": { kind: "deliver", binding: "SVC_GITHUB_SYNC", path: EVENTS_ASYNC_PATH },
+  "evt.mobile-bff": { kind: "deliver", binding: "SVC_MOBILE_BFF", path: EVENTS_ASYNC_PATH },
   // 改善#5: mail-automation now exposes /internal/events-async, so mail.message.received
   // is DELIVERED (auto-reply fires) instead of sitting pending forever on the free tier.
   "evt.mail-automation": {
     kind: "deliver",
     binding: "SVC_MAIL_AUTOMATION",
     path: EVENTS_ASYNC_PATH,
-    origin: "https://mail-automation",
     maxAgeMs: MAIL_AUTOMATION_MAX_AGE_MS,
   },
 
   // #850: identity.user.activated -> chat-service creates the member's times channel in Dub chat.
-  // origin MUST be "https://svc": chat-service 404s every non-"svc" host (workers.dev is on
-  // for its realtime WS), exactly like notification above.
-  "evt.chat": { kind: "deliver", binding: "SVC_CHAT", path: EVENTS_ASYNC_PATH, origin: "https://svc" },
+  "evt.chat": { kind: "deliver", binding: "SVC_CHAT", path: EVENTS_ASYNC_PATH },
 
   // No live consumer route yet -> DEFER (durable/pending; follow-ups when routes land):
   "deploy.job": DEFER, // processed in-process inside deploy-service only; no HTTP route
@@ -140,7 +137,7 @@ export function makeDeliver(env: Env): Deliver {
     const svc = env[route.binding] as Fetcher | undefined;
     if (!svc) throw new OutboxDeferral(topic); // binding absent at runtime: defer, don't crash
 
-    const res = await svc.fetch(route.origin + route.path, {
+    const res = await svc.fetch(SERVICE_BINDING_ORIGIN + route.path, {
       method: "POST",
       headers: { "content-type": "application/json", [HDR_INTERNAL]: INTERNAL_HEADER_VALUE },
       body: JSON.stringify(payload), // payload IS the envelope the producer built; verbatim
