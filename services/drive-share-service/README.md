@@ -140,7 +140,7 @@ with a Google Meet link, and the target's members are invited automatically. Con
 | Route | Permission |
 |---|---|
 | `GET /meetings`, `GET /meetings/targets` | カレンダー 閲覧 + `calendar:meetings_view` |
-| `POST /meetings`, `PATCH /meetings/:id`, `DELETE /meetings/:id`, `POST /meetings/sync` | カレンダー 編集 + `calendar:meetings_edit` |
+| `POST /meetings`, `PATCH /meetings/:id`, `DELETE /meetings/:id`, `POST /meetings/sync`, `POST /meetings/:id/sync` | カレンダー 編集 + `calendar:meetings_edit` |
 
 Both keys are toggles in ロール管理 > カレンダー > 細かい権限; migration `identity/0019` gives them
 to the system admin role only.
@@ -153,7 +153,13 @@ to the system admin role only.
   binding `SVC_MEMBER`). Members without one, and the shared group / bot addresses
   (`member@` / `maintainer@` / `commander-bot@developershub.jp`), are neither invited nor shared
   with (no Google account: mail to them bounced). Members without a Gmail are reported in
-  `POST /meetings/sync` → `withoutGoogleAccount`.
+  `POST /meetings/sync` → `withoutGoogleAccount`, and per meeting in
+  `GET /meetings/:id/attendees` → `notInvited` (`no_email` = メールアドレス未連携, `pending` = 未招待;
+  the 名簿 is read only when some target member is missing from the ledger). `POST /meetings/:id/sync`
+  (参加者を再同期) reconciles that one meeting now (#908).
+- **Role membership follow**: identity calls `POST /internal/role-membership` synchronously; a call
+  that fails or is left unfinished is queued on the freeq outbox (`identity.role_membership`) and
+  freeq-drain redelivers it to `POST /internal/role-membership-async` (503 = retry) (#908).
 - **Calendar sharing**: a role calendar is shared read-only (ACL `reader`) with that role's
   members only; the 全体 calendar with every active member. Shares are made with
   `sendNotifications=false`: Google sends **no** share mail (it used to mail every member once per

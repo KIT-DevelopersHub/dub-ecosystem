@@ -66,6 +66,8 @@ export interface CalendarApi {
   updateMeeting(id: string, body: meeting.UpdateMeetingRequest): Promise<meeting.Meeting>;
   deleteMeeting(id: string): Promise<void>;
   syncMeetings(): Promise<meeting.SyncMeetingsResponse>;
+  /** 参加者を再同期: one meeting's attendees now, with who still cannot be invited. */
+  syncMeeting(id: string): Promise<meeting.SyncMeetingResponse>;
   /** Open a meeting from Dub (records attendance when it is a 定例). */
   joinMeeting(id: string): Promise<meeting.JoinMeetingResponse>;
   /** Invitees + their answers in Google Calendar; `date` (JST) = one occurrence of a series. */
@@ -189,6 +191,7 @@ export function createCalendarApi(api: ApiClient): CalendarApi {
       await api.request<unknown>({ method: "DELETE", path: m(id) });
     },
     syncMeetings: () => api.request<meeting.SyncMeetingsResponse>({ method: "POST", path: `${P}/meetings/sync` }),
+    syncMeeting: (id) => api.request<meeting.SyncMeetingResponse>({ method: "POST", path: `${m(id)}/sync` }),
     joinMeeting: (id) => api.request<meeting.JoinMeetingResponse>({ method: "POST", path: `${m(id)}/join` }),
     listMeetingAttendees: (id, date) =>
       api.request<meeting.ListMeetingAttendeesResponse>({ method: "GET", path: `${m(id)}/attendees`, ...(date ? { query: { date } } : {}) }),

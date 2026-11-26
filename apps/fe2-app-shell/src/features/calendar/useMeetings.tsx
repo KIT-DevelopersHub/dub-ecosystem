@@ -44,6 +44,22 @@ export function useMeetingAttendeesQuery(meetingId: string | null, date: string 
   });
 }
 
+/** 参加者を再同期 (one meeting). The attendee list is re-read with the answer. */
+export function useResyncMeetingMutation(meetingId: string) {
+  const api = useCalendarApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation<meeting.SyncMeetingResponse, ApiError, void>({
+    mutationFn: () => api.syncMeeting(meetingId),
+    onSuccess: (r) => {
+      toast.show({ kind: "success", title: `参加者を再同期しました（追加 ${r.invitedAdded} 人・解除 ${r.invitedRemoved} 人）` });
+      void qc.invalidateQueries({ queryKey: ["calendar", "meeting-attendees", meetingId] });
+      void qc.invalidateQueries({ queryKey: MEETINGS_KEY });
+    },
+    onError: (err) => toast.show({ kind: "error", title: "参加者を再同期できませんでした", description: errorText(err) }),
+  });
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : "もう一度お試しください。";
 }

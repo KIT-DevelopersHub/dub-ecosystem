@@ -339,6 +339,12 @@ export interface PutUserManagedRolesResponse {
  *  A failure never fails the role change: it is reported back as `propagationWarnings`. */
 export const ROLE_MEMBERSHIP_PATH = "/internal/role-membership";
 
+/** A notice whose synchronous follow failed is retried through the freeq outbox: identity enqueues
+ *  the same RoleMembershipChangedV1 under this topic, and freeq-drain POSTs it to
+ *  ROLE_MEMBERSHIP_ASYNC_PATH, which answers 503 while something is left to retry (#908). */
+export const ROLE_MEMBERSHIP_TOPIC = "identity.role_membership";
+export const ROLE_MEMBERSHIP_ASYNC_PATH = "/internal/role-membership-async";
+
 /** added = the user now counts for these roles (assigned, or became active while holding them);
  *  removed = the user no longer does (revoked, role deleted, disabled / offboarded). */
 export type RoleMembershipChange = "added" | "removed";

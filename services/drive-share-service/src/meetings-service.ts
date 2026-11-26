@@ -50,11 +50,11 @@ import { meeting } from "@dub/types";
 import { EventIdTaken, type CalendarAttendee, type CalendarClient, type CalendarEvent, type CalendarEventInput } from "./google/calendar-client";
 import { GoogleQuotaError, isCalendarQuota } from "./drive-client";
 import type { AttendanceStore } from "./attendance-store";
-import type { MemberDirectory } from "./member-directory";
+import type { MemberDirectory, MemberGoogleInfo } from "./member-directory";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
 import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, lastEndMs, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
 import { createInMemorySyncState, type CalendarAclState, type MeetingSyncSnapshot, type MeetingSyncState } from "./meeting-sync-state";
-import type { RoleMembership } from "./role-membership";
+import type { ActiveUser, RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
 export const PEOPLE_CALENDAR_NAME = "個別";
@@ -160,6 +160,8 @@ export interface MeetingsService {
   /** opts.system = the alarm: a not-ready account is skipped instead of a 409.
    *  opts.aclOnly = a paced continuation: only the calendar shares. */
   sync(opts?: { system?: boolean; aclOnly?: boolean }): Promise<SyncResult>;
+  /** One meeting now (参加者を再同期): the same reconcile as the sync, for this meeting only. */
+  syncOne(id: string): Promise<meeting.SyncMeetingResponse>;
   /** Read-only, no Google call: the invitations the sync would add / remove now (ledger vs roster).
    *  Ended meetings are counted, never planned: their attendees are frozen. */
   plan(): Promise<meeting.RoleGrantReconcilePlan["calendar"]>;
@@ -428,12 +430,14 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
    *  reads roles per listed user, so narrow to `roleId` whenever only one target is wanted. */
   async function invitees(roleId?: string, strict?: boolean): Promise<Invitee[]> {
     const users = await deps.roster.listActiveUsers(roleId);
-    const google = await deps.directory.googleEmails(users.map((u) => u.id), strict ? { strict } : undefined);
-    return users.map((u) => {
+    return toInvitees(users, await deps.directory.googleEmails(users.map((u) => u.id), strict ? { strict } : undefined));
+  }
+
+  const toInvitees = (users: readonly ActiveUser[], google: ReadonlyMap<string, MemberGoogleInfo>): Invitee[] =>
+    users.map((u) => {
       const g = google.get(u.id);
       return { userId: u.id, email: lower(g?.gmail ?? u.email), name: u.name, roleIds: u.roleIds, hasGoogle: !!g?.gmail };
     });
-  }
 
   /** One invite per address. After the target filter: two accounts can share a Gmail, and the
    *  one kept must belong to the target, or the sync would uninvite the address. */
@@ -459,6 +463,18 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
   /** Who a meeting invites: the union of its targets' members. */
   const forTargets = (all: Invitee[], targets: readonly meeting.MeetingTargetRef[]) => uniqueEmails(all.filter((i) => inTargets(i, targets)).filter(reachable));
+
+  /** Target members missing from the invite list (`invited` = the ledger's addresses): no 名簿
+   *  Gmail, or invitable but not invited yet. Org bot / routing mailboxes are no people: left out. */
+  const notInvitedOf = (all: Invitee[], targets: readonly meeting.MeetingTargetRef[], invited: ReadonlySet<string>): meeting.MeetingNotInvitedMember[] => {
+    const out = new Map<string, meeting.MeetingNotInvitedMember>();
+    for (const i of all) {
+      if (out.has(i.userId) || !inTargets(i, targets) || invited.has(i.email)) continue;
+      const reason = !i.hasGoogle ? "no_email" : reachable(i) ? "pending" : null;
+      if (reason) out.set(i.userId, { userId: i.userId as meeting.MeetingNotInvitedMember["userId"], name: i.name, reason });
+    }
+    return [...out.values()].sort((a, b) => a.reason.localeCompare(b.reason) || a.name.localeCompare(b.name, "ja"));
+  };
 
   /** A lone role is read narrowed (identity reads roles per listed user); anything else in full. */
   const inviteesOf = async (targets: readonly meeting.MeetingTargetRef[]) => {
@@ -1037,7 +1053,52 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
         items.push({ userId: (r.userId ?? null) as meeting.MeetingAttendee["userId"], name: (r.userId && nameOf.get(r.userId)) || r.email, email: r.userId ? null : r.email, response: "needsAction", comment: null });
       }
       items.sort((x, y) => RESPONSE_ORDER.indexOf(x.response) - RESPONSE_ORDER.indexOf(y.response) || x.name.localeCompare(y.name, "ja"));
-      return { items, responsesAvailable: available };
+
+      // Target members not invited. The 名簿 is read only for those not on the ledger by account,
+      // so a fully invited meeting costs no extra read (rows read are near the free-tier cap).
+      let notInvited: meeting.MeetingNotInvitedMember[] = [];
+      const invitedIds = new Set(ledger.map((r) => r.userId).filter((u): u is string => !!u));
+      // An ended meeting's attendees are frozen: nobody is "still to invite".
+      const over = isOver(fieldsOf(row), Date.parse(deps.now()));
+      const candidates = over ? [] : users.filter((u) => !invitedIds.has(u.id) && meeting.isInMeetingTargets({ id: u.id, roleIds: u.roleIds }, row.targets));
+      if (candidates.length > 0) {
+        try {
+          const google = await deps.directory.googleEmails(candidates.map((u) => u.id), { strict: true });
+          notInvited = notInvitedOf(toInvitees(candidates, google), row.targets, new Set(ledger.map((r) => r.email)));
+        } catch (err) {
+          // Unknown is not "no address": say nothing rather than flag everyone.
+          log("meeting_not_invited_read_failed", { meetingId: id, message: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      return { items, responsesAvailable: available, notInvited };
+    },
+
+    async syncOne(id) {
+      const row = await store.getMeeting(orgId, id);
+      if (!row) throw errors.notFound("meeting", id);
+      const account = await readyAccount();
+      if (account.accountId !== row.accountId) {
+        throw errors.conflict("このミーティングは以前の Google アカウントで作成されています。削除して作り直してください。", { reason: "account_switched" });
+      }
+      const state = await syncState.load();
+      if (state.pausedUntil !== null && state.pausedUntil > Date.parse(deps.now())) throw new GoogleQuotaError("calendar", "sync_paused");
+      const cal = budgeted(account.calendar, budgetLimit, Date.now() + syncTimeLimit);
+      // Strict, as the sync: a 名簿 outage must not read as "every Gmail changed".
+      const all = await invitees(undefined, true);
+      let r: { added: number; removed: number };
+      try {
+        r = await reconcileMeeting(cal, row, forTargets(all, row.targets), await removalsSafe(all, row.targets, deletedRoleChecker()));
+      } catch (err) {
+        if (isCalendarQuota(err)) await pauseSync(err);
+        if (err instanceof BudgetExhausted) throw errors.upstreamUnavailable("google-calendar", err);
+        throw err;
+      }
+      // The target calendar's shares follow in the paced sync.
+      await kick(SOON_MS);
+      const ledger = await store.listInvites(row.id);
+      log("meeting_sync_one", { meetingId: id, added: r.added, removed: r.removed });
+      const over = isOver(fieldsOf(row), Date.parse(deps.now()));
+      return { invitedAdded: r.added, invitedRemoved: r.removed, notInvited: over ? [] : notInvitedOf(all, row.targets, new Set(ledger.map((l) => l.email))) };
     },
 
     async plan() {

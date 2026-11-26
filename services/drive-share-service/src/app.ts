@@ -19,6 +19,7 @@ import type { MeetingsService } from "./meetings-service";
 import type { AttendanceService } from "./attendance-service";
 import type { GoogleLinkService } from "./google-link";
 import type { RoleFollowService } from "./role-follow";
+import { identity } from "@dub/types";
 import { POLICY_TABLE } from "./policy-table";
 import type {
   CompleteGoogleConnectRequest,
@@ -160,6 +161,14 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await roleFollow().handle(body));
   });
 
+  // The freeq redelivery of a notice whose synchronous call above failed (freeq-drain, #908).
+  // 503 while a retry can still finish it, so the outbox row is retried with backoff.
+  app.post(identity.ROLE_MEMBERSHIP_ASYNC_PATH, async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const res = await roleFollow().handle(body);
+    return c.json(res, res.retry ? 503 : 200);
+  });
+
   // ---- link sharing on/off ----
   app.put("/driveshare/files/:id/link", async (c) => {
     const body = await parseBody<SetLinkSharingRequest>(c);
@@ -203,6 +212,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const { complete: _complete, quotaPausedUntil: _paused, aclContinueMs: _continue, ...res } = await (await deps.meetings()).sync();
     return c.json(res);
   });
+
+  // 参加者を再同期: this one meeting's attendees now, with who still cannot be invited.
+  app.post("/meetings/:id/sync", async (c) => c.json(await (await deps.meetings()).syncOne(c.req.param("id"))));
 
   app.patch("/meetings/:id", async (c) => {
     const body = await parseBody<unknown>(c);

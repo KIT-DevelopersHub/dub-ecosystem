@@ -136,7 +136,7 @@ const SETTINGS_WRITE = [
 ];
 // カレンダー > ミーティング.
 const MEETINGS_READ = ["GET /meetings", "GET /meetings/:id/attendees", "GET /meetings/targets"];
-const MEETINGS_WRITE = ["DELETE /meetings/:id", "PATCH /meetings/:id", "POST /meetings", "POST /meetings/sync"];
+const MEETINGS_WRITE = ["DELETE /meetings/:id", "PATCH /meetings/:id", "POST /meetings", "POST /meetings/:id/sync", "POST /meetings/sync"];
 // 定例の出席: the caller's own join + their own 定例 list (AUTHENTICATED; join asserts target membership).
 const SELF = ["GET /meetings/me/regulars", "POST /meetings/:id/join", "POST /meetings/me/google-link/callback", "POST /meetings/me/google-link/start"];
 // 定例の出席 report / corrections (人事).
@@ -149,7 +149,7 @@ const ATTENDANCE_WRITE = [
   "PUT /meetings/attendance/settings",
 ];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
-const INTERNAL_ROUTES = ["GET /internal/health", "POST /internal/role-membership"];
+const INTERNAL_ROUTES = ["GET /internal/health", "POST /internal/role-membership", "POST /internal/role-membership-async"];
 // The whole external surface — what a caller can reach through api-gateway at most.
 const FULL = [...READS, ...WRITES, ...SETTINGS_READ, ...SETTINGS_WRITE, ...MEETINGS_READ, ...MEETINGS_WRITE, ...SELF, ...ATTENDANCE_READ, ...ATTENDANCE_WRITE].sort();
 const OPERATOR = [...READS, ...WRITES, ...SELF].sort();

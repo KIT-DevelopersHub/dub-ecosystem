@@ -15,6 +15,7 @@ import type { Fetcher } from "@cloudflare/workers-types";
 import type { Deliver, OutboxRow } from "@dub/freeq";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import { SERVICE_BINDING_ORIGIN } from "@dub/http";
+import { identity } from "@dub/types";
 import type { Env, ServiceBindingName } from "./env";
 
 export const AUDIT_ASYNC_PATH = "/internal/audit-async";
@@ -56,6 +57,7 @@ const DEFER: DeferRoute = { kind: "defer" };
 // older than a day is noise; an auto-reply to mail received hours ago is worse than none.
 export const NOTIFICATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const MAIL_AUTOMATION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+export const ROLE_MEMBERSHIP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // Per-delivery timeout. A hung consumer must not pin the alarm invocation for minutes
 // (the 2026-09 stall saw ~3min alarm invocations); a timeout throws -> normal retry/backoff.
@@ -100,6 +102,16 @@ export const ROUTES: Readonly<Record<string, Route>> = {
 
   // #850: identity.user.activated -> chat-service creates the member's times channel in Dub chat.
   "evt.chat": { kind: "deliver", binding: "SVC_CHAT", path: EVENTS_ASYNC_PATH },
+
+  // #908: a role membership notice whose synchronous follow failed (identity-roster) ->
+  // drive-share-service re-reads the roster and reconciles Drive共有 / ミーティング招待. Idempotent;
+  // answers 503 while a retry can still finish it. Retired after a day (the hourly sync has caught up).
+  [identity.ROLE_MEMBERSHIP_TOPIC]: {
+    kind: "deliver",
+    binding: "SVC_DRIVE_SHARE",
+    path: identity.ROLE_MEMBERSHIP_ASYNC_PATH,
+    maxAgeMs: ROLE_MEMBERSHIP_MAX_AGE_MS,
+  },
 
   // No live consumer route yet -> DEFER (durable/pending; follow-ups when routes land):
   "deploy.job": DEFER, // processed in-process inside deploy-service only; no HTTP route

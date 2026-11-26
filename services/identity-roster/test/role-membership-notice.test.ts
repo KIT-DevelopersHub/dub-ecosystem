@@ -181,6 +181,37 @@ describe("createRoleMembershipSink (synchronous call to drive-share)", () => {
     expect(await slow.changed(notice)).toMatchObject({ ok: false, message: expect.stringContaining("秒以内に終わりませんでした") });
   });
 
+  it("#908: a failed / timed-out / retryable call is queued once on the freeq outbox for freeq-drain to redeliver", async () => {
+    const rows = (raw: ReturnType<typeof makeOutboxD1>["raw"]) =>
+      raw.prepare("SELECT id, topic, payload, status FROM freeq_outbox").all() as { id: string; topic: string; payload: string; status: string }[];
+
+    const a = makeOutboxD1();
+    const http = createRoleMembershipSink({ OUTBOX_DB: a.d1, SVC_DRIVE_SHARE: fakeDriveShare({ status: 503 }).svc } as unknown as Env, ids);
+    expect(await http.changed(notice)).toMatchObject({ ok: false, message: expect.stringContaining("自動で再試行します") });
+    await http.changed(notice); // same message id: INSERT OR IGNORE
+    const queued = rows(a.raw);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ id: "rm_1", topic: identity.ROLE_MEMBERSHIP_TOPIC, status: "pending" });
+    expect(JSON.parse(queued[0]!.payload)).toMatchObject({ type: "identity.role_membership.changed", id: "rm_1", roleIds: ["role_a", "role_b"] });
+
+    const b = makeOutboxD1();
+    const slow = createRoleMembershipSink({ OUTBOX_DB: b.d1, SVC_DRIVE_SHARE: fakeDriveShare({ hang: true }).svc } as unknown as Env, { ...ids, timeoutMs: 20 });
+    await slow.changed(notice);
+    expect(rows(b.raw)).toHaveLength(1);
+
+    const c = makeOutboxD1();
+    const retryable = createRoleMembershipSink({ OUTBOX_DB: c.d1, SVC_DRIVE_SHARE: fakeDriveShare({ body: { complete: false, retry: true, problems: ["途中"] } }).svc } as unknown as Env, ids);
+    await retryable.changed(notice);
+    expect(rows(c.raw)).toHaveLength(1);
+  });
+
+  it("#908: an unfinished follow a retry cannot fix (no calendar scope / refused address) is reported, not queued", async () => {
+    const { d1, raw } = makeOutboxD1();
+    const sink = createRoleMembershipSink({ OUTBOX_DB: d1, SVC_DRIVE_SHARE: fakeDriveShare({ body: { complete: false, problems: ["再接続してください。"] } }).svc } as unknown as Env, ids);
+    expect(await sink.changed(notice)).toEqual({ ok: false, message: "再接続してください。" });
+    expect(raw.prepare("SELECT count(*) AS n FROM freeq_outbox").get()).toMatchObject({ n: 0 });
+  });
+
   it("no binding / no roles: nothing is sent, ok", async () => {
     const none = createRoleMembershipSink({} as Env, ids);
     expect(await none.changed(notice)).toEqual({ ok: true });

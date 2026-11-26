@@ -204,6 +204,25 @@ export interface ListMeetingAttendeesResponse {
   items: MeetingAttendee[];
   /** false = Google could not be read now (usage limit / account not ready): every answer is needsAction. */
   responsesAvailable: boolean;
+  /** Members of the meeting's targets who are not on the invite list (#908). */
+  notInvited: MeetingNotInvitedMember[];
+}
+
+/** no_email = no 名簿 Gmail (or no 名簿 row linked to the account): Dub cannot invite them;
+ *  pending   = invitable, but the invitation has not been sent yet (参加者を再同期 sends it now). */
+export type MeetingNotInvitedReason = "no_email" | "pending";
+
+export interface MeetingNotInvitedMember {
+  userId: UserId;
+  name: string;
+  reason: MeetingNotInvitedReason;
+}
+
+/** POST /meetings/:id/sync — bring this one meeting's attendees in line with its targets now. */
+export interface SyncMeetingResponse {
+  invitedAdded: number;
+  invitedRemoved: number;
+  notInvited: MeetingNotInvitedMember[];
 }
 
 export interface SyncMeetingsResponse {
@@ -594,4 +613,7 @@ export interface RoleMembershipFollowResponse {
   complete: boolean;
   /** Japanese, one per part that did not finish (shown to the admin via identity's propagationWarnings). */
   problems: string[];
+  /** true = a later retry can still finish it (a part failed or ran out of time / was paused).
+   *  The outbox redelivery answers 503 on it. Absent = nothing to retry. */
+  retry?: boolean;
 }

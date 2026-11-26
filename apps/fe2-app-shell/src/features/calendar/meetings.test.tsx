@@ -77,8 +77,9 @@ function fakeApi(over: Partial<CalendarApi> = {}, account: meeting.MeetingAccoun
     updateMeeting: vi.fn(),
     deleteMeeting: vi.fn(() => Promise.resolve()),
     syncMeetings: vi.fn(),
+    syncMeeting: vi.fn(),
     joinMeeting: vi.fn(async () => ({ meetUrl: "https://meet.google.com/abc-defg-hij", recordedFor: null })),
-    listMeetingAttendees: vi.fn(async () => ({ items: [], responsesAvailable: true })),
+    listMeetingAttendees: vi.fn(async () => ({ items: [], responsesAvailable: true, notInvited: [] })),
     ...over,
   };
   return api;
@@ -137,6 +138,7 @@ describe("カレンダー > ミーティング permissions", () => {
           { userId: "usr_b" as common.UserId, name: "佐藤 太郎", email: null, response: "declined" as const, comment: "授業です" },
           { userId: "usr_c" as common.UserId, name: "鈴木 一郎", email: null, response: "needsAction" as const, comment: null },
         ],
+        notInvited: [],
       })),
     });
     render(wrap(<CalendarScreen />, api, VIEW));
@@ -160,6 +162,7 @@ describe("カレンダー > ミーティング permissions", () => {
       listMeetingAttendees: vi.fn(async () => ({
         responsesAvailable: false,
         items: [{ userId: "usr_a" as common.UserId, name: "山田 恵美", email: null, response: "needsAction" as const, comment: null }],
+        notInvited: [],
       })),
     });
     render(wrap(<CalendarScreen />, api, VIEW));
@@ -169,6 +172,54 @@ describe("カレンダー > ミーティング permissions", () => {
     await within(section).findByTestId("calendar-meeting-attendees-unavailable");
     expect(within(section).getAllByTestId("calendar-meeting-attendees-row")).toHaveLength(1);
     expect(within(section).queryByTestId("calendar-meeting-attendees-response")).not.toBeInTheDocument();
+  });
+
+  it("#908: target members Dub could not invite are listed — メールアドレス未連携 / 未招待 — and view-only users get no resync", async () => {
+    const api = fakeApi({
+      listMeetingAttendees: vi.fn(async () => ({
+        responsesAvailable: true,
+        items: [{ userId: "usr_a" as common.UserId, name: "山田 恵美", email: null, response: "accepted" as const, comment: null }],
+        notInvited: [
+          { userId: "usr_b" as common.UserId, name: "佐藤 太郎", reason: "no_email" as const },
+          { userId: "usr_c" as common.UserId, name: "鈴木 一郎", reason: "pending" as const },
+        ],
+      })),
+    });
+    render(wrap(<CalendarScreen />, api, VIEW));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    await userEvent.click(chipsOf("mtg_all")[0]!);
+    const section = await screen.findByTestId("calendar-meeting-attendees");
+    const missing = await within(section).findByTestId("calendar-meeting-attendees-not-invited");
+    expect(missing).toHaveTextContent("招待できていないメンバー 2人");
+    expect(within(missing).getAllByTestId("calendar-meeting-attendees-not-invited-reason").map((b) => b.textContent)).toEqual(["メールアドレス未連携", "未招待"]);
+    // Not counted as invited.
+    expect(section).toHaveTextContent("参加者 1人");
+    expect(within(section).queryByTestId("calendar-meeting-attendees-resync")).not.toBeInTheDocument();
+  });
+
+  it("#908: 参加者を再同期 (editor) syncs that meeting and re-reads its attendees", async () => {
+    let synced = false;
+    const api = fakeApi({
+      listMeetingAttendees: vi.fn(async () => ({
+        responsesAvailable: true,
+        items: synced ? [{ userId: "usr_c" as common.UserId, name: "鈴木 一郎", email: null, response: "needsAction" as const, comment: null }] : [],
+        notInvited: synced ? [] : [{ userId: "usr_c" as common.UserId, name: "鈴木 一郎", reason: "pending" as const }],
+      })),
+      syncMeeting: vi.fn(async () => {
+        synced = true;
+        return { invitedAdded: 1, invitedRemoved: 0, notInvited: [] };
+      }),
+    });
+    render(wrap(<CalendarScreen />, api, EDIT));
+    await waitFor(() => expect(chipsOf("mtg_all").length).toBeGreaterThan(0));
+    await userEvent.click(chipsOf("mtg_all")[0]!);
+    const section = await screen.findByTestId("calendar-meeting-attendees");
+    await within(section).findByTestId("calendar-meeting-attendees-not-invited");
+    await userEvent.click(within(section).getByTestId("calendar-meeting-attendees-resync"));
+    expect(api.syncMeeting).toHaveBeenCalledWith("mtg_all");
+    await waitFor(() => expect(within(section).getAllByTestId("calendar-meeting-attendees-row")).toHaveLength(1));
+    expect(within(section).queryByTestId("calendar-meeting-attendees-not-invited")).not.toBeInTheDocument();
+    expect(await screen.findByText("参加者を再同期しました（追加 1 人・解除 0 人）")).toBeInTheDocument();
   });
 
   it("a 定例 shows that attendance is taken, and Meet に参加 goes through the join (records attendance)", async () => {
