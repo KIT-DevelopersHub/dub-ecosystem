@@ -3,5 +3,6 @@
 export const queryKeys = {
   me: ["me"] as const,
   bffHome: ["bff", "home"] as const,
+  conferenceEvents: ["shell", "conference-events"] as const,
   feature: (featureId: string, ...parts: readonly unknown[]) => [featureId, ...parts] as const,
 };
