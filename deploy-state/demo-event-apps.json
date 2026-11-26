@@ -3,12 +3,12 @@
   "slug": "event-apps",
   "worker": "dub-demo-event-apps",
   "url": "https://dub-demo-event-apps.developershub-site.workers.dev",
-  "deployedSha": "d5093c07",
+  "deployedSha": "82499e83",
   "branch": "feat/event-enabled-apps",
   "actor": "ko-tarou",
   "markers": ["fe3-event-apps","members-event-staff"],
   "live": true,
-  "verifiedAt": "2026-11-26T16:56:26Z",
-  "updatedAt": "2026-11-26T16:56:26Z",
+  "verifiedAt": "2026-11-26T17:03:26Z",
+  "updatedAt": "2026-11-26T17:03:26Z",
   "note": ""
 }
