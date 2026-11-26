@@ -9,7 +9,8 @@ import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp } from "@dub/types";
 import { ordersCsv } from "./ticket-csv";
 import { EVENT_NAME, isTestOrder, orderNumber, renderBuyerMail, renderOpsMail, renderRefundMail, type RenderedMail, type TicketPass } from "./ticket-mail";
-import { ticketToken, verifyTicketToken } from "./ticket-token";
+import { receiptAvailable } from "./ticket-receipt";
+import { receiptToken, ticketToken, verifyTicketToken } from "./ticket-token";
 import type { OutboundMail } from "./mailer";
 import type { AppDeps, CheckinRow, OutboxKind, OutboxRow, OutboxUpdate, TicketOrderRow, TicketRow } from "./types";
 
@@ -218,6 +219,13 @@ export class TicketDelivery {
     );
   }
 
+  /** 有料の注文だけ。チケットの URL とは別のトークン（同行者に転送されても領収書は開けない）。 */
+  private async receiptUrl(order: TicketOrderRow): Promise<string | null> {
+    if (!receiptAvailable(order)) return null;
+    const base = this.deps.lpBaseUrl.replace(/\/+$/, "");
+    return `${base}/receipt/${await receiptToken(this.deps.ticketTokenSecret!, order.id)}`;
+  }
+
   private async mailFor(row: OutboxRow, order: TicketOrderRow, tickets: readonly TicketRow[]): Promise<OutboundMail | null> {
     let rendered: RenderedMail;
     let to: string;
@@ -227,7 +235,7 @@ export class TicketDelivery {
     } else if (row.kind === "buyer_confirmation") {
       const valid = tickets.filter((t) => t.status === "valid");
       if (valid.length === 0) return null;
-      rendered = renderBuyerMail(order, await this.passes(valid));
+      rendered = renderBuyerMail(order, await this.passes(valid), await this.receiptUrl(order));
       to = order.buyerEmail;
     } else {
       rendered = renderOpsMail(order);

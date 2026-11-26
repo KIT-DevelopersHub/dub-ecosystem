@@ -21,6 +21,8 @@ export type LpTicketOrdersPage = lpTickets.LpTicketOrdersPage;
 export type LpTicketTypeInput = lpTickets.LpTicketTypeInput;
 export type LpTicketCoupon = lpTickets.LpTicketCoupon;
 export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
+export type LpTicketReceipt = lpTickets.LpTicketReceipt;
+export type LpTicketReceiptIssuer = lpTickets.LpTicketReceiptIssuer;
 export type LpTicketRefundResult = lpTickets.LpTicketRefundResult;
 export type LpTicketRefundResponse = lpTickets.LpTicketRefundResponse;
 export type LpTicketRefundErrorReason = lpTickets.LpTicketRefundErrorReason;
@@ -55,6 +57,8 @@ export interface TicketOrderRow extends Omit<LpTicketOrder, "test"> {
   resolvedAt: string | null;
   /** Hashed sender IP from the public LP Worker (per-sender hold cap). Never the raw IP. */
   clientKey: string | null;
+  /** 0003 migration. 領収書の宛名。null = 宛名なし（購入者名で代用しない）。 */
+  receiptName: string | null;
 }
 export interface TicketCouponRow extends Omit<LpTicketCoupon, "used"> {
   site: string;
@@ -206,6 +210,8 @@ export interface LpTicketRepo {
   setOrderPaymentMethod(id: string, method: string): Promise<void>;
   /** 0006 migration. Display-only marker; callers swallow failures. */
   markOrderPreview(id: string): Promise<void>;
+  /** 0003 migration. Sets the 宛名 only while it is still NULL (one statement). false = already set / no order. */
+  setReceiptName(id: string, receiptName: string): Promise<boolean>;
   /** Newest first, keyset by (created_at, id). */
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
   /** Oldest first, keyset by (created_at, id). No per-id binds, so a page may be far larger than listOrders'. */
