@@ -9,21 +9,21 @@ import {
   type NotificationChannel,
 } from "../contracts/notification-api";
 import type { MergedPreference } from "../lib/preference-merge";
-import { resolveTypeDisplay } from "../lib/type-dictionary";
+import { NOTIFICATION_GROUP_META, resolveTypeDisplay } from "../lib/type-dictionary";
 
 const CHANNEL_LABEL: Record<NotificationChannel, string> = {
-  in_app: "In-app",
-  email: "Email",
-  chat: "Chat",
-  push: "Push",
+  in_app: "アプリ内",
+  email: "メール",
+  chat: "チャット",
+  push: "プッシュ",
 };
 
 // push is display-only until MO3 ships real delivery (test 17).
 const DISPLAY_ONLY_CHANNELS: ReadonlySet<NotificationChannel> = new Set(["push"]);
 
 function rowLabel(type: string): string {
-  if (type === "*") return "All notifications";
-  if (type.endsWith(".*")) return `${resolveTypeDisplay(type.slice(0, -1) + "x").group} (all)`;
+  if (type === "*") return "すべての通知";
+  if (type.endsWith(".*")) return `${NOTIFICATION_GROUP_META[resolveTypeDisplay(type.slice(0, -1) + "x").group].label}（すべて）`;
   return resolveTypeDisplay(type).label;
 }
 
@@ -39,14 +39,14 @@ export function PreferenceMatrix(props: PreferenceMatrixProps): ReactNode {
   const columns: ColumnDef<MergedPreference>[] = [
     {
       key: "type",
-      header: "Type",
+      header: "種類",
       cell: (row) => (
         <span data-testid={`fe5-prefs-row-${row.type}`} data-overridden={row.overridden}>
           {rowLabel(row.type)}
           {row.overridden ? (
-            <span data-testid={`fe5-prefs-override-${row.type}`} title="Customized">
+            <span data-testid={`fe5-prefs-override-${row.type}`} title="カスタマイズ済み">
               {" "}
-              (customized)
+              （カスタマイズ済み）
             </span>
           ) : null}
         </span>
@@ -57,7 +57,7 @@ export function PreferenceMatrix(props: PreferenceMatrixProps): ReactNode {
         key: ch,
         align: "center",
         header: DISPLAY_ONLY_CHANNELS.has(ch) ? (
-          <Tooltip content="Delivery coming soon (settings saved now)">
+          <Tooltip content="配信は準備中です（設定は保存されます）">
             <span data-testid={`fe5-prefs-col-${ch}`}>{CHANNEL_LABEL[ch]} *</span>
           </Tooltip>
         ) : (
