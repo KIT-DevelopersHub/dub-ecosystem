@@ -23,6 +23,9 @@ export interface Env {
   SVC_GITHUB_SYNC?: Fetcher; // github-sync      POST /internal/events-async
   SVC_MOBILE_BFF?: Fetcher; // mo3-mobile-bff   POST /internal/events-async
   SVC_MAIL_AUTOMATION?: Fetcher; // mail-automation POST /internal/events-async (改善#5)
+
+  // --- write guard (#841): max outbox rows claimed per UTC day (default 3000; "0" pauses) ---
+  FREEQ_DAILY_ROW_CAP?: string;
 }
 
 // The env keys that hold a consumer service binding (used by the routing map).

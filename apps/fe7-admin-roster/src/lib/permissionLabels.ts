@@ -111,6 +111,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "infra:deploy": { label: "デプロイの実行", description: "サイトのデプロイ（公開・反映）を実行できるようになります。" },
   "infra:dns": { label: "DNS の変更", description: "ドメインの DNS レコードを変更できるようになります。" },
   "infra:admin": { label: "インフラの管理", description: "サイトの新規登録や、操作を許可するドメインの管理ができるようになります。" },
+  "lp:checkin": { label: "チケットの当日受付", description: "オンにすると、LP管理 > チケット > 受付 で参加者のチケット QR を読んで受付済みにできます（同じ券は 1 日 1 回）。読み間違えの取り消しと、その日の受付一覧（参加者名）も見られます。LP管理の閲覧も必要です。" },
   "lp:publish": { label: "公開サイトの切り替え", description: "オンにすると、LP管理から hokuriku-it-conf.com に公開する版を切り替えられます。" },
   "audit:read": { label: "監査ログの閲覧", description: "誰が何をしたかの監査ログを検索・確認できるようになります。" },
   "github:read": { label: "GitHub の閲覧", description: "GitHub の同期状態・リポジトリ・プルリクエストを閲覧できるようになります。" },

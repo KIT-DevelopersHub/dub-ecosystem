@@ -34,23 +34,49 @@ export function worstCaseSubrequestsPerTick(dbCount: number = OUTBOX_DB_BINDINGS
   return dbCount * (1 + 2 * DRAIN_OPTS.batchSize) + dbCount;
 }
 
-export type DrainAllEntry = ({ ok: true } & DrainResult) | { ok: false; error: string };
+export type DrainAllEntry =
+  | ({ ok: true; capped?: true } & DrainResult)
+  | { ok: false; error: string };
 export type DrainAllResult = Partial<Record<OutboxDbBinding, DrainAllEntry>>;
+
+export interface DrainAllOptions {
+  /**
+   * Upper bound on rows claimed across ALL DBs in this pass (the remaining daily budget, see
+   * daily-cap.ts). Undefined = no bound (just the per-DB batchSize). A DB reached after the
+   * budget is spent is not queried at all and reports `capped: true`; its rows stay pending.
+   */
+  maxRows?: number;
+}
+
+/** Total rows claimed in one drainAll pass (what the daily budget is charged). */
+export function claimedRows(result: DrainAllResult): number {
+  let n = 0;
+  for (const e of Object.values(result)) if (e && e.ok) n += e.claimed;
+  return n;
+}
 
 /**
  * Drain each bound outbox D1 in sequence with the single shared deliver. A missing
  * binding is skipped; a per-DB failure is recorded and swallowed so the remaining DBs
  * still drain. Returns a per-DB summary (for the scheduled-handler log).
  */
-export async function drainAll(env: Env): Promise<DrainAllResult> {
+export async function drainAll(env: Env, opts: DrainAllOptions = {}): Promise<DrainAllResult> {
   const deliver = makeDeliver(env);
   const out: DrainAllResult = {};
+  let remaining = opts.maxRows ?? Number.POSITIVE_INFINITY;
   for (const name of OUTBOX_DB_BINDINGS) {
     const db = env[name] as D1Database | undefined;
     if (!db) continue; // binding not present in this deploy: nothing to drain
+    if (remaining <= 0) {
+      // Daily budget spent: leave this DB's rows pending (not expired, not failed).
+      out[name] = { ok: true, capped: true, claimed: 0, delivered: 0, retried: 0, failed: 0 };
+      continue;
+    }
+    const batchSize = Math.min(DRAIN_OPTS.batchSize, remaining);
     try {
-      const res = await drain(db, deliver, { ...DRAIN_OPTS, expire: expireStale });
-      out[name] = { ok: true, ...res };
+      const res = await drain(db, deliver, { ...DRAIN_OPTS, batchSize, expire: expireStale });
+      remaining -= res.claimed;
+      out[name] = { ok: true, ...res, ...(batchSize < DRAIN_OPTS.batchSize ? { capped: true as const } : {}) };
     } catch (err) {
       out[name] = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
