@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeD1 } from "./d1";
-import { readLatestSnapshot, upsertSnapshot, usageDb } from "../src/snapshot-repo";
+import { readGrowthHistory, readLatestSnapshot, upsertSnapshot, usageDb } from "../src/snapshot-repo";
 import type { SnapshotRow } from "../src/types";
 
 // A minimal snapshot row factory. `used`/`pct` NULL ⇔ status "unknown" (mirrors the collector).
@@ -75,5 +75,20 @@ describe("readLatestSnapshot — resilient last-known read", () => {
     const db = usageDb(d1);
     await upsertSnapshot(db, [row("cloudflare", "workers_requests_day", null, "unknown")], new Date("2026-08-14T00:00:00Z"));
     expect(await readLatestSnapshot(db)).toEqual([]);
+  });
+});
+
+describe("readGrowthHistory — storage growth for the run-out projection (#902)", () => {
+  it("returns only growth metrics inside the lookback, and readLatestSnapshot carries captured_at", async () => {
+    const { d1 } = makeD1();
+    const db = usageDb(d1);
+    await upsertSnapshot(db, [row("cloudflare", "r2_storage", 100, "ok"), row("cloudflare", "workers_requests_day", 5, "ok")], new Date("2026-11-10T10:00:00Z"));
+    await upsertSnapshot(db, [row("cloudflare", "r2_storage", 200, "ok")], new Date("2026-11-22T10:00:00Z"));
+    await upsertSnapshot(db, [row("cloudflare", "r2_storage", 300, "ok"), row("cloudflare", "d1_storage", null, "unknown")], new Date("2026-11-27T10:00:00Z"));
+    const h = await readGrowthHistory(db, new Date("2026-11-27T12:00:00Z"));
+    expect([...h.keys()]).toEqual(["r2_storage"]);
+    expect(h.get("r2_storage")!.map((p) => p.day).sort()).toEqual(["2026-11-22", "2026-11-27"]);
+    const latest = await readLatestSnapshot(db);
+    expect(latest.find((r) => r.metric_key === "r2_storage")?.captured_at).toMatch(/^20\d\d-/);
   });
 });

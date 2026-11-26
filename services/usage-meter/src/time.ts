@@ -25,3 +25,5 @@ export function nextUtcDay(now: Date): Date {
 export function firstOfNextUtcMonth(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 }
+
+export const DAY_MS = 24 * 60 * 60 * 1000;

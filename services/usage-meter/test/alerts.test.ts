@@ -138,12 +138,14 @@ describe("runAlerts", () => {
 });
 
 describe("buildAlertLines", () => {
-  it("renders one line per breach with pct + overflow behavior", () => {
+  it("renders the level, pct, overflow behavior, playbook and paid plan per breach", () => {
     const summary = buildSummary([row("workers_requests_day", "critical", 95)], NOW, NOW.toISOString());
     const lines = buildAlertLines(summary.services.filter((s) => s.status === "critical"));
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("CRITICAL");
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toContain("[危険]");
     expect(lines[0]).toContain("停止");
+    expect(lines[2]).toContain("docs/runbooks/11-usage-free-tier/workers-requests.md");
+    expect(lines[3]).toContain("Workers Paid");
   });
 });
 

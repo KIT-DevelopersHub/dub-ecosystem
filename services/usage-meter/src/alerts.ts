@@ -1,4 +1,5 @@
-// Billing-guard alerting (spec E). When a metric crosses warn(70%)/critical(90%) the daily
+// Billing-guard alerting (spec E, #902 levels). When a metric reaches warn(70%)/act(85%)/
+// critical(95%) — or its projection says it runs out before the reset — the daily
 // alarm fires an admin alert over TWO best-effort channels — never throwing, never blocking:
 //   1. In-app EVT_NOTIFICATION via notification-service POST /notify (when admin user ids
 //      are configured via USAGE_ALERT_ADMIN_USER_IDS).
@@ -13,6 +14,7 @@ import type { mail, notification } from "@dub/types";
 import type { Env } from "./env";
 import { utcDayString } from "./time";
 import { breachedServices } from "./summary";
+import { LEVEL_LABEL, levelReason } from "./escalation";
 import type { UsageServiceSummary, UsageSummary } from "./types";
 
 const SERVICE_NAME = "usage-meter";
@@ -36,21 +38,30 @@ export interface AlertResult {
 }
 
 function dedupKey(s: UsageServiceSummary, day: string): string {
-  return `alert:${s.metricKey}:${s.status}:${day}`;
+  return `alert:${s.metricKey}:${s.level}:${day}`;
 }
 
 function fmtPct(s: UsageServiceSummary): string {
   return s.pct === null ? "?" : `${s.pct}%`;
 }
 
-/** One-line-per-metric human summary of the breaches. */
+/** Per-metric human summary of the breaches: the numbers, why, and what to read next. */
 export function buildAlertLines(breaches: readonly UsageServiceSummary[]): string[] {
-  return breaches.map(
-    (s) =>
-      `[${s.status.toUpperCase()}] ${s.label}: ${fmtPct(s)} (${s.used ?? "?"}/${s.limit} ${s.unit}` +
+  return breaches.flatMap((s) => [
+    `[${LEVEL_LABEL[s.level]}] ${s.label}: ${fmtPct(s)} (${s.used ?? "?"}/${s.limit} ${s.unit}` +
       `, 超過時=${s.overflowBehavior === "halt" ? "停止" : "課金"})`,
-  );
+    `  ${levelReason(s.pct, s.projection)}`,
+    `  手順書: ${s.playbookUrl}`,
+    `  課金する場合: ${s.paidPlan.name} ${s.paidPlan.price}`,
+  ]);
 }
+
+/** Footer explaining where the decision is tracked. */
+const ISSUE_FLOW_LINES = [
+  "",
+  "対策するか課金するかは GitHub Issue（ラベル area:usage）で決めます。",
+  "Issue は usage-escalation ワークフローが 6 時間ごとに作成・更新します（同じ項目は 1 日 1 回まで）。",
+];
 
 function parseCsv(csv: string | undefined): string[] {
   if (!csv) return [];
@@ -160,16 +171,16 @@ export async function runAlerts(
   };
   if (fresh.length === 0) return result;
 
-  const levels = fresh.map((f) => `${f.metricKey}:${f.status}`).join(",");
-  const worst = fresh.some((b) => b.status === "critical") ? "critical" : "warn";
+  const levels = fresh.map((f) => `${f.metricKey}:${f.level}`).join(",");
+  const worst = fresh.some((b) => b.level === "critical") ? "critical" : fresh.some((b) => b.level === "act") ? "act" : "warn";
   Object.assign(
     result,
     await deliverAdminAlert(
       env,
       {
         type: ALERT_TYPE,
-        title: `無料枠しきい値超過 (${fresh.length}件・最大 ${worst})`,
-        lines: ["無料枠の使用率がしきい値を超えました。", "", ...buildAlertLines(fresh)],
+        title: `無料枠しきい値超過 (${fresh.length}件・最大 ${LEVEL_LABEL[worst]})`,
+        lines: ["無料枠の使用率がしきい値を超えました。", "", ...buildAlertLines(fresh), ...ISSUE_FLOW_LINES],
         idempotencyKey: `usage-alert:${day}:${levels}`,
         notifyDedupKey: `usage:${levels}`,
       },
