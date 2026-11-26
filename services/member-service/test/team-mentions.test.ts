@@ -52,6 +52,21 @@ describe("GET /members/internal/team-members", () => {
     expect(list.json.userIds).toEqual(["usr_kurokawa", "usr_kanemu"]);
   });
 
+  it("all=1 returns every linked member regardless of team, declined left out on request", async () => {
+    const app = createApp(makeDeps());
+    await seedTeamWithPeople(app);
+    const plain = await call(app, "POST", "/members/people", { body: { name: "チーム無し", status: "added" } });
+    await call(app, "POST", `/members/people/${plain.json.id}/identity-link`, { body: { identityUserId: "usr_noteam", version: plain.json.version } });
+    const all = await call(app, "GET", "/members/internal/team-members?all=1", { internal: true });
+    expect(all.json.userIds.sort()).toEqual(["usr_kanai", "usr_kanemu", "usr_kota", "usr_kurokawa", "usr_noteam"]);
+    const people = (await call(app, "GET", "/members/overview")).json.members as { id: string; identityUserId: string | null; version: number }[];
+    const kota = people.find((p) => p.identityUserId === "usr_kota")!;
+    await call(app, "PATCH", `/members/people/${kota.id}`, { body: { status: "declined", version: kota.version } });
+    const active = await call(app, "GET", "/members/internal/team-members?all=1&excludeDeclined=1", { internal: true });
+    expect(active.json.userIds).not.toContain("usr_kota");
+    expect(active.json.userIds).toContain("usr_noteam");
+  });
+
   it("returns an empty list for an unknown or empty teamIds", async () => {
     const app = createApp(makeDeps());
     await seedTeamWithPeople(app);

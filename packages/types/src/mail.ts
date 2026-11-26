@@ -88,6 +88,10 @@ export interface SendMailRequest {
   // and hands the provider the structured attachment list. Bounded per-file / per-message
   // (see mail-gateway config). Frozen consumers that ignore it keep working unchanged.
   attachments?: MailAttachmentInput[];
+  // ADDITIVE (共用アドレスから送る, 0027): the From the composer picked. Omitted = the server's
+  // own choice (the sender's address, or the shared mailbox a reply goes out as). Only the
+  // sender's own address or a shared mailbox they may send as is accepted (else 403).
+  fromAddress?: string;
 }
 /** One outbound attachment on a SendMailRequest: filename + MIME + base64-encoded bytes. */
 export interface MailAttachmentInput {
@@ -478,6 +482,43 @@ export interface MailTeamListCreateRequest {
   localPart: string;
   teamId: string;
 }
+// ---- shared sending addresses (共用アドレスから送る, 0027) ----
+// A shared address (e.g. info@) that members pick as the From in compose. The external side
+// sees the shared address with its display name; replies to such a send also reach the
+// member who sent it. Who may pick it: every 運営メンバー, or one team's members.
+export type MailSharedMailboxAllow = "all_members" | "team";
+export interface MailSharedMailboxInput {
+  displayName: string; // shown as the From name, e.g. 北陸ITカンファレンス 実行委員会
+  signature: string; // put at the end of the body when picked in compose ("" = none)
+  allow: MailSharedMailboxAllow;
+  teamId?: string | null; // required when allow is "team"
+}
+export interface MailSharedMailbox extends MailSharedMailboxInput {
+  id: string;
+  /** Lowercased full address, e.g. info@developershub.jp. */
+  address: string;
+  teamId: string | null;
+  updatedAt: ISODateTime;
+}
+/** POST /mail/admin/shared-mailboxes body. The address is always `${localPart}@` our own zone. */
+export interface MailSharedMailboxCreateRequest extends MailSharedMailboxInput {
+  localPart: string;
+}
+/** One From the signed-in user may send as (GET /mail/send-as). */
+export interface MailSendAsOption {
+  address: string;
+  /** "self" = the user's own address (the default); "shared" = a shared mailbox. */
+  kind: "self" | "shared";
+  displayName?: string;
+  signature?: string;
+}
+/** GET /mail/send-as: the user's own address first, then the shared mailboxes they may use. */
+export interface MailSendAsList {
+  items: MailSendAsOption[];
+}
+export const MAIL_SHARED_DISPLAY_NAME_MAX = 100;
+export const MAIL_SHARED_SIGNATURE_MAX = 2_000;
+
 /** Registrations (= verification mails) one account may trigger per UTC day. */
 export const MAIL_FORWARD_DAILY_REGISTER_LIMIT = 5;
 

@@ -179,6 +179,18 @@ export class MemberService {
     return { userIds };
   }
 
+  /** Every linked, non-archived 名簿 row's identity account (共用アドレスから送る: mail-gateway asks
+   *  "is this sender a 運営メンバー at all" for an address whose senders are 運営メンバー全員). */
+  async listMemberIdentityUserIds(opts: { excludeDeclined?: boolean } = {}): Promise<{ userIds: string[] }> {
+    const people = await this.deps.repo.listPeople(this.deps.orgId);
+    const userIds = new Set<string>();
+    for (const p of people) {
+      if (!p.identityUserId || (opts.excludeDeclined && p.status === "declined")) continue;
+      userIds.add(p.identityUserId);
+    }
+    return { userIds: [...userIds] };
+  }
+
   /** Google addresses of linked 名簿 rows (カレンダー > ミーティング invitations, drive-share-service
    *  -> member-service). Only rows linked to one of `userIds` are returned; gmail is null when the
    *  row has none (the caller falls back to the Dub login address). */
