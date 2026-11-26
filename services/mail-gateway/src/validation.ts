@@ -378,3 +378,22 @@ export function parseListMessagesQuery(q: Record<string, string | undefined>): {
 }
 
 export { mailInvalid };
+
+/** Validate PUT /mail/templates/:id (#867). A title is required; subject / body may be empty. */
+export function parseTemplateInput(body: unknown): mail.MailTemplateInput {
+  if (!isPlainObject(body)) throw mailInvalid([{ field: "(root)", reason: "invalid_type" }]);
+  const fe: FieldError[] = [];
+  const text = (field: string, max: number): string => {
+    const v = body[field] ?? "";
+    if (typeof v !== "string" || v.length > max) {
+      fe.push({ field, reason: "invalid_length", message: `<= ${max}` });
+      return "";
+    }
+    return v;
+  };
+  const title = text("title", mail.MAIL_TEMPLATE_TITLE_MAX).trim();
+  const out: mail.MailTemplateInput = { title, subject: text("subject", SUBJECT_MAX), body: text("body", mail.MAIL_TEMPLATE_BODY_MAX) };
+  if (!title && !fe.some((e) => e.field === "title")) fe.push({ field: "title", reason: "required" });
+  if (fe.length > 0) throw mailInvalid(fe);
+  return out;
+}

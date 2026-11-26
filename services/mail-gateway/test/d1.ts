@@ -41,6 +41,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0023_user_forward.sql"),
   join(HERE, "../db/0024_team_list.sql"),
   join(HERE, "../db/0025_drafts_inline_cid.sql"),
+  join(HERE, "../db/0026_mail_templates.sql"),
 ];
 
 function norm(v: unknown): unknown {

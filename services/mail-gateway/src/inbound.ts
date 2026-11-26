@@ -28,6 +28,7 @@ import { loadMatcher } from "./blocks";
 import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
 import { isAutoReply, notifySponsorContact } from "./sponsor-sync";
+import { isAutomatedMail, notifyNewMail } from "./new-mail-notify";
 
 function stripAngle(id: string): string {
   return id.trim().replace(/^<|>$/g, "").trim();
@@ -212,6 +213,21 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   return result;
 }
 
+/** Fail-open: a broken block list must never cost a delivery its normal handling. */
+async function blockedFor(deps: InboundDeps, ownerUserId: string, sender: string): Promise<boolean> {
+  try {
+    return (await loadMatcher(deps.db, ownerUserId)).matches(sender);
+  } catch {
+    return false;
+  }
+}
+
+/** 新着メールの通知 (#869): 持ち主のいる配送の、人が送ったメールだけ。ブロック判定は呼び出し側。 */
+async function maybeNotifyNewMail(deps: InboundDeps, raw: RawInbound, message: mail.MailMessage, ownerUserId: string | null, blocked: boolean): Promise<void> {
+  if (!ownerUserId || blocked || !deps.newMailNotify || isAutomatedMail(raw.headers)) return;
+  await notifyNewMail(deps.newMailNotify, deps.ctx, message, ownerUserId);
+}
+
 async function ingestCopy(deps: InboundDeps, raw: RawInbound, isListCopy: boolean): Promise<{ processed: boolean; message: mail.MailMessage }> {
   const parsed = parseInbound(raw, {
     archiveAddress: deps.archiveAddress ?? null,
@@ -253,8 +269,13 @@ async function ingestCopy(deps: InboundDeps, raw: RawInbound, isListCopy: boolea
     if (!existing) return { processed: false, message };
     message.id = existing.id;
     message.threadId = existing.thread_id;
-    await insertDelivery(deps.db, { inboundId: existing.id, ownerUserId, envelopeTo });
+    const added = await insertDelivery(deps.db, { inboundId: existing.id, ownerUserId, envelopeTo });
     if (ownerUserId) await claimInboundOwnerIfUnset(deps.db, existing.id, ownerUserId);
+    // Another recipient's copy: that member is told too. A redelivery of the same copy adds no
+    // delivery row, so it never notifies twice (the dedupKey is the second guard).
+    if (ownerUserId && added > 0 && deps.newMailNotify) {
+      await maybeNotifyNewMail(deps, raw, message, ownerUserId, await blockedFor(deps, ownerUserId, message.from.email));
+    }
     return { processed: false, message };
   }
   await insertDelivery(deps.db, { inboundId: message.id, ownerUserId, envelopeTo });
@@ -301,12 +322,7 @@ async function ingestCopy(deps: InboundDeps, raw: RawInbound, isListCopy: boolea
   // trigger the downstream pipeline (auto-reply / new-mail notification). Fail-open on a
   // lookup error: a broken block list must never cost a delivery its normal handling.
   if (ownerUserId) {
-    let blocked = false;
-    try {
-      blocked = (await loadMatcher(deps.db, ownerUserId)).matches(message.from.email);
-    } catch {
-      blocked = false;
-    }
+    const blocked = await blockedFor(deps, ownerUserId, message.from.email);
     if (blocked) {
       consoleSink({
         level: "info",
@@ -318,6 +334,8 @@ async function ingestCopy(deps: InboundDeps, raw: RawInbound, isListCopy: boolea
       return { processed: true, message };
     }
   }
+
+  await maybeNotifyNewMail(deps, raw, message, ownerUserId, false);
 
   // スポンサーのメール連携: 初めて保存したメールだけ (別の宛先のコピー・再配送は上で戻っている)。
   // 自動応答は「返信あり」にしない。日時は Dub が受け取った時刻 (差出人の Date ヘッダは使わない)。

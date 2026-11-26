@@ -34,3 +34,12 @@ describe("LP sponsor inquiry link", () => {
     expect(resolveLinkUrl(link)).toEqual({ path: "/lp/sponsors", fellBack: false });
   });
 });
+
+describe("new-mail link (#869)", () => {
+  it("links mail_message items to /mail?open=<id>", async () => {
+    const { itemLinkUrl } = await import("../src/components/NotificationCard");
+    const link = itemLinkUrl({ resourceType: "mail_message", resourceId: "mailin_1" } as Parameters<typeof itemLinkUrl>[0]);
+    expect(link).toBe("/mail?open=mailin_1");
+    expect(resolveLinkUrl(link)).toEqual({ path: "/mail?open=mailin_1", fellBack: false });
+  });
+});

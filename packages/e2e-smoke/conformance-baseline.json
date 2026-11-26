@@ -48,9 +48,12 @@
       "GET /chat/slack-import/channels",
       "GET /chat/slack-import/jobs",
       "GET /chat/slack-import/jobs/{}",
+      "GET /chat/times/preview",
       "POST /chat/custom-emojis/slack-import",
       "POST /chat/slack-import/jobs",
-      "POST /chat/slack-import/jobs/{}/step"
+      "POST /chat/slack-import/jobs/{}/step",
+      "POST /chat/times/bulk",
+      "POST /internal/events-async"
     ],
     "missingInCode": []
   },

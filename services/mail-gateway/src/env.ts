@@ -38,6 +38,8 @@ export interface Env {
   // スポンサーのメール連携 (sponsor-sync.ts): 人が送った / 受け取ったメールを SVC_MEMBER に知らせる。
   // 既定 on。"off" で止める (メールの送受信には影響しない)。
   MAIL_SPONSOR_SYNC?: string;
+  // 新着メールの通知 (new-mail-notify.ts, SVC_NOTIFICATION)。既定 on。"off" で止める。
+  MAIL_NEW_MAIL_NOTIFY?: string;
   // Every inbound mail is also forwarded (once per Message-ID) to this single address.
   // Unset/empty = off. Independent of MAIL_GMAIL_FORWARD. Must be a VERIFIED Email Routing
   // destination, or forward() fails (logged + audited, storage unaffected).
