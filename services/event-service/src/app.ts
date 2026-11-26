@@ -143,6 +143,20 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.saveEventPageLayout(reqCtx(c), c.req.param("id"), body));
   });
 
+  // ---- AI digest + Q&A (#879). Flag OFF => GET says disabled, run 409, ask "disabled". ----
+  app.get("/events/:id/digest", async (c) => {
+    return c.json(await svc.getEventDigest(reqCtx(c), c.req.param("id")));
+  });
+
+  app.post("/events/:id/digest/run", async (c) => {
+    return c.json(await svc.runEventDigest(reqCtx(c), c.req.param("id"), "manual"));
+  });
+
+  app.post("/events/:id/ask", async (c) => {
+    const body = await readJson<event.AskEventRequest>(c);
+    return c.json(await svc.askEvent(reqCtx(c), c.req.param("id"), body));
+  });
+
   // ---- actions (hierarchy: created only under an event) ----
   app.get("/events/:id/actions", async (c) => {
     const q = c.req.query();
