@@ -10,7 +10,7 @@
 //   スケルトンを出すと入力済みの人にもちらつく)。
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, IconButton } from "@dub/ui";
+import { Button, Icon, IconButton } from "@dub/ui";
 import { member } from "@dub/types";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
@@ -72,18 +72,24 @@ export function ProfileReminderBanner({
   if (missing.length === 0 || dismissed) return null;
   return (
     <div className={styles.banner} role="status" aria-live="polite" data-testid="fe2-profile-reminder">
-      <span className={styles.message}>
-        <span className={styles.title}>プロフィールに未入力の項目があります。入力してください</span>
-        <span className={styles.fields} data-testid="fe2-profile-reminder-fields">
-          {summarizeMissing(missing)}
+      <span className={styles.lead}>
+        <span className={styles.icon}>
+          <Icon name="alert-triangle" size="md" />
+        </span>
+        <span className={styles.message}>
+          <span className={styles.title}>プロフィールに未入力の項目があります。入力してください</span>
+          <span className={styles.fields} data-testid="fe2-profile-reminder-fields">
+            {summarizeMissing(missing)}
+          </span>
         </span>
       </span>
       <span className={styles.actions}>
-        <Button variant="primary" size="sm" onClick={onOpenSettings} testId="fe2-profile-reminder-open">
+        <Button variant="secondary" size="sm" onClick={onOpenSettings} testId="fe2-profile-reminder-open">
           入力する
         </Button>
         <IconButton
           name="x"
+          variant="secondary"
           aria-label="あとで (このセッションでは表示しない)"
           size="sm"
           onClick={() => {

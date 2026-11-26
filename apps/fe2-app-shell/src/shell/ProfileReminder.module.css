@@ -1,5 +1,7 @@
-/* プロフィール未入力のリマインド。代理表示バナーと同じ位置・形で、色は情報 (警告ほど強くしない)。
-   生値は使わずトークンのみ。 */
+/* プロフィール未入力のリマインド。@dub/tokens の warning スケールで目を引く注意色にする
+   (代理表示バナーと同じ配色レシピ: 背景 300 / 枠 500 / 文字 900)。warning スケールは
+   ライト/ダーク共通値なので、文字コントラストはどちらのテーマでも同じ (900 on 300 = 6.1:1,
+   800 on 300 = 4.9:1)。ボタンは secondary (面色) にして、ダークでも文字が読める。生値は使わない。 */
 .banner {
   display: flex;
   align-items: center;
@@ -9,10 +11,21 @@
   margin-bottom: var(--dub-space-3);
   padding: var(--dub-space-2) var(--dub-space-4);
   border-radius: var(--dub-radius-md);
-  border: 1px solid var(--dub-color-border-default);
-  background: var(--dub-color-surface-raised);
-  color: var(--dub-color-text-primary);
+  border: 1px solid var(--dub-color-warning-500);
+  background: var(--dub-color-warning-300);
+  color: var(--dub-color-warning-900);
   font-size: var(--dub-font-size-sm);
+}
+.lead {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  min-width: 0;
+}
+.icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--dub-color-warning-900);
 }
 .message {
   display: flex;
@@ -24,7 +37,7 @@
   font-weight: var(--dub-font-weight-bold);
 }
 .fields {
-  color: var(--dub-color-text-secondary);
+  color: var(--dub-color-warning-800);
   font-size: var(--dub-font-size-xs);
 }
 .actions {
