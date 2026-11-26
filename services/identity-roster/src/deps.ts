@@ -45,6 +45,11 @@ export interface RoleMembershipSink {
   changed(notice: RoleMembershipNotice): Promise<RoleMembershipOutcome>;
 }
 
+/** Domain events (#850). Best-effort: never throws into the business flow. */
+export interface DomainEventSink {
+  userActivated(input: { orgId: string; userId: string; email: string; displayName: string }, ctx: RequestCtx): Promise<void>;
+}
+
 export interface Deps {
   repo: IdentityRepo;
   /** Passkey credential store (/internal/webauthn/*). Absent => those routes 503. */
@@ -53,6 +58,8 @@ export interface Deps {
   revoker: SessionRevoker;
   /** Role membership changes for drive-share-service. Absent = nobody listens (tests, bare deploys). */
   membership?: RoleMembershipSink;
+  /** identity.user.activated etc. Absent = no events (tests, bare deploys). */
+  events?: DomainEventSink;
   now: () => string; // @dub/db nowIso
   newId: (prefix: string) => string; // @dub/db newId
   defaultOrgId: string; // common.DUB_DEFAULT_ORG_ID

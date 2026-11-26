@@ -1,6 +1,7 @@
 // chat — chat-service namespace. RT contract frozen; channel/message CRUD is STUB
 // pending 9-C activation. RT土台 = Durable Objects (WS is gateway-bypassing, DO-direct).
 import type { ChannelId, MessageId, UserId, EventId, ISODateTime, CursorQuery } from "./common";
+export * from "./chat-times"; // #850 times channels (Dub chat)
 
 // Server-internal fanout contract AND client WS wire contract (frozen · RT裁定#4).
 export type ChatRealtimeEvent =
