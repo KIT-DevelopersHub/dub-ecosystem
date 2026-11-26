@@ -84,13 +84,14 @@ export class SyncEngine {
     issue: IssueSnapshot,
   ): Promise<ApplyResult> {
     const ctx = this.sysCtx(requestId);
-    const assigneeId = await this.resolveAssignee(ctx, issue.assignees);
+    // 担当は必須: an issue with no mappable assignee goes to the user who registered the repo.
+    const assigneeId = (await this.resolveAssignee(ctx, issue.assignees)) ?? repo.createdBy;
     const createReq: task.CreateTaskRequest = {
       eventId: repo.eventId,
       title: issue.title,
       origin: "github",
       ...(issue.body ? { description: issue.body } : {}),
-      ...(assigneeId ? { assigneeId } : {}),
+      assigneeId,
     };
     const created = await this.d.tasks.createTask(ctx, createReq);
     const link: LinkRecord = {
@@ -160,7 +161,7 @@ export class SyncEngine {
 
     // github -> internal write.
     try {
-      const patched = await this.patchTaskFromIssue(ctx, current, issue);
+      const patched = await this.patchTaskFromIssue(ctx, current, issue, repo);
       await this.d.stores.links.update(link.id, {
         syncState: "in_sync",
         lastGithubUpdatedAt: issue.updatedAt,
@@ -179,9 +180,13 @@ export class SyncEngine {
     ctx: RequestContext,
     current: task.Task,
     issue: IssueSnapshot,
+    repo: GithubRepoConfig,
   ): Promise<task.Task> {
     const status = stateToStatus(issue.state, issue.labels);
-    const assigneeId = await this.resolveAssignee(ctx, issue.assignees);
+    // 担当は必須: a legacy unassigned task gets the repo registrant when the issue has no
+    // mappable assignee, so the PATCH is not rejected; an assigned task keeps its 担当.
+    const unassigned = !current.assigneeId && !current.assigneeTeamId;
+    const assigneeId = (await this.resolveAssignee(ctx, issue.assignees)) ?? (unassigned ? repo.createdBy : null);
     const req: task.UpdateTaskRequest = {
       version: current.version,
       title: issue.title,
@@ -228,7 +233,7 @@ export class SyncEngine {
       // conflict, github wins: pull issue into task instead of pushing.
       await this.d.publisher.conflictDetected(this.evtCtx(requestId), taskId);
       try {
-        const patched = await this.patchTaskFromIssue(ctx, current, issue);
+        const patched = await this.patchTaskFromIssue(ctx, current, issue, repo);
         await this.d.stores.links.update(link.id, {
           syncState: "in_sync",
           lastGithubUpdatedAt: issue.updatedAt,
