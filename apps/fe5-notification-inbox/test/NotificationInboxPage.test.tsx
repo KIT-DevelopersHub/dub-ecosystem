@@ -100,7 +100,7 @@ describe("NotificationInboxPage", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("fe5-inbox-item-notif_0001")).not.toBeInTheDocument();
     });
-    expect(harness.toast.show).toHaveBeenCalledWith("info", expect.stringMatching(/no longer available/i));
+    expect(harness.toast.show).toHaveBeenCalledWith("info", expect.stringMatching(/削除されています/));
   });
 
   it("5xx on mark-read rolls back and toasts an error (test 5)", async () => {
@@ -113,7 +113,7 @@ describe("NotificationInboxPage", () => {
     const user = userEvent.setup();
     await user.click(screen.getByTestId("fe5-inbox-item-notif_0001"));
     await waitFor(() => {
-      expect(harness.toast.show).toHaveBeenCalledWith("error", expect.stringMatching(/try again/i));
+      expect(harness.toast.show).toHaveBeenCalledWith("error", expect.stringMatching(/もう一度お試しください/));
     });
     // rolled back: still unread, count restored
     expect(screen.getByTestId("fe5-inbox-item-notif_0001")).toHaveAttribute("data-unread", "true");
