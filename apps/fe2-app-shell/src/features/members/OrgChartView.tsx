@@ -1,10 +1,9 @@
-// 組織図ビュー — 代表(横長ダークネイビー箱) → チーム色のカード → カードの中に「班」を横並び。
-//   班 = チーム内のリーダー(position=leader、無ければ roleTitle から推定)と、leaderId を上へ
-//   たどってそのリーダーに行き着くメンバー。リーダーの leaderId が同じチームの別リーダーを指す
-//   場合は同じ班の共同リーダーとして並べる。班名は専用の項目が無いので、先頭リーダーの役割
-//   (「広報リーダー」→「広報班」)、取れない・重なる時は姓(「石井班」)から作る。
-//   班に入らない人(オーガナイザー・リーダー未設定)はカード上部に従来の親子ツリーで出す。
-//   リーダーが居ないチームは従来どおり leaderId の親子ツリーだけを描く。
+// 組織図ビュー — 代表(横長ダークネイビー箱) → チーム色のカードを横 1 列 → カードの中は単位の木。
+//   単位 = オーガナイザーのグループ / リーダーの班。子の単位は常に横 1 列に並べ、どの深さでも
+//   同じ形で再帰する(チーム → オーガナイザーごとのグループ → 班 → …)。親子は leaderId だけで決め、
+//   リーダーの leaderId が同じチームの別リーダーを指す場合は同じ班の共同リーダーとして並べる。
+//   班名は先頭リーダーの役割(「広報リーダー」→「広報班」)、取れない・重なる時は姓(「石井班」)。
+//   どの単位にもつかない人は「リーダー未設定」の箱へ。頭が誰も居ないチームは従来の親子ツリー。
 import { useRef, type CSSProperties } from "react";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import { tierOf as roleTierOf, type Tier } from "./orgChartOrder.ts";
@@ -86,30 +85,43 @@ function buildTeamTree(members: OrgMember[]): TreeNode[] {
   return tree;
 }
 
-type Squad = { id: string; name: string; leaders: OrgMember[]; tree: TreeNode[] };
+/**
+ * 組織図の 1 単位(グループ / 班)。子の単位は横 1 列に並べ、どの深さでも同じ形で再帰する。
+ * - group = オーガナイザー 1 人を頭にした単位(配下の班・メンバーを持つ)。
+ * - squad = 班。リーダー(＋共同リーダー)を頭にした単位。
+ * - loose = 単位を持つチームで、どのオーガナイザー/リーダーにもつかない人の置き場。
+ */
+type UnitKind = "group" | "squad" | "loose";
+export type OrgUnit = { kind: UnitKind; id: string; name: string; heads: OrgMember[]; members: TreeNode[]; units: OrgUnit[] };
 
 /** 班名の候補: 「広報リーダー」→「広報班」。役割から取れなければ姓。 */
 function squadBaseName(head: OrgMember): string {
   const base = (head.roleTitle ?? "").replace(/リーダー|leader/gi, "").trim();
   return base ? `${base}班` : surnameSquadName(head);
 }
+function surname(m: OrgMember): string {
+  return m.name.split(/[\s\u3000]+/)[0] || m.name;
+}
 function surnameSquadName(head: OrgMember): string {
-  return `${head.name.split(/[\s\u3000]+/)[0] || head.name}班`;
+  return `${surname(head)}班`;
 }
 
 /**
- * 1チーム分を「班に入らない人」と「班」の並びに分ける。
- * - 班の先頭 = リーダーのうち、leaderId をたどって同じチームのリーダーに当たらない人。
- * - 共同リーダー = leaderId が同じチームのリーダーを指すリーダー(先頭の班に入る)。
- * - メンバー = leaderId を上へたどり、最初に当たったリーダーの班へ。当たらなければ班の外。
- * 循環は seen で打ち切る。リーダーが居なければ squads は空(従来の描画)。
+ * 1 チーム分を単位の木に組む。親子はすべて leaderId から決める。
+ * - 頭 = オーガナイザー(1 人 1 グループ)とリーダー。leaderId が同じチームのリーダーを指す
+ *   リーダーは共同リーダーとして同じ班に入る。
+ * - 単位の親 = 頭から leaderId を上へたどって最初に当たった別の単位(オーガナイザー→オーガナイザーも可)。
+ * - メンバー = leaderId を上へたどって最初に当たった単位へ。当たらなければ loose。
+ * - オーガナイザーが 1 人だけのチームでは、親の決まらない班をそのオーガナイザーの下に置く。
+ * 循環は seen で打ち切る。頭が誰も居なければ units は空(従来の親子ツリーで描く)。
  */
-function buildTeamSquads(members: OrgMember[]): { rest: TreeNode[]; squads: Squad[] } {
+export function buildTeamUnits(members: OrgMember[], teamId = "team"): { rest: TreeNode[]; units: OrgUnit[] } {
   const byId = new Map(members.map((m) => [m.id, m]));
   const isLeader = (m: OrgMember): boolean => tierOf(m) === "leader";
-  const leaders = members.filter(isLeader);
-  if (leaders.length === 0) return { rest: buildTeamTree(members), squads: [] };
+  const isOrganizer = (m: OrgMember): boolean => tierOf(m) === "organizer";
+  if (!members.some((m) => isLeader(m) || isOrganizer(m))) return { rest: buildTeamTree(members), units: [] };
 
+  // リーダーの班の頭 = leaderId を同じチームのリーダーへたどれる限り上った人。
   const headOf = (l: OrgMember): OrgMember => {
     const seen = new Set([l.id]);
     let cur = l;
@@ -120,43 +132,81 @@ function buildTeamSquads(members: OrgMember[]): { rest: TreeNode[]; squads: Squa
       cur = up;
     }
   };
-  const firstLeaderOf = (m: OrgMember): OrgMember | undefined => {
+  /** その人が属する単位の id(頭なら自分の単位)。 */
+  const unitIdOf = (m: OrgMember): string | undefined =>
+    isOrganizer(m) ? m.id : isLeader(m) ? headOf(m).id : undefined;
+  /** leaderId を上へたどり、最初に当たった単位の id(自分の単位 self は飛ばす)。 */
+  const unitAbove = (m: OrgMember, self?: string): string | undefined => {
     const seen = new Set([m.id]);
     let id = m.leaderId ?? null;
     while (id && !seen.has(id)) {
       seen.add(id);
       const up = byId.get(id);
       if (!up) return undefined;
-      if (isLeader(up)) return up;
+      const u = unitIdOf(up);
+      if (u && u !== self) return u;
       id = up.leaderId ?? null;
     }
     return undefined;
   };
 
-  const groups = new Map<string, { head: OrgMember; leaders: OrgMember[]; members: OrgMember[] }>();
-  for (const l of [...leaders].sort(byActivityThenTier)) {
-    const head = headOf(l);
-    const g = groups.get(head.id) ?? { head, leaders: [], members: [] };
-    g.leaders.push(l);
-    groups.set(head.id, g);
+  type Draft = { kind: "group" | "squad"; head: OrgMember; heads: OrgMember[]; members: OrgMember[]; parent?: string };
+  const drafts = new Map<string, Draft>();
+  for (const m of [...members].sort(byActivityThenTier)) {
+    const uid = unitIdOf(m);
+    if (!uid) continue;
+    const head = byId.get(uid)!;
+    const d = drafts.get(uid) ?? { kind: isOrganizer(head) ? "group" : "squad", head, heads: [], members: [] };
+    d.heads.push(m);
+    drafts.set(uid, d);
   }
-  const rest: OrgMember[] = [];
+  const loose: OrgMember[] = [];
   for (const m of members) {
-    if (isLeader(m)) continue;
-    const lead = tierOf(m) === "organizer" ? undefined : firstLeaderOf(m);
-    if (lead) groups.get(headOf(lead).id)!.members.push(m);
-    else rest.push(m);
+    if (unitIdOf(m)) continue;
+    const uid = unitAbove(m);
+    if (uid) drafts.get(uid)!.members.push(m);
+    else loose.push(m);
+  }
+  for (const [id, d] of drafts) d.parent = unitAbove(d.head, id);
+  // 単位どうしの循環(O1→O2→O1 など)は、その単位を根に戻して切る。
+  for (const [id, d] of drafts) {
+    const seen = new Set([id]);
+    let p = d.parent;
+    while (p) {
+      if (seen.has(p)) {
+        d.parent = undefined;
+        break;
+      }
+      seen.add(p);
+      p = drafts.get(p)?.parent;
+    }
+  }
+  const rootGroups = [...drafts.values()].filter((d) => !d.parent && d.kind === "group");
+  if (rootGroups.length === 1) {
+    const only = rootGroups[0]!;
+    for (const d of drafts.values()) if (!d.parent && d.kind === "squad") d.parent = only.head.id;
   }
 
-  const ordered = [...groups.values()].sort((a, b) => byActivityThenTier(a.head, b.head));
-  const names = ordered.map((g) => squadBaseName(g.head));
-  const squads = ordered.map((g, i) => {
-    const dup = names.filter((n) => n === names[i]).length > 1;
-    // 先頭リーダーを最初に、共同リーダーは活動順。
-    const ls = [g.head, ...g.leaders.filter((l) => l.id !== g.head.id)];
-    return { id: g.head.id, name: dup ? surnameSquadName(g.head) : names[i]!, leaders: ls, tree: buildTeamTree(g.members) };
-  });
-  return { rest: buildTeamTree(rest), squads };
+  // 班名(重なる時は姓)。グループ名はオーガナイザーの姓。
+  const squadDrafts = [...drafts.values()].filter((d) => d.kind === "squad");
+  const baseNames = new Map(squadDrafts.map((d) => [d.head.id, squadBaseName(d.head)]));
+  const nameOf = (d: Draft): string => {
+    if (d.kind === "group") return `${surname(d.head)}グループ`;
+    const n = baseNames.get(d.head.id)!;
+    return [...baseNames.values()].filter((x) => x === n).length > 1 ? surnameSquadName(d.head) : n;
+  };
+  const build = (d: Draft): OrgUnit => {
+    const kids = [...drafts.values()].filter((c) => c.parent === d.head.id).sort((a, b) => byActivityThenTier(a.head, b.head));
+    return { kind: d.kind, id: d.head.id, name: nameOf(d), heads: d.heads, members: buildTeamTree(d.members), units: kids.map(build) };
+  };
+  const units = [...drafts.values()]
+    .filter((d) => !d.parent)
+    .sort((a, b) => byActivityThenTier(a.head, b.head))
+    .map(build);
+  if (loose.length > 0) {
+    units.push({ kind: "loose", id: teamId, name: "リーダー未設定", heads: [], members: buildTeamTree(loose), units: [] });
+  }
+  return { rest: [], units };
 }
 
 /** 1人分のノード。tier で見た目の強さを、status でバッジ/淡色を出し分ける。 */
@@ -203,51 +253,66 @@ function TreeList({ nodes }: { nodes: TreeNode[] }): JSX.Element | null {
   );
 }
 
-function SquadBox({ squad }: { squad: Squad }): JSX.Element {
+const UNIT_TESTID: Record<UnitKind, string> = { group: "members-orggroup", squad: "members-orgsquad", loose: "members-orgloose" };
+
+/** 子の単位を横 1 列に並べる(折り返さない)。どの深さでも同じ。 */
+function UnitRow({ units, testId }: { units: OrgUnit[]; testId: string }): JSX.Element {
   return (
-    <section className={styles.squad} data-testid={`members-orgsquad-${squad.id}`} aria-label={squad.name}>
-      <div className={styles.squadName}>{squad.name}</div>
-      <ul className={styles.squadLeaders} data-testid={`members-orgsquad-leaders-${squad.id}`}>
-        {squad.leaders.map((l) => (
-          <OrgNode key={l.id} node={{ m: l, children: [] }} />
-        ))}
-      </ul>
-      {squad.tree.length > 0 ? (
-        <div className={styles.squadMembers}>
-          <TreeList nodes={squad.tree} />
+    <div className={styles.unitRow} data-layout="row" data-testid={testId}>
+      {units.map((u) => (
+        <UnitBox key={u.id} unit={u} />
+      ))}
+    </div>
+  );
+}
+
+/** 1 単位: 頭(横並び) → 配下メンバー(縦の親子ツリー) → 子の単位(横 1 列)。 */
+function UnitBox({ unit }: { unit: OrgUnit }): JSX.Element {
+  const base = UNIT_TESTID[unit.kind];
+  const cls = [styles.unit, unit.kind === "group" ? styles.unitGroup : unit.kind === "loose" ? styles.unitLoose : ""]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <section className={cls} data-testid={`${base}-${unit.id}`} data-unit={unit.kind} aria-label={unit.name}>
+      {unit.kind !== "group" ? <div className={styles.squadName}>{unit.name}</div> : null}
+      {unit.heads.length > 0 ? (
+        <ul className={styles.squadLeaders} data-testid={`${base}-leaders-${unit.id}`}>
+          {unit.heads.map((l) => (
+            <OrgNode key={l.id} node={{ m: l, children: [] }} />
+          ))}
+        </ul>
+      ) : null}
+      {unit.members.length > 0 ? (
+        <div className={unit.kind === "loose" ? undefined : styles.squadMembers}>
+          <TreeList nodes={unit.members} />
         </div>
       ) : null}
+      {unit.units.length > 0 ? <UnitRow units={unit.units} testId={`members-orgunits-${unit.id}`} /> : null}
     </section>
   );
 }
 
+function countSquads(units: OrgUnit[]): number {
+  return units.reduce((n, u) => n + (u.kind === "squad" ? 1 : 0) + countSquads(u.units), 0);
+}
+
 function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] }): JSX.Element {
   const color = team.color ?? "#64748b";
-  const { rest, squads } = buildTeamSquads(members);
+  const { rest, units } = buildTeamUnits(members, team.id);
+  const squads = countSquads(units);
   const tent = members.filter((m) => statusGroup(m.status) === "pending").length;
-  const cls = [styles.orgCol, squads.length > 1 ? styles.orgColWide : ""].filter(Boolean).join(" ");
 
   return (
-    <div
-      className={cls}
-      style={{ ["--team" as string]: color, ["--squads" as string]: squads.length } as CSSProperties}
-      data-testid={`members-orgcol-${team.id}`}
-    >
+    <div className={styles.orgCol} style={{ ["--team" as string]: color } as CSSProperties} data-testid={`members-orgcol-${team.id}`}>
       <div className={styles.colHead}>
         <div className={styles.colName}>{team.name}</div>
         {team.description ? <div className={styles.colDesc}>{team.description}</div> : null}
       </div>
       <div className={styles.colBody}>
         <TreeList nodes={rest} />
-        {squads.length > 0 ? (
-          <div className={styles.squadRow} data-testid={`members-orgsquads-${team.id}`}>
-            {squads.map((sq) => (
-              <SquadBox key={sq.id} squad={sq} />
-            ))}
-          </div>
-        ) : null}
+        {units.length > 0 ? <UnitRow units={units} testId={`members-orgsquads-${team.id}`} /> : null}
         <div className={styles.colCount}>
-          計{members.length}名{squads.length > 0 ? ` ／ ${squads.length}班` : ""}
+          計{members.length}名{squads > 0 ? ` ／ ${squads}班` : ""}
           {tent > 0 ? `（うち打診中${tent}）` : ""}
         </div>
       </div>
@@ -255,7 +320,7 @@ function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] 
   );
 }
 
-/** 代表箱からチームの並びへ下りる線。チームは画面幅で折り返すので、列ごとの分岐線は引かない。 */
+/** 代表箱からチームの並びへ下りる線。チームは横 1 列(広ければ横スクロール)。 */
 function Connector(): JSX.Element {
   return (
     <div className={styles.connector} aria-hidden>
@@ -298,7 +363,7 @@ export function OrgChartView({ teams: allTeams, members }: { teams: MemberTeam[]
       <div className={styles.orgHead}>
         <div className={styles.orgTitle}>全体組織体制図</div>
         <div className={styles.orgSub}>
-          チームの中に班を並べ、班ごとにリーダーと配下メンバーを表示します
+          チーム → オーガナイザーごとのグループ → 班 の順に、下の階層を横に並べます
         </div>
         <div className={styles.orgLegend}>
           <span className={styles.li}>
@@ -346,7 +411,7 @@ export function OrgChartView({ teams: allTeams, members }: { teams: MemberTeam[]
 
           {reps.length > 0 && columns.length > 0 ? <Connector /> : null}
 
-          <div className={styles.teamsRow} data-testid="fe2-orgchart-subgroups">
+          <div className={styles.teamsRow} data-layout="row" data-testid="fe2-orgchart-subgroups">
             {columns.map(({ team, members: cm }) => (
               <TeamColumn key={team.id} team={team} members={cm} />
             ))}

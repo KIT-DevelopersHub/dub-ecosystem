@@ -8,6 +8,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ApiClient, RequestInput } from "../../lib/api-client.tsx";
 import { FakeAuthProvider, editorPermissions, viewerPermissions } from "../../auth/test-support.tsx";
 import { createMembersApi, type MembersApi } from "./membersApi.tsx";
@@ -358,8 +361,12 @@ describe("MembersPage", () => {
     await screen.findByTestId("members-orgchart");
     expect(screen.getByTestId("fe2-orgchart-subgroups")).toBeInTheDocument();
 
-    const row = screen.getByTestId("members-orgsquads-pr");
-    const squads = [...row.querySelectorAll("[data-testid^='members-orgsquad-'][aria-label]")];
+    // オーガナイザーが 1 人 → チームの下にそのグループ、グループの下に班が横 1 列。
+    const teamRow = screen.getByTestId("members-orgsquads-pr");
+    expect([...teamRow.children].map((e) => e.getAttribute("data-testid"))).toEqual(["members-orggroup-O"]);
+    const row = screen.getByTestId("members-orgunits-O");
+    expect(row.getAttribute("data-layout")).toBe("row");
+    const squads = [...row.children];
     expect(squads.map((e) => e.getAttribute("data-testid"))).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
     expect(squads.map((e) => e.getAttribute("aria-label"))).toEqual(["広報班", "デザイン班"]);
 
@@ -369,9 +376,9 @@ describe("MembersPage", () => {
     expect(within(s1).queryByTestId("members-orgchip-R2")).not.toBeInTheDocument();
     for (const id of ["L2", "R2"]) expect(within(s2).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
     expect(within(s2).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
-    // オーガナイザーは班の外(カード上部)。
+    // オーガナイザーは班の外(グループの頭)。
     expect(within(row).queryByTestId("members-orgchip-O")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("members-orgcol-pr")).getByTestId("members-orgchip-O")).toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orggroup-leaders-O")).getByTestId("members-orgchip-O")).toBeInTheDocument();
   });
 
   it("組織図 lines up co-leaders of one 班 side by side", async () => {
@@ -424,27 +431,75 @@ describe("MembersPage", () => {
     render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
     await screen.findByTestId("members-orgchart");
 
+    // オーガナイザー 2 人 → 2 グループ、親の決まらないリーダー 4 人 → 班 4 つ、残り → リーダー未設定。
+    // すべてチームの下に横 1 列で並ぶ(縦に積まない)。
     const row = screen.getByTestId("members-orgsquads-pr");
-    const squads = [...row.children];
-    expect(squads.map((e) => e.getAttribute("data-testid"))).toEqual([
+    expect(row.getAttribute("data-layout")).toBe("row");
+    expect([...row.children].map((e) => e.getAttribute("data-testid"))).toEqual([
+      "members-orggroup-O1",
+      "members-orggroup-O2",
       "members-orgsquad-L1",
       "members-orgsquad-L2",
       "members-orgsquad-L3",
       "members-orgsquad-L4",
+      "members-orgloose-pr",
     ]);
-    expect(squads.map((e) => e.getAttribute("aria-label"))).toEqual(["川口班", "北村班", "久保班", "小松班"]);
-    // 各班のリーダーは 1 人ずつ(全員が 1 班にまとまらない)。
+    expect([...row.children].slice(2, 6).map((e) => e.getAttribute("aria-label"))).toEqual(["川口班", "北村班", "久保班", "小松班"]);
     for (const id of ["L1", "L2", "L3", "L4"]) {
       const chips = screen.getByTestId(`members-orgsquad-leaders-${id}`).querySelectorAll("[data-testid^='members-orgchip-']");
       expect([...chips].map((e) => e.getAttribute("data-testid"))).toEqual([`members-orgchip-${id}`]);
     }
-    // 班の数ぶんの幅をカードに渡す(中身の幅任せだと配下の無い班が縦に積まれる)。
-    const col = screen.getByTestId("members-orgcol-pr");
-    expect(col.style.getPropertyValue("--squads")).toBe("4");
-    // オーガナイザー・その配下・どのリーダーにもつかない人は班の外(カード上部)。
-    for (const id of ["O1", "O2", "M1", "M2", "M3", "M4", "N1", "N2", "P1", "P2"]) {
-      expect(within(row).queryByTestId(`members-orgchip-${id}`)).not.toBeInTheDocument();
-      expect(within(col).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    // オーガナイザーを leaderId に持つ人はそのグループの中。
+    const g1 = screen.getByTestId("members-orggroup-O1");
+    for (const id of ["O1", "M1", "M2", "M3"]) expect(within(g1).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    const loose = screen.getByTestId("members-orgloose-pr");
+    for (const id of ["M4", "N1", "N2", "P1", "P2"]) expect(within(loose).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+  });
+
+  // オーガナイザーが 2 人: チームの中を 2 グループに横に分け、各グループの下に自分の班を横に並べる。
+  // オーガナイザーの下のオーガナイザーも同じ形で 1 段深く入る(再帰)。
+  it("組織図 splits a team with 2 organizers into side-by-side groups, each with its own 班 (recursive)", async () => {
+    const p = { ...squadBase, teamIds: ["pr"], position: null };
+    const overview: MembersOverview = {
+      teams: [{ id: "pr", key: "pr", name: "集客広報", color: "#db2777", description: null }],
+      members: [
+        { ...p, id: "O1", name: "大西 修", roleTitle: "オーガナイザー", leaderId: null, sortOrder: 1 },
+        { ...p, id: "O2", name: "片山 美咲", roleTitle: "オーガナイザー", leaderId: null, sortOrder: 2 },
+        { ...p, id: "O3", name: "副 統括", roleTitle: "オーガナイザー", leaderId: "O2", sortOrder: 3 },
+        { ...p, id: "L1", name: "川口 隼", roleTitle: "広報リーダー", leaderId: "O1", sortOrder: 4 },
+        { ...p, id: "L2", name: "北村 楓", roleTitle: "デザインリーダー", leaderId: "O1", sortOrder: 5 },
+        { ...p, id: "L3", name: "久保 蒼", roleTitle: "SNSリーダー", leaderId: "O2", sortOrder: 6 },
+        { ...p, id: "L4", name: "小松 遥", roleTitle: "LPリーダー", leaderId: "O3", sortOrder: 7 },
+        { ...p, id: "M1", name: "斉藤 湊", roleTitle: "メンバー", leaderId: "L1", sortOrder: 8 },
+        { ...p, id: "M3", name: "杉山 翔", roleTitle: "メンバー", leaderId: "L3", sortOrder: 9 },
+        { ...p, id: "M4", name: "関 美月", roleTitle: "メンバー", leaderId: "L4", sortOrder: 10 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+
+    const kids = (id: string): Array<string | null> => [...screen.getByTestId(id).children].map((e) => e.getAttribute("data-testid"));
+    expect(screen.getByTestId("fe2-orgchart-subgroups").getAttribute("data-layout")).toBe("row");
+    expect(kids("members-orgsquads-pr")).toEqual(["members-orggroup-O1", "members-orggroup-O2"]);
+    expect(kids("members-orgunits-O1")).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
+    expect(kids("members-orgunits-O2")).toEqual(["members-orggroup-O3", "members-orgsquad-L3"]);
+    expect(kids("members-orgunits-O3")).toEqual(["members-orgsquad-L4"]);
+    for (const id of ["O1", "O2", "O3"]) expect(screen.getByTestId(`members-orgunits-${id}`).getAttribute("data-layout")).toBe("row");
+    // 配下は自分の班の中だけ。
+    expect(within(screen.getByTestId("members-orgsquad-L1")).getByTestId("members-orgchip-M1")).toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orgsquad-L3")).getByTestId("members-orgchip-M3")).toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orgsquad-L4")).getByTestId("members-orgchip-M4")).toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orggroup-O1")).queryByTestId("members-orgchip-L3")).not.toBeInTheDocument();
+    expect(screen.getByTestId("members-orgcol-pr").textContent).toContain("4班");
+  });
+
+  // 横並びの段は CSS で折り返さない(折り返すと狭い画面・多いチームで縦に積まれる)。
+  it("組織図 rows never wrap (teams row and every unit row stay horizontal)", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "members.module.css"), "utf8");
+    for (const sel of [".teamsRow", ".unitRow"]) {
+      const body = css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
+      expect(body, sel).toMatch(/flex-direction:\s*row/);
+      expect(body, sel).toMatch(/flex-wrap:\s*nowrap/);
     }
   });
 

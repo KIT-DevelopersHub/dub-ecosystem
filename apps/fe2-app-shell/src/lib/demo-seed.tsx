@@ -4408,8 +4408,13 @@ function createMembersStore() {
     mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 29, null, "メディア情報学科", "2年", null, "member_e5"),
     // 組織図の「班」確認用: 広報班の共同リーダー(leaderId が同じチームのリーダー)と、3つ目の SNS 班。
     mk("member_e7", "村上 千尋", "広報リーダー", "added", ["team_pr"], 30, null, "メディア情報学科", "2年", null, "member_e2"),
-    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 31, null, "メディア情報学科", "2年", null, "member_e1"),
+    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 31, null, "メディア情報学科", "2年", null, "member_e10"),
     mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 32, null, "メディア情報学科", "1年", null, "member_e8"),
+    // オーガナイザー 2 人目: 組織図でチームの中が 2 グループに横に分かれ、各グループの下に自分の班が並ぶ確認用。
+    // 白木 → 広報班・デザイン班 / 岡田 → SNS班・LP班。
+    mk("member_e10", "岡田 真琴", "オーガナイザー", "added", ["team_pr"], 49, null, "メディア情報学科", "3年"),
+    mk("member_e11", "小野 葵", "LPリーダー", "added", ["team_pr"], 50, null, "メディア情報学科", "2年", null, "member_e10"),
+    mk("member_e12", "松井 陽", "メンバー", "added", ["team_pr"], 51, null, "メディア情報学科", "1年", null, "member_e11"),
     // ネットワーク — 本番の集客広報と同じ形(position 未設定・役割は roleTitle だけ)の確認用。
     // リーダー4人に配下は居ない / メンバー3人はオーガナイザーを leaderId に持つ / 役割も役職も無い人。
     mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 33, null, "情報工学科", "3年"),
@@ -4474,6 +4479,9 @@ function createMembersStore() {
     member_e7: ["むらかみ", "ちひろ"],
     member_e8: ["もりもと", "ようた"],
     member_e9: ["はせがわ", "ゆい"],
+    member_e10: ["おかだ", "まこと"],
+    member_e11: ["おの", "あおい"],
+    member_e12: ["まつい", "よう"],
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };

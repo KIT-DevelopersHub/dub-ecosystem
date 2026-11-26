@@ -198,11 +198,14 @@
   overflow-x: auto;
   padding-bottom: var(--dub-space-2);
 }
+/* 中身の幅まで広がる(画面より広い時は .orgScroll が横スクロール)。中央寄せでも左端が切れない。 */
 .orgCanvas {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 0;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
   padding-top: var(--dub-space-2);
 }
 
@@ -294,19 +297,19 @@
 }
 
 /* チームカラム */
-/* チームは画面幅で折り返す。班を持つチームは中身の幅まで広がる。 */
+/* チームは常に横 1 列。折り返すと縦に積まれるので、広い時は横スクロールに任せる。 */
 .teamsRow {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--dub-space-4);
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: var(--dub-space-5);
   justify-content: center;
   align-items: flex-start;
-  width: 100%;
 }
 .orgCol {
-  flex: 0 1 200px;
-  min-width: 170px;
-  max-width: 240px;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 190px;
   border-radius: 10px;
   overflow: hidden;
   border: 1.6px solid color-mix(in srgb, var(--team, #64748b) 45%, #fff);
@@ -339,39 +342,39 @@
   gap: var(--dub-space-2);
 }
 
-/* 班が 2 つ以上のチーム: 班の数ぶんの幅をカードに取り、班を横 1 列に並べる。
-   中身の幅(max-content)任せにすると、配下の居ない班は細く見積もられて縦に積まれる。
-   画面より広い時だけ 100% に収め、班は折り返す。 */
-.orgCol.orgColWide {
-  --squad-w: 190px;
-  flex: 0 0 auto;
-  width: min(
-    100%,
-    calc(var(--squads) * var(--squad-w) + (var(--squads) - 1) * var(--dub-space-3) + 2 * var(--dub-space-3) + 4px)
-  );
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-/* ── 班 ─────────────────────────────────────────────────────────────
-   チームカードの中に横並び(狭い画面では折り返し)。班名 → リーダー(横並び) → 配下。 */
-.squadRow {
+/* ── 単位(オーガナイザーのグループ / 班) ───────────────────────────────
+   子の単位は常に横 1 列(折り返さない)。どの深さでも同じ。頭 → 配下 → 子の単位。 */
+.unitRow {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--dub-space-3);
-  margin-top: var(--dub-space-2);
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: var(--dub-space-4);
+  align-items: flex-start;
 }
-.squad {
-  flex: 1 1 170px;
+.unit {
+  flex: 0 0 auto;
   min-width: 170px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: var(--dub-space-2);
+  gap: var(--dub-space-3);
   padding: var(--dub-space-3);
   border-radius: 8px;
   border: 1.4px solid color-mix(in srgb, var(--team, #64748b) 32%, #fff);
   background: color-mix(in srgb, var(--team, #64748b) 4%, #fff);
+}
+/* オーガナイザーのグループ = 一段濃い枠で、中の班と区別する。 */
+.unit.unitGroup {
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--team, #64748b) 55%, #fff);
+  background: color-mix(in srgb, var(--team, #64748b) 7%, #fff);
+}
+.unit .unit {
+  background: #fff;
+}
+.unit.unitLoose {
+  border-style: dashed;
+  background: #fff;
 }
 .squadName {
   font-size: 12px;
