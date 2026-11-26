@@ -13,8 +13,8 @@
 //
 //  2. INSTANCE LAYER (this file): the decisions that need the request's DATA, which a static
 //     table cannot express — `includeArchived` demanding `task:delete`, the self-scoping of a
-//     bare `GET /tasks`, `origin` being service-only, the origin=github protected fields and
-//     the same-team dependency constraint. Those stay here, next to the row they judge. See
+//     bare `GET /tasks`, `origin` being service-only, the origin=github protected fields,
+//     the same-team dependency constraint and who may edit ONE task (#881 assertCanEditTask). Those stay here, next to the row they judge. See
 //     packages/policy-gate/src/gate.ts's "NOT this layer's job" note and
 //     docs/policy-coverage-inventory.md §3(d).
 import { Hono } from "hono";
@@ -147,6 +147,24 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const principal = principalOf(c);
     if (principal.kind === "service") return true;
     return (await deps.authz(principal.userId, config.orgId, [key])).includes(key);
+  };
+
+  /**
+   * INSTANCE LAYER (#881): may this caller edit THIS task? The table already demanded
+   * `task:write` (or the calendar key); here the row decides — assignee or creator, else
+   * `task:edit_all`. Rule lives in @dub/types `task.canEditTask` (FE4 renders the same).
+   * Service principals (github-sync) edit everything, as at the entry layer.
+   */
+  const assertCanEditTask = async (c: Context, t: task.Task): Promise<void> => {
+    const principal = principalOf(c);
+    if (principal.kind === "service") return;
+    if (task.canEditTask(t, { userId: principal.userId }, false)) return;
+    if (await holdsKey(c, task.TASK_EDIT_ALL_KEY)) return;
+    throw errors.forbidden("permission denied: task:edit_all", {
+      reason: "not_task_assignee",
+      required: [task.TASK_EDIT_ALL_KEY],
+      missing: [task.TASK_EDIT_ALL_KEY],
+    });
   };
 
   // The authorization layer. First and only — every route below is gated by POLICY_TABLE,
@@ -386,6 +404,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, current);
     if (body.version !== current.version) throw taskErrors.versionConflict();
 
     // origin=github protection (non-service principals cannot write protected fields).
@@ -503,6 +522,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, current);
 
     const now = nowIso();
     const ok = await deps.repo.archive(id, now);
@@ -542,6 +562,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const id = c.req.param("id");
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, found);
 
     const body = await readJson<Partial<task.CreateTaskAttachmentRequest>>(c);
     const fe: FieldError[] = [];
@@ -579,6 +600,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   app.delete("/tasks/:id/attachments/:attachmentId", async (c) => {
     const id = c.req.param("id");
     const attachmentId = c.req.param("attachmentId");
+    const found = await deps.repo.getById(id);
+    if (!found) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, found);
     const ok = await deps.repo.archiveAttachment(id, attachmentId, nowIso());
     if (!ok) throw taskErrors.notFound(attachmentId);
     return c.json({ ok: true });
@@ -604,6 +628,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, current);
     if (body.version !== current.version) throw taskErrors.versionConflict();
 
     // Single-engine dependency validation via @dub/gantt-calc. taskIds = the live
