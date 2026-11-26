@@ -12,7 +12,7 @@ import { Hono } from "hono";
 import type { GatewayEnv } from "./env";
 import { requestIdMiddleware, gatewayErrorHandler, gatewayError, GATEWAY_ROUTE_NOT_FOUND, type GatewayVariables } from "./context";
 import { corsMiddleware } from "./cors";
-import { rateLimitMiddleware, createInMemoryRateLimiter, type RateLimiter } from "./rate-limit";
+import { rateLimitMiddleware, createInMemoryRateLimiter, rateLimitWindowFromEnv, type RateLimiter, type RateLimitPolicy } from "./rate-limit";
 import { healthzHandler } from "./handlers/healthz";
 import { meHandler } from "./handlers/me";
 import { bffHomeHandler } from "./handlers/bff-home";
@@ -42,6 +42,8 @@ export interface CreateAppOptions {
   turnstile?: TurnstileVerifier;
   /** override rate limiter (tests / infra native binding). Defaults to in-memory fixed window. */
   rateLimiter?: RateLimiter;
+  /** override the per-session / per-IP budgets (tests). Defaults to env (rate-limit.ts). */
+  rateLimitPolicy?: RateLimitPolicy;
   /** override the permission source the policy gate consults (tests). Defaults to identity. */
   authz?: PermissionGranter;
   /** override where impersonation audit tags go (tests). Defaults to audit-log. */
@@ -55,14 +57,24 @@ export function createApp(options: CreateAppOptions = {}): GatewayApp {
   // An explicitly injected limiter is authoritative (deterministic tests / infra native
   // binding). Otherwise fall back to the per-isolate in-memory limiter, but prefer a
   // shared KV limiter per request when RATE_LIMIT_KV is bound (see rate-limit.ts).
+  // The in-memory limiter is created on the first request so it can honour
+  // RATE_LIMIT_WINDOW_MS (env is only visible per request), then reused by the isolate.
   const injected = options.rateLimiter;
-  const fallback = injected ?? createInMemoryRateLimiter();
+  let memory: RateLimiter | undefined = injected;
+  const fallback = (env: GatewayEnv): RateLimiter =>
+    (memory ??= createInMemoryRateLimiter({ windowMs: rateLimitWindowFromEnv(env) }));
 
   app.onError(gatewayErrorHandler);
 
   app.use("*", corsMiddleware());
   app.use("*", requestIdMiddleware());
-  app.use("*", rateLimitMiddleware(fallback, { preferEnv: injected === undefined }));
+  app.use(
+    "*",
+    rateLimitMiddleware(fallback, {
+      preferEnv: injected === undefined,
+      ...(options.rateLimitPolicy ? { policy: options.rateLimitPolicy } : {}),
+    }),
+  );
 
   // THE authorization layer — first and only, ahead of every route below. It is mounted
   // AFTER these three on purpose, and the order is load-bearing:

@@ -61,10 +61,10 @@ describe("rateLimiterFromEnv", () => {
     expect((await limiter!.check("k")).limit).toBe(100);
   });
 
-  it("honours the RATE_LIMIT_MAX override var", async () => {
+  it("applies a per-call budget override (tiered buckets share one store)", async () => {
     const { kv } = fakeKv();
-    const limiter = rateLimiterFromEnv(makeEnv({ RATE_LIMIT_KV: kv, RATE_LIMIT_MAX: "5" }));
-    expect((await limiter!.check("k")).limit).toBe(5);
+    const limiter = rateLimiterFromEnv(makeEnv({ RATE_LIMIT_KV: kv }));
+    expect((await limiter!.check("k", 5)).limit).toBe(5);
   });
 });
 
