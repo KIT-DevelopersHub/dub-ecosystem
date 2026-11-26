@@ -21,6 +21,7 @@ import { useSetCurrentEventId } from "@dub/fe3-event-action";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
+import { useConferenceEvents } from "./dashboard/useConferenceEvents.ts";
 import { useRecentVisits } from "../useVisitTracker.tsx";
 import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
@@ -29,9 +30,9 @@ import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { RegularMeetingsCard } from "./dashboard/RegularMeetingsCard.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
-  CONFERENCE,
   daysUntil,
   freeTierFromMetrics,
+  pickConference,
   statusMeta,
   taskCompletionPct,
   taskSegmentsFromCounts,
@@ -239,6 +240,7 @@ export function HomeScreen({
   const membersError = errorFor("member-service");
 
   const events = data?.upcomingEvents ?? [];
+  const conferenceEvents = useConferenceEvents(api);
   const unread = data?.unreadCount ?? 0;
 
   // Live dashboard aggregates from /bff/home. A source in partialErrors leaves its
@@ -286,7 +288,9 @@ export function HomeScreen({
   };
 
   // ── derived KPI values ────────────────────────────────────────────────────────
-  const days = daysUntil(CONFERENCE.dateISO);
+  // 本戦 = the conference event's startsAt (event data). Hidden when unset or past.
+  const conference = pickConference([...events, ...conferenceEvents]);
+  const days = conference ? daysUntil(conference.dateISO) : null;
   const cdStatus = days === null ? "info" : countdownStatus(days);
   const completion = taskCompletionPct(segments);
   const compStatus = completionStatus(completion);
@@ -325,15 +329,17 @@ export function HomeScreen({
           </>
         ) : (
           <>
-            <KpiTile
-              testId="fe2-kpi-countdown"
-              icon="clock"
-              label="本戦まで"
-              value={days === null ? "—" : String(days)}
-              unit="日"
-              status={cdStatus}
-              hint={`${CONFERENCE.name}・${CONFERENCE.dateLabel}`}
-            />
+            {conference && days !== null ? (
+              <KpiTile
+                testId="fe2-kpi-countdown"
+                icon="clock"
+                label="本戦まで"
+                value={String(days)}
+                unit="日"
+                status={cdStatus}
+                hint={`${conference.name}・${conference.dateLabel}`}
+              />
+            ) : null}
             <KpiTile
               testId="fe2-kpi-tasks"
               icon="check-square"
