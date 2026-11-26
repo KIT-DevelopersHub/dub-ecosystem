@@ -1,4 +1,4 @@
-// The one ミーティング form: 作成 > ミーティング, 「ミーティングを設定」 and ミーティングを編集 all
+// The one ミーティング form: 作成 > ミーティング and ミーティングを編集 all
 // render this inside the 作成 dialog's layout (icon rows, like EventForm). It registers a real
 // meeting (Google Calendar + Meet + invites) through toMeetingRequest — the payload is unchanged.
 import { useId, useMemo, useState, type ReactNode } from "react";
@@ -65,6 +65,7 @@ export function MeetingForm({
   targetsLoading = false,
   accountEmail,
   kindSwitch,
+  saving = false,
   onSubmit,
   onCancel,
 }: {
@@ -80,6 +81,8 @@ export function MeetingForm({
   accountEmail: string | null;
   /** The 作成 dialog's 種類 switch (absent when editing). */
   kindSwitch?: ReactNode;
+  /** A meeting is still being registered: no second one meanwhile. */
+  saving?: boolean;
   onSubmit: (body: meeting.CreateMeetingRequest) => void;
   onCancel: () => void;
 }): JSX.Element {
@@ -106,7 +109,7 @@ export function MeetingForm({
   const submit = () => {
     const e = validateMeetingForm(form);
     setErrors(e);
-    if (Object.values(e).some(Boolean)) return;
+    if (saving || Object.values(e).some(Boolean)) return;
     onSubmit(toMeetingRequest(form));
   };
 
@@ -283,8 +286,8 @@ export function MeetingForm({
         <Button variant="ghost" onClick={onCancel} testId={`${tid}-cancel`}>
           キャンセル
         </Button>
-        <Button type="submit" testId={`${tid}-submit`}>
-          {editing ? "保存" : "登録"}
+        <Button type="submit" disabled={saving} loading={saving} testId={`${tid}-submit`}>
+          {saving ? "作成中…" : editing ? "保存" : "登録"}
         </Button>
       </div>
     </form>

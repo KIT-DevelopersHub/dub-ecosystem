@@ -56,9 +56,9 @@ import { MeetingFilter } from "./MeetingFilter.tsx";
 import { MeetingForm } from "./MeetingForm.tsx";
 import { useUserPref } from "./calendar-prefs";
 import {
-  emptyMeetingForm,
   isMeetingTargetVisible,
   isMeetingVisible,
+  meetingFormForTab,
   meetingFormFromDraft,
   meetingToForm,
   parseMeetingTargetChoices,
@@ -493,15 +493,19 @@ export function CalendarScreen(): JSX.Element {
     if (canWrite) setPanel({ kind: "create", draft, ghost, recurrence: "none", meeting: null });
   };
   const openCreateDialog = () => openCreate(nextHourDraft(anchorDay));
-  // 「ミーティングを設定」 = the same 作成 dialog, opened on its ミーティング tab.
-  const openMeetingDialog = () =>
-    setPanel({ kind: "create", draft: withKind(nextHourDraft(anchorDay), "meeting"), ghost: null, recurrence: "none", meeting: emptyMeetingForm() });
-  /** A 作成 draft change; landing on the ミーティング tab starts its form from what was typed. */
+  /** A 作成 draft change. The ミーティング tab is the only way to create a meeting (#884): it starts
+   *  from the former 「ミーティングを設定」 defaults, or from the typed 予定 when 繰り返し was chosen. */
   const changeCreateDraft = (p: Extract<Panel, { kind: "create" }>, draft: EventDraft) =>
     setPanel({
       ...p,
       draft,
-      meeting: p.meeting ?? (repeatOffered && draft.kind === "meeting" ? meetingFormFromDraft(draft, p.recurrence, targets) : null),
+      meeting:
+        p.meeting ??
+        (repeatOffered && draft.kind === "meeting"
+          ? p.recurrence !== "none"
+            ? meetingFormFromDraft(draft, p.recurrence, targets)
+            : meetingFormForTab(draft)
+          : null),
     });
   const selectItem = (item: CalendarItem, anchor: AnchorRect) => {
     if (isMeetingTask(item.task)) {
@@ -751,7 +755,7 @@ export function CalendarScreen(): JSX.Element {
         <div className={styles.body}>
           {sidebarOpen && (
             <aside className={styles.sidebar} data-testid="calendar-sidebar">
-              <div className={styles.createRow} data-testid="calendar-create-row">
+              <div className={styles.createRow} data-feature={MEETINGS_FEATURE_MARKER} data-testid="calendar-create-row">
                 <Button
                   iconLeft={<Icon name="plus" />}
                   onClick={openCreateDialog}
@@ -761,22 +765,6 @@ export function CalendarScreen(): JSX.Element {
                   作成
                 </Button>
               </div>
-
-              {access.canEdit && (
-                <div className={styles.meetingActions} data-feature={MEETINGS_FEATURE_MARKER} data-testid="calendar-meetings-toolbar">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    iconLeft={<Icon name="plus" />}
-                    onClick={openMeetingDialog}
-                    disabled={!accountReady || createMeeting.isPending}
-                    loading={createMeeting.isPending}
-                    testId="calendar-meetings-create"
-                  >
-                    {createMeeting.isPending ? "作成中…" : "ミーティングを設定"}
-                  </Button>
-                </div>
-              )}
 
               <MiniCalendar
                 selectedDay={anchorDay}
@@ -944,6 +932,7 @@ export function CalendarScreen(): JSX.Element {
                       accountEmail={account?.email ?? null}
                       // Tabs other than ミーティング need 予定 write permission.
                       kindSwitch={canWrite ? kindSwitch : null}
+                      saving={createMeeting.isPending}
                       onSubmit={(body) => submitMeeting(body, null)}
                       onCancel={close}
                     />

@@ -445,7 +445,7 @@ export function EventForm({
   );
 }
 
-/** Create / edit dialog — the standard @dub/ui Modal (slot click, 作成, ミーティングを設定, 編集).
+/** Create / edit dialog — the standard @dub/ui Modal (slot click, 作成, 編集).
  *  `meetingForm` = the ミーティング tab registers a real meeting: given the tabs, it renders the
  *  one MeetingForm in this same dialog (absent = the tab stays a plain 予定). */
 export function EventDialog({
