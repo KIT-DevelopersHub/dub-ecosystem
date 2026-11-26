@@ -23,6 +23,8 @@ export function Menu({
   align = "end",
   menuLabel,
   iconOnly = false,
+  badge = false,
+  badgeLabel,
   testId,
 }: MenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -54,6 +56,11 @@ export function Menu({
   };
 
   const triggerTestId = testId ? `${testId}-trigger` : undefined;
+  const baseLabel = menuLabel ?? label;
+  const triggerAria = badge && badgeLabel ? `${baseLabel}（${badgeLabel}）` : baseLabel;
+  const dot = badge ? (
+    <span className={cx(styles.dot)} aria-hidden="true" data-testid={testId ? `${testId}-badge` : undefined} />
+  ) : null;
 
   return (
     <div className={cx(styles.root)} ref={rootRef} data-testid={testId}>
@@ -63,13 +70,14 @@ export function Menu({
         <button
           type="button"
           className={cx(styles.iconTrigger)}
-          aria-label={menuLabel ?? label}
+          aria-label={triggerAria}
           aria-haspopup="menu"
           aria-expanded={open}
           data-testid={triggerTestId}
           onClick={() => setOpen((v) => !v)}
         >
           {icon ? <Icon name={icon} /> : null}
+          {dot}
         </button>
       ) : (
         <Button
@@ -80,6 +88,7 @@ export function Menu({
           {...(triggerTestId ? { testId: triggerTestId } : {})}
         >
           <span className={cx(styles.triggerLabel)}>{label}</span>
+          {dot}
         </Button>
       )}
       {open && (
@@ -109,6 +118,13 @@ export function Menu({
                   </span>
                 ) : null}
                 <span className={cx(styles.itemLabel)}>{item.label}</span>
+                {item.badge ? (
+                  <span
+                    className={cx(styles.itemDot)}
+                    aria-hidden="true"
+                    data-testid={item.testId ? `${item.testId}-badge` : undefined}
+                  />
+                ) : null}
               </button>
             </Fragment>
           ))}
