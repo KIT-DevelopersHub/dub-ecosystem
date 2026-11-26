@@ -297,11 +297,11 @@
 }
 
 /* チーム */
-/* チームは縦に 1 段ずつ。各チームの中は左に帯(チーム名)、右へ グループ → 班 → … と深くなる。
+/* チームは横 1 列(折り返さない・上揃え)。各チームの中は左に帯(チーム名)、右へ グループ → 班 → … と深くなる。
    広い時は .orgScroll の中で横スクロール(ページ自体は横に動かない)。 */
 .teamsRow {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex-wrap: nowrap;
   gap: var(--dub-space-5);
   align-items: flex-start;

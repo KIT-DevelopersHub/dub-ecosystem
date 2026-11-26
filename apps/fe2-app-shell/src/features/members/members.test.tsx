@@ -479,8 +479,8 @@ describe("MembersPage", () => {
     await screen.findByTestId("members-orgchart");
 
     const kids = (id: string): Array<string | null> => [...screen.getByTestId(id).children].map((e) => e.getAttribute("data-testid"));
-    // チームは縦に 1 段ずつ、チームの中は左 → 右。
-    expect(screen.getByTestId("fe2-orgchart-subgroups").getAttribute("data-layout")).toBe("column");
+    // チームは横 1 列、チームの中は左 → 右。
+    expect(screen.getByTestId("fe2-orgchart-subgroups").getAttribute("data-layout")).toBe("row");
     expect(screen.getByTestId("members-orgcol-pr").getAttribute("data-layout")).toBe("ltr");
     expect(kids("members-orgsquads-pr")).toEqual(["members-orggroup-O1", "members-orggroup-O2"]);
     expect(kids("members-orgunits-O1")).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
@@ -503,12 +503,12 @@ describe("MembersPage", () => {
     expect(screen.getByTestId("members-orgcol-pr").textContent).toContain("4班");
   });
 
-  // 木は左 → 右: 単位とチームは横(自分 → 子の列)、子の列とチームの並びは縦。どれも折り返さない。
+  // チームの並びは横 1 列。チームの中の木は左 → 右(自分 → 子の列)で、子の列は縦。どれも折り返さない。
   it("組織図 flows left to right in CSS (no wrapping at any level)", () => {
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "members.module.css"), "utf8");
     const rule = (sel: string): string => css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
     for (const [sel, dir] of [
-      [".teamsRow", "column"],
+      [".teamsRow", "row"],
       [".orgCol", "row"],
       [".unit", "row"],
       [".unitChildren", "column"],

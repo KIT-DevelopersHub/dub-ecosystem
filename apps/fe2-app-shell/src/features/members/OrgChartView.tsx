@@ -1,4 +1,4 @@
-// 組織図ビュー — 代表(横長ダークネイビー箱) → チーム色の帯を縦に 1 段ずつ → 帯の中は単位の木。
+// 組織図ビュー — 代表(横長ダークネイビー箱) → チームを横 1 列 → 各チームは帯 + 左 → 右の単位の木。
 //   単位 = オーガナイザーのグループ / リーダーの班。木は左 → 右に深くなり、子の単位は親の右に
 //   縦 1 列で並ぶ。どの深さでも同じ形で再帰する(チーム → オーガナイザーごとのグループ → 班 → …)。親子は leaderId だけで決め、
 //   リーダーの leaderId が同じチームの別リーダーを指す場合は同じ班の共同リーダーとして並べる。
@@ -331,7 +331,7 @@ function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] 
   );
 }
 
-/** 代表箱からチームの並びへ下りる線。チームは縦に 1 段ずつ、各チームの中は左 → 右。 */
+/** 代表箱からチームの並びへ下りる線。チームは横 1 列、各チームの中は左 → 右。 */
 function Connector(): JSX.Element {
   return (
     <div className={styles.connector} aria-hidden>
@@ -422,7 +422,7 @@ export function OrgChartView({ teams: allTeams, members }: { teams: MemberTeam[]
 
           {reps.length > 0 && columns.length > 0 ? <Connector /> : null}
 
-          <div className={styles.teamsRow} data-layout="column" data-testid="fe2-orgchart-subgroups">
+          <div className={styles.teamsRow} data-layout="row" data-testid="fe2-orgchart-subgroups">
             {columns.map(({ team, members: cm }) => (
               <TeamColumn key={team.id} team={team} members={cm} />
             ))}
