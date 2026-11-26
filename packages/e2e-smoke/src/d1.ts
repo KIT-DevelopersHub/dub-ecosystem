@@ -36,6 +36,7 @@ export function allSchemas(): string[] {
     // PR-C: planned start (task_tasks.start_at). Same rationale as 0004 — the repo now
     // SELECT/INSERTs start_at, so the seeded smoke D1 must apply this physical migration.
     sqlFile("../../../infra/d1/migrations/task/0005_task_start_at.sql"),
+    sqlFile("../../../infra/d1/migrations/task/0006_task_assignee_team.sql"),
     sqlFile("../../../services/notification/db/0001_notif.sql"),
     sqlFile("../../../services/notification/db/0002_feedback.sql"),
     sqlFile("../../../services/notification/db/0003_freeq_outbox.sql"),
