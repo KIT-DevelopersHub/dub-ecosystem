@@ -22,7 +22,10 @@ const PUBLISH = [
   "POST /lp/tickets/cta",
   "POST /lp/tickets/enabled",
   "POST /lp/tickets/orders/:id/approve",
+  "POST /lp/tickets/orders/:id/refund",
 ];
+// 当日受付: LP管理の閲覧 + lp:checkin（edit は要らない）。
+const CHECKIN = ["DELETE /lp/tickets/checkin/:ticketId", "GET /lp/tickets/checkins", "POST /lp/tickets/checkin"];
 
 function allowedRoutes(keys: identity.PermissionKey[]): string[] {
   return Object.entries(POLICY_TABLE)
@@ -54,6 +57,17 @@ describe("role x endpoint matrix (frozen)", () => {
     expect(allowedRoutes(["app:lp:view", "app:lp:edit", "lp:publish"])).toEqual([...EDIT, ...PUBLISH, ...VIEW].sort());
     // lp:publish without 編集 opens nothing extra: the tier caps it.
     expect(allowedRoutes(["app:lp:view", "lp:publish"])).toEqual(VIEW);
+  });
+
+  it("lp:checkin opens 受付 only (with LP管理 view), and nothing else needs it", () => {
+    expect(allowedRoutes(["app:lp:view", "lp:checkin"])).toEqual([...CHECKIN, ...VIEW].sort());
+    // 受付係に購入者一覧（edit）は要らない・渡さない。
+    expect(allowedRoutes(["app:lp:view", "lp:checkin"])).not.toContain("GET /lp/tickets/orders");
+    // LP管理を開けない人には lp:checkin だけでは何も開かない。
+    expect(allowedRoutes(["lp:checkin"])).toEqual([]);
+    expect(allowedRoutes(["app:lp:view", "app:lp:edit", "lp:publish", "lp:checkin"])).toEqual(
+      [...CHECKIN, ...EDIT, ...PUBLISH, ...VIEW].sort(),
+    );
   });
 
   it("every /lp/internal/* and the health route are INTERNAL (no key opens them)", () => {

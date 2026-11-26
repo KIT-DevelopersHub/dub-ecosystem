@@ -13,6 +13,7 @@
 // header-trusting API to service-binding callers only — otherwise enabling the subdomain
 // for /ws would let anyone spoof x-dub-user-id. /health stays public for uptime probes.
 import type { ExportedHandler, MessageBatch, Request as CfRequest } from "@cloudflare/workers-types";
+import { isServiceBindingRequest } from "@dub/http";
 import type { DubEventEnvelope } from "@dub/events";
 import type { Env } from "./env";
 import { createApp } from "./app";
@@ -41,7 +42,7 @@ const handler: ExportedHandler<Env> = {
     // Header-trusting HTTP API is gated to service-binding callers (host "svc") only.
     // /health stays public; /ws already handled above. A public workers.dev request to
     // any business route 404s so x-dub-user-id can never be spoofed over the subdomain.
-    const viaServiceBinding = url.hostname === "svc";
+    const viaServiceBinding = isServiceBindingRequest(url);
     if (!viaServiceBinding && url.pathname !== "/health" && !url.pathname.startsWith("/ws/")) {
       return new Response("not found", { status: 404 }) as never;
     }
