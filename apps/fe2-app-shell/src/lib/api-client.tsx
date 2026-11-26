@@ -45,12 +45,26 @@ export interface ApiClientConfig {
   onUnauthenticated?: () => void;
   requestIdFactory?: () => string;
   retry?: { maxRetries: number; baseDelayMs: number };
+  /** GET retries on 429 (Retry-After honored, else exponential backoff from baseDelayMs). */
+  rateLimitRetry?: { maxRetries: number; baseDelayMs: number; maxWaitMs: number };
   fetchImpl?: typeof fetch;
   sleepImpl?: (ms: number) => Promise<void>;
 }
 
 const REQUEST_ID_HEADER = "x-dub-request-id";
 const DEFAULT_RETRY = { maxRetries: 2, baseDelayMs: 200 };
+const DEFAULT_RATE_LIMIT_RETRY = { maxRetries: 3, baseDelayMs: 1_000, maxWaitMs: 15_000 };
+
+/** Retry-After (delta-seconds or HTTP-date) → ms, or null when absent/unparseable. */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (value === null) return null;
+  const v = value.trim();
+  if (v === "") return null;
+  if (/^\d+(\.\d+)?$/.test(v)) return Math.round(Number(v) * 1000);
+  const at = Date.parse(v);
+  if (Number.isNaN(at)) return null;
+  return Math.max(0, at - now);
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -58,6 +72,9 @@ export class ApiError extends Error {
   readonly requestId?: string;
   readonly details?: unknown;
   readonly body: ErrorResponse;
+
+  /** Server-advised wait (Retry-After), when the response carried one. */
+  retryAfterMs?: number;
 
   constructor(status: number, body: ErrorResponse) {
     super(body.error.message);
@@ -186,6 +203,7 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
   const fetchImpl = config.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const sleep = config.sleepImpl ?? defaultSleep;
   const retry = config.retry ?? DEFAULT_RETRY;
+  const rateLimitRetry = config.rateLimitRetry ?? DEFAULT_RATE_LIMIT_RETRY;
 
   async function doFetch<TBody>(input: RequestInput<TBody>): Promise<Response> {
     const headers: Record<string, string> = {
@@ -216,12 +234,17 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
     } catch {
       body = undefined;
     }
-    if (isErrorResponse(body)) return new ApiError(res.status, body);
+    const retryAfterMs = parseRetryAfter(res.headers.get("retry-after"));
+    const withRetryAfter = (err: ApiError): ApiError => {
+      if (retryAfterMs !== null) err.retryAfterMs = retryAfterMs;
+      return err;
+    };
+    if (isErrorResponse(body)) return withRetryAfter(new ApiError(res.status, body));
     // Non-envelope failure: synthesize a normalized envelope.
     const requestId = res.headers.get(REQUEST_ID_HEADER) ?? undefined;
-    return new ApiError(
-      res.status,
-      synthEnvelope(res.status >= 500 ? "INTERNAL" : "CLIENT_CONTRACT_MISMATCH", res.statusText || "Request failed", res.status >= 500, requestId),
+    const code = res.status === 429 ? "RATE_LIMITED" : res.status >= 500 ? "INTERNAL" : "CLIENT_CONTRACT_MISMATCH";
+    return withRetryAfter(
+      new ApiError(res.status, synthEnvelope(code, res.statusText || "Request failed", res.status >= 500 || res.status === 429, requestId)),
     );
   }
 
@@ -285,6 +308,7 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
   async function requestOnce<TRes, TBody>(input: RequestInput<TBody>): Promise<TRes> {
     const isGet = input.method === "GET";
     let networkAttempts = 0;
+    let rateLimitAttempts = 0;
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
@@ -307,9 +331,23 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
         return (text ? JSON.parse(text) : undefined) as TRes;
       }
 
-      // GET-only retry on 5xx
+      // GET-only retry on 429: wait what the server asks (Retry-After), else back off
+      // exponentially. A wait longer than maxWaitMs is not slept through — the error
+      // surfaces so the screen can show its error state + 再試行 instead of hanging.
+      if (isGet && res.status === 429 && rateLimitAttempts < rateLimitRetry.maxRetries) {
+        const advised = parseRetryAfter(res.headers.get("retry-after"));
+        const wait = advised ?? rateLimitRetry.baseDelayMs * 2 ** rateLimitAttempts;
+        if (wait <= rateLimitRetry.maxWaitMs) {
+          await sleep(wait);
+          rateLimitAttempts++;
+          continue;
+        }
+      }
+
+      // GET-only retry on 5xx (honors Retry-After when sent, e.g. 503)
       if (isGet && res.status >= 500 && networkAttempts < retry.maxRetries) {
-        await sleep(retry.baseDelayMs * 2 ** networkAttempts);
+        const advised = parseRetryAfter(res.headers.get("retry-after"));
+        await sleep(Math.min(advised ?? retry.baseDelayMs * 2 ** networkAttempts, rateLimitRetry.maxWaitMs));
         networkAttempts++;
         continue;
       }

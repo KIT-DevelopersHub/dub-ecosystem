@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { ErrorResponse } from "@dub/errors";
-import { createApiClient, ApiError, toDisplayableError } from "./api-client.tsx";
+import { createApiClient, ApiError, parseRetryAfter, toDisplayableError } from "./api-client.tsx";
 
 const BASE = "https://api.test";
 
@@ -242,5 +242,60 @@ describe("createApiClient", () => {
     expect(d.code).toBe("FORBIDDEN");
     expect(d.message).toContain("権限");
     expect(d.correlationId).toBe("req-7");
+  });
+});
+
+describe("429 handling (#855)", () => {
+  it("parseRetryAfter reads delta-seconds and HTTP-date", () => {
+    expect(parseRetryAfter("3")).toBe(3000);
+    expect(parseRetryAfter(new Date(10_000).toUTCString(), 4_000)).toBe(6000);
+    expect(parseRetryAfter(null)).toBeNull();
+    expect(parseRetryAfter("soon")).toBeNull();
+  });
+
+  it("retries a GET on 429 after the Retry-After wait, then succeeds", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(errBody("RATE_LIMITED"), 429, { "retry-after": "2" }))
+      .mockResolvedValueOnce(jsonRes({ ok: true }));
+    const sleepImpl = vi.fn(async () => {});
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, sleepImpl });
+    await expect(api.request({ method: "GET", path: "/api/v1/mail/messages" })).resolves.toEqual({ ok: true });
+    expect(sleepImpl).toHaveBeenCalledWith(2000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs off exponentially without Retry-After and gives up after maxRetries", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response("", { status: 429 }));
+    const sleepImpl = vi.fn(async () => {});
+    const api = createApiClient({
+      baseUrl: BASE,
+      fetchImpl,
+      sleepImpl,
+      rateLimitRetry: { maxRetries: 2, baseDelayMs: 100, maxWaitMs: 10_000 },
+    });
+    const err = await api.request({ method: "GET", path: "/api/v1/me" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(429);
+    expect((err as ApiError).code).toBe("RATE_LIMITED");
+    expect(sleepImpl.mock.calls.map((c) => (c as unknown[])[0])).toEqual([100, 200]);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not sleep through a Retry-After beyond maxWaitMs (surfaces the error with retryAfterMs)", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(errBody("RATE_LIMITED"), 429, { "retry-after": "120" }));
+    const sleepImpl = vi.fn(async () => {});
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, sleepImpl });
+    const err = (await api.request({ method: "GET", path: "/api/v1/me" }).catch((e: unknown) => e)) as ApiError;
+    expect(err.status).toBe(429);
+    expect(err.retryAfterMs).toBe(120_000);
+    expect(sleepImpl).not.toHaveBeenCalled();
+  });
+
+  it("does NOT retry write methods on 429", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(errBody("RATE_LIMITED"), 429, { "retry-after": "1" }));
+    const api = createApiClient({ baseUrl: BASE, fetchImpl, sleepImpl: noSleep });
+    await expect(api.request({ method: "POST", path: "/api/v1/events", body: {} })).rejects.toMatchObject({ status: 429 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

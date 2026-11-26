@@ -1,11 +1,12 @@
 // LP管理 → チケット の純粋関数。検証ルールは契約（lp-analytics 側の 400 判定）と同じ値で持つ:
 // サーバーで弾かれる入力を先に画面で止め、楽観更新が即ロールバックされる体験を作らない。
-import { lp } from "@dub/types";
+import { lp, lpTickets } from "@dub/types";
 import type {
   LpTicketCoupon,
   LpTicketCouponInput,
   LpTicketField,
   LpTicketFieldType,
+  LpTicketOrder,
   LpTicketOrderItem,
   LpTicketOrderStatus,
   LpTicketTypeInput,
@@ -29,6 +30,27 @@ export const TICKET_FIELD_ID_RE = /^[a-z0-9_-]{1,40}$/;
 export const FIELD_TYPE_LABELS: Record<LpTicketFieldType, string> = lp.LP_FIELD_TYPE_LABELS;
 export const TICKET_FIELD_DESCRIPTION_MAX = lp.LP_FIELD_DESCRIPTION_MAX;
 export const isChoiceField = lp.isLpChoiceField;
+
+/**
+ * 購入者一覧の「返金/取消」ボタン。支払い済み・要確認の注文だけ（審理中のチャージバックは Stripe が決めるので出さない）。
+ * 0 円（クーポン・無料券）は Stripe を通っていないので「取消」、有料は Stripe で全額「返金」。
+ */
+export function refundActionFor(o: Pick<LpTicketOrder, "status" | "reviewReason" | "amountJpy">): "refund" | "cancel" | null {
+  if (o.status !== "paid" && o.status !== "needs_review") return null;
+  if (o.status === "needs_review" && o.reviewReason === "dispute") return null;
+  return o.amountJpy === 0 ? "cancel" : "refund";
+}
+
+/** 返金・取消の期限（開催最終日の当日まで・JST）。過ぎたらボタンを出さず、この理由を出す。期限は @dub/types が正典。 */
+export function refundWindowClosed(nowIso: string = new Date().toISOString()): boolean {
+  return !lpTickets.isLpTicketRefundOpen(nowIso);
+}
+
+/** 例 "2027/9/14"（開催最終日）。 */
+export const REFUND_LAST_DAY_LABEL = (() => {
+  const [y, m, d] = (lpTickets.LP_TICKET_EVENT_DAYS[lpTickets.LP_TICKET_EVENT_DAYS.length - 1] ?? "").split("-");
+  return `${y}/${Number(m)}/${Number(d)}`;
+})();
 
 export const ORDER_STATUS: Record<LpTicketOrderStatus, { label: string; tone: "success" | "warning" | "neutral" }> = {
   paid: { label: "支払い済み", tone: "success" },

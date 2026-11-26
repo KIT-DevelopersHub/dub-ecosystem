@@ -2,7 +2,9 @@
 // build the same deps without importing the entry module.
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { createDbClient, newId, nowIso } from "@dub/db";
+import { createServiceClient, newRequestId } from "@dub/http";
 import { consoleSink } from "@dub/observability";
+import type { accounting } from "@dub/types";
 import { sharedAuthzGranter } from "@dub/policy-gate";
 import { createD1TicketRepo } from "./d1-repo";
 import { createResendMailer } from "./mailer";
@@ -46,6 +48,15 @@ function backupStore(env: Env): AppDeps["backup"] {
   };
 }
 
+/** 会計アプリの発行者情報 (member-service の内部口)。結線が無ければ未設定扱い (既定の発行者)。 */
+function issuerLoader(env: Env, requestId?: string): AppDeps["loadIssuer"] {
+  const svc = env.SVC_MEMBER;
+  if (!svc) return async () => null;
+  const client = createServiceClient(svc, { service: "member-service", caller: "lp-tickets" });
+  return async () =>
+    (await client.get<accounting.GetIssuerResponse>({ requestId: requestId ?? newRequestId() }, "/members/internal/accounting/issuer", { timeoutMs: 3_000, retry: false })).issuer;
+}
+
 export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext): AppDeps {
   const db = createDbClient(env.DB, {
     namespace: "lp",
@@ -76,5 +87,6 @@ export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext):
     backup: backupStore(env),
     defer: ctx ? (work) => ctx.waitUntil(work) : null,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    loadIssuer: issuerLoader(env, requestId),
   };
 }

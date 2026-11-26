@@ -52,7 +52,7 @@ export const notificationsModule: FeatureModule = {
   ],
   nav: [
     {
-      label: "Notifications",
+      label: "通知",
       path: ROUTE_INBOX,
       icon: "bell",
       // events(10) < tasks(20) < notifications(30) < chat(40) < admin(50).

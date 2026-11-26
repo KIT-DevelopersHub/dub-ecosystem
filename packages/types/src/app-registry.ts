@@ -99,7 +99,7 @@ export const APP_MANIFEST = [
   // チャットのサービスに読み取り用のドメインキーは無く、3 段階の鍵だけで開ける。chat:create をここに
   // 置くと保存のたびに付け直され (withRequiredAppDomainKeys)、「作成できない」を選べなくなる。
   { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["app:chat:view"], access: { view: "app:chat:view", edit: "app:chat:edit" },
-    detailPermissions: ["chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility"] },
+    detailPermissions: ["chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:times", "chat:manage_sections", "chat:change_visibility"] },
   { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" },
     detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:admin"] },
   { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true,
@@ -119,9 +119,9 @@ export const APP_MANIFEST = [
     detailPermissions: ["drive:read", "drive:write", "drive:settings_view", "drive:settings_edit", "file:read", "file:write", "file:admin"] },
   // LP管理 reads infra:read, but infra:* governs the whole デプロイ/DNS surface (not just LP),
   // so those keys stay in 「その他」 instead of being scoped to this app's 詳細 dialog.
-  // lp:publish (switch the version live on the public site) is LP管理's own 詳細 knob.
+  // lp:publish (switch the version live on the public site) and lp:checkin (当日受付) are LP管理's own 詳細 knobs.
   { id: "lp", label: "LP管理", navPath: "/lp", domain: "infra", permissions: ["infra:read"], access: { view: "app:lp:view", edit: "app:lp:edit" },
-    detailPermissions: ["lp:publish"] },
+    detailPermissions: ["lp:publish", "lp:checkin"] },
   // identity:admin is claimed by 運営メンバー's 詳細設定 (名簿・ロールの話は名簿アプリの中)。
   // ロール管理 itself has no knob beyond 無効/閲覧/編集 — that 3 段階 is its whole settings surface.
   { id: "admin", label: "ロール管理", navPath: "/admin/roles", domain: "identity", permissions: ["identity:admin"], access: { view: "app:admin:view", edit: "app:admin:edit" },
@@ -147,6 +147,10 @@ export const APP_MANIFEST = [
   // 無効/閲覧/編集 がそのまま全部の設定。未公開アプリなので identity/0031 で admin のみ付与。
   { id: "goals", label: "目標管理", navPath: "/goals", domain: "goals", permissions: ["goals:read"], access: { view: "app:goals:view", edit: "app:goals:edit" },
     detailPermissions: ["goals:read"] },
+  // 会計: 団体の発行者情報 (法人名・所在地・インボイス登録番号・税率)。領収書 (lp-tickets) がここを読む
+  // (member-service /members/accounting/issuer)。未公開アプリなので identity/0036 で admin のみ付与。
+  { id: "accounting", label: "会計", navPath: "/accounting", domain: "accounting", permissions: ["accounting:read"], access: { view: "app:accounting:view", edit: "app:accounting:edit" },
+    detailPermissions: ["accounting:read"] },
 ] as const satisfies readonly AppManifestEntry[];
 
 /** Canonical app id union (derived from the manifest). */

@@ -57,6 +57,9 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     deleteDraft: vi.fn().mockResolvedValue(undefined),
     addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
     removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
+    listTemplates: vi.fn().mockResolvedValue([]),
+    saveTemplate: vi.fn().mockImplementation((id: string, t: object) => Promise.resolve({ ...t, id, updatedAt: "2026-01-01T00:00:00.000Z" })),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
     listBlocks: vi.fn().mockResolvedValue([]),
     addBlock: vi.fn().mockImplementation((req: mail.MailSenderBlockRequest) =>
       Promise.resolve({ value: req.kind === "domain" ? req.value.split("@").pop()! : req.value, kind: req.kind ?? "address", createdAt: "2026-10-30T00:00:00.000Z" }),
@@ -251,6 +254,9 @@ describe("blocking a sender in the 3-pane mail app", () => {
       deleteDraft: vi.fn().mockResolvedValue(undefined),
       addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
       removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
+      listTemplates: vi.fn().mockResolvedValue([]),
+      saveTemplate: vi.fn().mockImplementation((id: string, t: object) => Promise.resolve({ ...t, id, updatedAt: "2026-01-01T00:00:00.000Z" })),
+      deleteTemplate: vi.fn().mockResolvedValue(undefined),
       listBlocks: vi.fn().mockReturnValue(new Promise(() => undefined)),
     });
     renderApp(api);

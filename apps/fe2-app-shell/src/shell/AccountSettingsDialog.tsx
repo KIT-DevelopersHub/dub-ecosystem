@@ -3,8 +3,9 @@
 // (which manages OTHER users). One dialog unifies every self-service action:
 //   • プロフィール — display name + avatar (upload / preset / initials)
 //   • 基本情報      — login email (read-only) + password change (nested dialog)
-//   • ブラウザ通知  — per-device opt-in for OS notifications on chat @mentions (applies
+//   • ブラウザ通知  — per-device opt-in for OS notifications on chat @mentions / new mail (applies
 //                     immediately; not part of 保存する since it needs a permission prompt)
+//   • 新着メールの通知 — account-wide ON/OFF of mail.received (notification preferences; #869)
 //   • 本人の情報    — the fields the user entered in the 参加届 (participation form),
 //                     rendered by the shared PersonProfileFields (運営名簿・参加届と共通の
 //                     PersonProfile) so the set never drifts from the roster / submit contract.
@@ -25,7 +26,7 @@ import {
   showBrowserNotice,
   type BrowserNotifyPermission,
 } from "@dub/fe5-notification-inbox";
-import type { gateway, member } from "@dub/types";
+import { mail, type gateway, type member, type notification } from "@dub/types";
 import { ApiError, toDisplayableError, type ApiClient, type SelfParticipation } from "../lib/api-client.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
 import {
@@ -349,6 +350,7 @@ export function AccountSettingsDialog({
           </div>
 
           <BrowserNotifySetting open={open} />
+          <MailNotifySetting api={api} open={open} />
 
           {/* ── 本人の情報（参加届と同じ項目） ── */}
           <div className="fe2-account-section" data-testid="fe2-account-participation">
@@ -490,6 +492,60 @@ function BrowserNotifySetting({ open }: { open: boolean }): JSX.Element {
       <div className="fe2-account-password-help" data-testid="fe2-account-browser-notify-help">
         {browserNotifyHelp(perm)}
       </div>
+    </div>
+  );
+}
+
+const PREFS_PATH = "/api/v1/notifications/preferences" as const;
+const MAIL_PREFS_KEY = queryKeys.feature("notifications", "preferences", "account");
+const MAIL_ON_CHANNELS: notification.PreferenceEntry["channels"] = ["in_app", "push"];
+type PrefsWire = { entries?: notification.PreferenceEntry[]; overrides?: notification.PreferenceEntry[]; defaults?: notification.PreferenceEntry[] } | null;
+
+/** Effective in_app flag of mail.received: most specific of exact > "mail." > "*" (server rules); on by default. */
+export function mailNotifyEnabled(wire: PrefsWire): boolean {
+  const rows = [...(wire?.defaults ?? []), ...(wire?.entries ?? []), ...(wire?.overrides ?? [])];
+  const pick = (type: string) => rows.filter((r) => r.type === type).pop();
+  const hit = pick(mail.MAIL_RECEIVED_NOTIFY_TYPE) ?? pick("mail.") ?? pick("mail.*") ?? pick("*");
+  return hit ? hit.channels.includes("in_app") : true;
+}
+
+/** 新着メールの通知 row — saved the moment it is toggled (optimistic, rolls back on failure). */
+function MailNotifySetting({ api, open }: { api: ApiClient; open: boolean }): JSX.Element {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({
+    queryKey: MAIL_PREFS_KEY,
+    queryFn: () => api.request<PrefsWire>({ method: "GET", path: PREFS_PATH }),
+    enabled: open,
+  });
+  const enabled = mailNotifyEnabled(q.data ?? null);
+
+  async function onToggle(next: boolean) {
+    const prev = qc.getQueryData<PrefsWire>(MAIL_PREFS_KEY);
+    const entry: notification.PreferenceEntry = { type: mail.MAIL_RECEIVED_NOTIFY_TYPE, channels: next ? MAIL_ON_CHANNELS : [] };
+    qc.setQueryData<PrefsWire>(MAIL_PREFS_KEY, (old) => ({ ...(old ?? {}), entries: [...(old?.entries ?? []).filter((e) => e.type !== entry.type), entry] }));
+    try {
+      await api.request<unknown, { entries: notification.PreferenceEntry[] }>({ method: "PATCH", path: PREFS_PATH, body: { entries: [entry] } });
+    } catch {
+      qc.setQueryData(MAIL_PREFS_KEY, prev);
+      toast.show({ kind: "error", title: "通知設定を保存できませんでした", description: "時間をおいてもう一度お試しください。" });
+    }
+  }
+
+  return (
+    <div className="fe2-account-notify" data-testid="fe2-account-mail-notify">
+      {q.isLoading ? (
+        <Skeleton width="60%" height={20} />
+      ) : (
+        <Switch
+          id="fe2-account-mail-notify"
+          checked={enabled}
+          onChange={(v) => void onToggle(v)}
+          label="新しいメールが届いたら通知する"
+          testId="fe2-account-mail-notify-toggle"
+        />
+      )}
+      <div className="fe2-account-password-help">自分の受信トレイにメールが届くと、通知一覧とプッシュでお知らせします（ブロックした送信者・自動返信は除く）。</div>
     </div>
   );
 }

@@ -3,6 +3,8 @@
 //
 // The three LP管理 tiers are the same ones lp-analytics applies to its own routes:
 //   VIEW = read the numbers, EDIT = 券種・入力項目・購入者一覧, PUBLISH = 販売 on/off・クーポン・要確認の確定.
+// CHECKIN = 当日受付（QR を読んで入場済みにする）。受付係にだけ配る lp:checkin。LP管理を開ける（view）ことが前提で、
+// edit は要らない（購入者一覧・券種には触れない）。
 //
 // INTERNAL routes are reached over Service Bindings only: the public LP Worker (LP_TICKETS) and
 // lp-analytics (SVC_LP_TICKETS, 公開設定の release). api-gateway never forwards /lp/internal/* (404 at
@@ -14,6 +16,7 @@ import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate";
 const VIEW = appLevel("lp", "view");
 const EDIT = appLevel("lp", "edit");
 const PUBLISH = appLevel("lp", "edit", "lp:publish");
+const CHECKIN = appLevel("lp", "view", "lp:checkin");
 
 export const POLICY_TABLE = definePolicyTable({
   "GET /internal/health": INTERNAL,
@@ -25,6 +28,8 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /lp/internal/tickets/preview": INTERNAL,
   "POST /lp/internal/tickets/confirm": INTERNAL,
   "GET /lp/internal/tickets/pass/:token": INTERNAL,
+  "GET /lp/internal/tickets/receipt/:token": INTERNAL,
+  "POST /lp/internal/tickets/receipt/:token": INTERNAL,
   "POST /lp/internal/tickets/stripe-webhook": INTERNAL,
   "GET /lp/internal/tickets/release": INTERNAL,
   "POST /lp/internal/tickets/release": INTERNAL,
@@ -40,7 +45,13 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /lp/tickets/orders": EDIT,
   "GET /lp/tickets/orders/export": PUBLISH,
   "POST /lp/tickets/orders/:id/approve": PUBLISH,
+  "POST /lp/tickets/orders/:id/refund": PUBLISH,
   "GET /lp/tickets/coupons": PUBLISH,
   "POST /lp/tickets/coupons": PUBLISH,
   "PATCH /lp/tickets/coupons/:id": PUBLISH,
+
+  // ---- 当日受付 ----
+  "POST /lp/tickets/checkin": CHECKIN,
+  "DELETE /lp/tickets/checkin/:ticketId": CHECKIN,
+  "GET /lp/tickets/checkins": CHECKIN,
 });

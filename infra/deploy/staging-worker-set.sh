@@ -25,6 +25,8 @@ STAGING_WORKER_DIRS=(
   "services/drive-share-service"
   "services/chat-service"
   "services/mail-gateway"
+  # mail-automation binds mail-gateway (above); freeq-drain binds it (#836).
+  "services/mail-automation"
   "services/deploy-service"
   "services/github-sync"
   "services/audit-log"

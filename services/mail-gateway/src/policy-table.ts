@@ -99,6 +99,11 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /mail/drafts/:id/attachments/:attId": appLevel("mail", "edit", "mail:send"),
   "GET /mail/drafts": appLevel("mail", "view", "mail:read"),
   "GET /mail/drafts/:id/attachments/:attId": appLevel("mail", "view", "mail:read"),
+  // Templates (定型文, 0026) are compose material, so saving one needs the sending tier; every
+  // row is keyed on the caller (templates.ts), so listing them needs only 閲覧.
+  "PUT /mail/templates/:id": appLevel("mail", "edit", "mail:send"),
+  "DELETE /mail/templates/:id": appLevel("mail", "edit", "mail:send"),
+  "GET /mail/templates": appLevel("mail", "view", "mail:read"),
 
   // 閲覧 on メール + mail:read — reads, and the two mutations that only touch the reader's
   // own view of mail they can already see (the read flag of one message; their personal

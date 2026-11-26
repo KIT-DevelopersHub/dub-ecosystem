@@ -304,8 +304,23 @@ function Shortcuts(): JSX.Element | null {
   return help ? <ShortcutHelp onClose={() => setHelp(false)} /> : null;
 }
 
-function GmailBody(): JSX.Element {
+/** Deep link from a new-mail notification: open the conversation holding that message once
+ *  it is in the store (the first sync, or a later poll). Each id is opened once. */
+function useOpenMessageFromLink(openMessageId: string | undefined): void {
   const { state, dispatch } = useMailStore();
+  const handled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openMessageId || handled.current === openMessageId) return;
+    const thread = state.threads.find((t) => !t.purged && (t.id === openMessageId || t.messages.some((m) => m.id === openMessageId)));
+    if (!thread) return;
+    handled.current = openMessageId;
+    dispatch({ type: "OPEN_THREAD", id: thread.id });
+  }, [openMessageId, state.threads, dispatch]);
+}
+
+function GmailBody({ openMessageId }: { openMessageId?: string | undefined }): JSX.Element {
+  const { state, dispatch } = useMailStore();
+  useOpenMessageFromLink(openMessageId);
   useMailSync(); // hydrate inbox + Sent from the gateway; lazy-load bodies on open
   useRestoreComposeDraftsOnMount(); // re-open any compose window left dirty by a reload/crash
   // A purged (完全に削除) thread is never shown, even if it was the open one when a reload's
@@ -372,10 +387,10 @@ function GmailBody(): JSX.Element {
   );
 }
 
-export function GmailApp(): JSX.Element {
+export function GmailApp({ openMessageId }: { openMessageId?: string } = {}): JSX.Element {
   return (
     <MailStoreProvider>
-      <GmailBody />
+      <GmailBody openMessageId={openMessageId} />
     </MailStoreProvider>
   );
 }

@@ -14,6 +14,7 @@ import { createD1HrInterviewRepo } from "./hr-interview-repo";
 import { createD1HrResultRepo } from "./hr-result-repo";
 import { interviewerNotifierVia, sendHrMailVia } from "./hr-interview-mail";
 import { createD1GoalRepo, createGoalSources } from "./goal-repo";
+import { createD1AccountingRepo } from "./accounting-repo";
 import { createD1SponsorRepo, r2ImageStore } from "./sponsor-repo";
 import { createD1SponsorLeadRepo } from "./sponsor-lead-repo";
 import { createD1SponsorMailRepo } from "./sponsor-mail-repo";
@@ -74,6 +75,7 @@ export function buildDeps(env: Env, requestId?: string, exec?: ExecutionContext)
     ...(env.SVC_MAIL ? { mailContacts: mailContactsVia(env.SVC_MAIL) } : {}),
     goalRepo: createD1GoalRepo(db),
     goalSources: createGoalSources(env),
+    accountingRepo: createD1AccountingRepo(db),
     // 参加届が届いたら管理者(admin/maintainer)へ in-app 通知を1件出す（best-effort）。
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),

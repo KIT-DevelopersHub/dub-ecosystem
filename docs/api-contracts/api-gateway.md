@@ -397,11 +397,17 @@ Credentialed, exact-allow-list CORS (cookies cross-site require it).
 Per-client fixed-window limiting, applied to **every** request (owned and proxied) before
 auth/routing.
 
-- **Client key:** `cf-connecting-ip`, falling back to `x-forwarded-for`, else a shared
-  `"unknown"` bucket.
-- **P0 policy:** 100 requests / 60 s window, in-memory per isolate. The policy shape is
-  internal and will be swapped for the Cloudflare native Rate Limiting binding in R1
-  **without** a contract change — clients must depend only on the wire signals below.
+- **Buckets:** a request carrying a session credential (Bearer or `dub_session` cookie) is
+  counted per **session** (SHA-256 of the token) and additionally against a high per-IP
+  ceiling; a request without a credential is counted per IP (`cf-connecting-ip`, falling
+  back to `x-forwarded-for`, else a shared `"unknown"` bucket). Members behind one shared
+  IP (venue Wi-Fi) therefore do not share a budget.
+- **Policy (defaults, env-tunable):** 600 / session (`RATE_LIMIT_USER_MAX`), 300 / IP
+  without credential (`RATE_LIMIT_IP_MAX`, legacy alias `RATE_LIMIT_MAX`), 6000 / IP
+  ceiling over credentialed requests (`RATE_LIMIT_IP_CEILING`), per 60 s window
+  (`RATE_LIMIT_WINDOW_MS`). In-memory per isolate, or a shared KV fixed window when
+  `RATE_LIMIT_KV` is bound. The policy shape is internal — clients must depend only on the
+  wire signals below.
 - **Response headers (always, on allowed and rejected):** `RateLimit-Limit`,
   `RateLimit-Remaining`, `RateLimit-Reset` (epoch seconds).
 - **On exceed:** `429 RATE_LIMITED` with `details.retryAfterSec` and a `Retry-After`

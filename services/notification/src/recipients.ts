@@ -26,6 +26,10 @@ export function makeRecipientResolver(deps: { identity: IdentityPort; event: Eve
           const { userIds } = await deps.identity.permissionHolders(notification.receiveAudiencePermission(audience), ctx);
           for (const id of userIds) set.add(id);
         }
+        for (const key of recipients.permissions ?? []) {
+          const { userIds } = await deps.identity.permissionHolders(key, ctx);
+          for (const id of userIds) set.add(id);
+        }
         for (const roleKey of recipients.roles ?? []) {
           const ids = await deps.identity.listUserIdsByRole(roleKey, ctx);
           for (const id of ids) set.add(id);

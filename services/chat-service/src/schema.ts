@@ -191,6 +191,25 @@ CREATE TABLE chat_custom_emojis (
 `.trim(),
 };
 
+// Forward-only add-on (#850): each member's times channel in chat (src/times.ts).
+// Physical mirror: infra/d1/migrations/chat/0008_times.sql.
+export const CHAT_TIMES_MIGRATION: Migration = {
+  namespace: "chat",
+  id: "0008_times",
+  up: `
+CREATE TABLE chat_times (
+  org_id       TEXT NOT NULL,
+  user_id      TEXT NOT NULL,
+  channel_id   TEXT NOT NULL,
+  channel_name TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('created','existing')),
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (org_id, user_id)
+);
+CREATE UNIQUE INDEX idx_chat_times_name ON chat_times(org_id, channel_name);
+`.trim(),
+};
+
 // Forward-only add-on: ORG-WIDE sidebar sections (one shared set every member sees), replacing
 // 0004's per-user sections (left in place, no longer used). A channel sits in at most one
 // shared section (PK channel_id). Writes need chat:manage_sections. Physical mirror:

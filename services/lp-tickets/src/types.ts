@@ -1,7 +1,7 @@
 // Service-local types for lp-tickets (LP チケット販売). The wire shapes come from the shared
 // contract @dub/types lpTickets (also read by fe2) — never redeclare them here.
 import type { PermissionGranter } from "@dub/policy-gate";
-import type { common, lpTickets } from "@dub/types";
+import type { accounting, common, lpTickets } from "@dub/types";
 import type { Mailer } from "./mailer";
 import type { StripeClient } from "./stripe";
 
@@ -21,6 +21,19 @@ export type LpTicketOrdersPage = lpTickets.LpTicketOrdersPage;
 export type LpTicketTypeInput = lpTickets.LpTicketTypeInput;
 export type LpTicketCoupon = lpTickets.LpTicketCoupon;
 export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
+export type LpTicketReceipt = lpTickets.LpTicketReceipt;
+export type LpTicketReceiptIssuer = lpTickets.LpTicketReceiptIssuer;
+export type LpTicketRefundResult = lpTickets.LpTicketRefundResult;
+export type LpTicketRefundResponse = lpTickets.LpTicketRefundResponse;
+export type LpTicketRefundErrorReason = lpTickets.LpTicketRefundErrorReason;
+export type LpTicketCheckinResult = lpTickets.LpTicketCheckinResult;
+export type LpTicketCheckinDayCheck = lpTickets.LpTicketCheckinDayCheck;
+export type LpTicketCheckinInput = lpTickets.LpTicketCheckinInput;
+export type LpTicketCheckinTicket = lpTickets.LpTicketCheckinTicket;
+export type LpTicketCheckinResponse = lpTickets.LpTicketCheckinResponse;
+export type LpTicketCheckin = lpTickets.LpTicketCheckin;
+export type LpTicketCheckinsPage = lpTickets.LpTicketCheckinsPage;
+export type LpTicketCheckinUndoResponse = lpTickets.LpTicketCheckinUndoResponse;
 
 // ---- tickets persistence ----
 export interface TicketSettingsRow {
@@ -44,6 +57,8 @@ export interface TicketOrderRow extends Omit<LpTicketOrder, "test"> {
   resolvedAt: string | null;
   /** Hashed sender IP from the public LP Worker (per-sender hold cap). Never the raw IP. */
   clientKey: string | null;
+  /** 0003 migration. 領収書の宛名。null = 宛名なし（購入者名で代用しない）。 */
+  receiptName: string | null;
 }
 export interface TicketCouponRow extends Omit<LpTicketCoupon, "used"> {
   site: string;
@@ -66,7 +81,31 @@ export interface TicketRow {
   createdAt: string;
   voidedAt: string | null;
 }
-export type OutboxKind = "buyer_confirmation" | "ops_copy";
+/** 受付 1 件（lp_ticket_checkins の 1 行）。1 枚 x 開催日 1 行。 */
+export interface CheckinRow {
+  ticketId: string;
+  /** 'YYYY-MM-DD'（JST） */
+  eventDay: string;
+  checkedInAt: string;
+  checkedInBy: string;
+}
+/** 受付で照合する券 + 注文の状態と名前。 */
+export interface CheckinTicketRow {
+  ticket: TicketRow;
+  holderName: string | null;
+  /** 注文が見つからない時 null。 */
+  orderStatus: LpTicketOrderStatus | null;
+  buyerName: string;
+}
+export interface CheckinListRow extends CheckinRow {
+  orderId: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  holderName: string | null;
+  buyerName: string;
+}
+/** buyer_refund = 返金・取消のお知らせ（db/0004 で追加）。 */
+export type OutboxKind = "buyer_confirmation" | "buyer_refund" | "ops_copy";
 export interface OutboxRow {
   id: string;
   orderId: string;
@@ -153,8 +192,11 @@ export interface LpTicketRepo {
   markOrderExpired(id: string): Promise<boolean>;
   /** pending|expired|paid -> needs_review. */
   markOrderNeedsReview(id: string, reason: string, paymentIntentId?: string | null): Promise<boolean>;
-  /** paid|needs_review -> refunded (releases the seat) and, in the same transaction, voids the order's tickets. */
-  markOrderRefunded(id: string, refundedAt: string): Promise<boolean>;
+  /**
+   * paid|needs_review -> refunded (releases the seat) and, in the same transaction, voids the order's tickets.
+   * `mail` (the buyer_refund row) is queued in that same transaction, and only when this call made the change.
+   */
+  markOrderRefunded(id: string, refundedAt: string, mail?: OutboxRow): Promise<boolean>;
   /** needs_review -> paid (paid_at kept if set). `onlyReason` restricts it to that review_reason. */
   approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string): Promise<boolean>;
   /** Fills payment_intent_id only where it is still NULL. */
@@ -168,6 +210,8 @@ export interface LpTicketRepo {
   setOrderPaymentMethod(id: string, method: string): Promise<void>;
   /** 0006 migration. Display-only marker; callers swallow failures. */
   markOrderPreview(id: string): Promise<void>;
+  /** 0003 migration. Sets the 宛名 only while it is still NULL (one statement). false = already set / no order. */
+  setReceiptName(id: string, receiptName: string): Promise<boolean>;
   /** Newest first, keyset by (created_at, id). */
   listOrders(site: string, cursor: string | null, limit: number): Promise<TicketOrderRow[]>;
   /** Oldest first, keyset by (created_at, id). No per-id binds, so a page may be far larger than listOrders'. */
@@ -196,6 +240,24 @@ export interface LpTicketRepo {
   outboxDue(before: string): Promise<Map<OutboxKind, number>>;
   listOrderOutbox(orderId: string): Promise<OutboxRow[]>;
   getJobStates(): Promise<Map<string, string>>;
+
+  // ---- 当日受付（lp_ticket_checkins） ----
+  getCheckinTicket(ticketId: string): Promise<CheckinTicketRow | null>;
+  /** 注文番号（注文 ID の末尾 8 文字・大文字）で引いた券の ID。発行順。 */
+  ticketIdsByOrderRef(orderRef: string): Promise<string[]>;
+  /**
+   * 1 文の INSERT ... SELECT ... ON CONFLICT DO NOTHING。券が valid の間だけ入る。
+   * false = この券・この日はもう受付済み、または券が valid でない（呼び出し側が getCheckin で見分ける）。
+   */
+  insertCheckin(row: CheckinRow): Promise<boolean>;
+  getCheckin(ticketId: string, eventDay: string): Promise<CheckinRow | null>;
+  deleteCheckin(ticketId: string, eventDay: string): Promise<boolean>;
+  /** その日の受付。新しい順・keyset `checkedInAt~ticketId`。 */
+  listCheckins(eventDay: string, cursor: string | null, limit: number): Promise<CheckinListRow[]>;
+  /** 受付のある日ごとの件数（日付順）。 */
+  checkinCounts(): Promise<{ eventDay: string; count: number }[]>;
+  /** バックアップ用。keyset `eventDay~ticketId`（古い順）。 */
+  listCheckinsForBackup(cursor: string | null, limit: number): Promise<CheckinRow[]>;
   setJobState(key: string, value: string, updatedAt: string): Promise<void>;
 }
 
@@ -250,4 +312,9 @@ export interface AppDeps {
   /** ctx.waitUntil of the current request. null outside a request (cron, alarm, tests). */
   defer: ((work: Promise<unknown>) => void) | null;
   sleep: (ms: number) => Promise<void>;
+  /**
+   * 会計アプリの発行者情報 (member-service の内部口)。null を返したら未設定 = 既定の RECEIPT_ISSUER。
+   * 失敗は throw (領収書を古い発行者のまま出さず 503)。結線が無い環境 (テスト・未設定) は () => null。
+   */
+  loadIssuer: () => Promise<accounting.IssuerSettings | null>;
 }

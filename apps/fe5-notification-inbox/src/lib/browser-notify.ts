@@ -1,13 +1,18 @@
-// Browser (OS) notifications for chat @mentions. The in-app inbox already gets a
+// Browser (OS) notifications for chat @mentions and new mail (#869). The in-app inbox already gets a
 // `chat.mention` row per mention; this layer mirrors NEW ones to the Web Notification
 // API while the app is open but not focused. Opt-in per device: the user enables it in
 // アカウント設定 (stored in localStorage) AND the browser permission must be "granted".
 // No push subscription / service worker — only works while a tab is open.
 
+import { mail } from "@dub/types";
 import type { InboxItem } from "../contracts/notification-api";
 
 export const BROWSER_NOTIFY_PREF_KEY = "dub.browserNotify.enabled";
 export const CHAT_MENTION_TYPE = "chat.mention";
+/** 新着メール (#869) — mirrored to the OS too, under the same per-device opt-in. */
+export const MAIL_RECEIVED_TYPE = mail.MAIL_RECEIVED_NOTIFY_TYPE;
+/** Inbox types worth an OS notification (deliberate pings, not every inbox row). */
+export const BROWSER_NOTIFY_TYPES: ReadonlySet<string> = new Set([CHAT_MENTION_TYPE, MAIL_RECEIVED_TYPE]);
 /** Fired on window when the setting flips, so an already-mounted notifier can re-baseline. */
 export const BROWSER_NOTIFY_CHANGE_EVENT = "dub:browser-notify-change";
 
@@ -72,6 +77,14 @@ export function showBrowserNotice(notice: BrowserNotice): void {
   }
 }
 
+/** The OS notice for any BROWSER_NOTIFY_TYPES row. */
+export function browserNoticeFor(item: InboxItem): Omit<BrowserNotice, "onClick"> {
+  if (item.type === MAIL_RECEIVED_TYPE) {
+    return { title: item.title || "新しいメールが届きました", body: item.body || "クリックしてメールを開く", tag: `dub-notif-${item.id}` };
+  }
+  return mentionNotice(item);
+}
+
 export function mentionNotice(item: InboxItem): Omit<BrowserNotice, "onClick"> {
   const who = item.actorName?.trim();
   return {
@@ -109,7 +122,7 @@ export function createMentionNotifier(deps: MentionNotifierDeps): MentionNotifie
   let inFlight: Promise<void> | null = null;
 
   async function run(): Promise<void> {
-    const items = (await deps.fetchUnread()).filter((i) => i.type === CHAT_MENTION_TYPE && !i.readAt);
+    const items = (await deps.fetchUnread()).filter((i) => BROWSER_NOTIFY_TYPES.has(i.type) && !i.readAt);
     const fresh = items.filter((i) => !seen.has(i.id));
     for (const i of items) seen.add(i.id);
     if (!baselined) {

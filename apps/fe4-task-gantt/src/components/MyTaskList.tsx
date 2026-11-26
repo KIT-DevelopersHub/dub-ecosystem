@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { task, common } from "@dub/types";
-import { Badge, SkeletonTable, EmptyState, LoadMore, type BadgeTone } from "@dub/ui";
+import { Badge, SkeletonTable, EmptyState, ErrorState, LoadMore, type BadgeTone } from "@dub/ui";
 import type { UserCache } from "../domain/user-cache";
 import { isOverdue } from "../domain/my-tasks";
 import { PRIORITY_LABEL } from "../domain/task-form";
@@ -26,6 +26,9 @@ export interface MyTaskListProps {
   users: UserCache;
   teamNames: Map<common.TeamId, string>;
   loading?: boolean;
+  /** Non-null when the last load failed; shown instead of the empty state. */
+  loadError?: unknown;
+  onRetry?: () => void;
   /** open the task detail dialog (feedback #2 — row click shows 内容, not navigate). */
   onSelect: (task: task.Task) => void;
   /**
@@ -51,6 +54,8 @@ export function MyTaskList({
   users,
   teamNames,
   loading,
+  loadError = null,
+  onRetry,
   onSelect,
   onComplete,
   visibleCount,
@@ -65,6 +70,21 @@ export function MyTaskList({
       <div data-testid="fe4-mytasks-loading">
         <SkeletonTable rows={6} columns={6} />
       </div>
+    );
+  }
+
+  if (loadError && tasks.length === 0) {
+    const status = (loadError as { status?: unknown }).status;
+    const reason =
+      status === 429
+        ? "アクセスが集中しています。少し待ってから再試行してください。"
+        : "時間をおいて再試行してください。";
+    return (
+      <ErrorState
+        error={{ code: status === 429 ? "RATE_LIMITED" : "LOAD_FAILED", message: `タスクを読み込めませんでした。${reason}` }}
+        {...(onRetry ? { onRetry } : {})}
+        testId="fe4-mytasks-error"
+      />
     );
   }
 

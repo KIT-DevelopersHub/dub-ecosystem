@@ -36,6 +36,7 @@ import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin, registerEmailRoutingInternal } from "./email-routing-routes";
 import { registerTeamListAdmin } from "./team-list-routes";
 import { registerDrafts } from "./drafts";
+import { registerTemplates } from "./templates";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
 import { handleResendWebhook } from "./resend-webhook";
 import { buildAuditEnv, buildBlobs, buildDb, buildSendDeps } from "./deps";
@@ -616,6 +617,7 @@ export function createApp() {
   registerEmailRoutingAdmin(ext);
   registerTeamListAdmin(ext);
   registerDrafts(ext);
+  registerTemplates(ext);
 
   // Send-health for the admin shell's rate-limit banner (GET /api/v1/mail/status, mail:admin in
   // the table): the same secret-free report as /internal/status.

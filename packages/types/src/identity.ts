@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (97 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (102 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -61,6 +61,7 @@ export const PERMISSION_CATALOG = [
   { key: "chat:delete_channel", name: "Delete channels", description: "Permanently delete chat channels and all their messages", domain: "chat", dangerous: true },
   { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
   { key: "chat:emoji_import", name: "Import Slack custom emoji", description: "Import the Slack workspace's custom emoji (images) for use in chat reactions", domain: "chat", dangerous: true },
+  { key: "chat:times", name: "Create times channels", description: "Preview and bulk-create each member's own times channel in chat (the member owns it)", domain: "chat", dangerous: true },
   { key: "chat:manage_sections", name: "Manage chat sections", description: "Create, rename, reorder and delete the org-wide chat sidebar sections and assign channels to them", domain: "chat", dangerous: false },
   { key: "chat:change_visibility", name: "Change channel visibility", description: "Switch a chat channel between public and private", domain: "chat", dangerous: true },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },
@@ -111,6 +112,7 @@ export const PERMISSION_CATALOG = [
   { key: "app:admin:view", name: "Open 管理 app", description: "Open and view the 管理 app", domain: "app", dangerous: false },
   { key: "app:admin:edit", name: "Edit in 管理 app", description: "Act inside the 管理 app (implies view)", domain: "app", dangerous: false },
   { key: "lp:publish", name: "Publish LP version", description: "Switch which LP version is live on the public conference site", domain: "lp", dangerous: true },
+  { key: "lp:checkin", name: "Check in LP tickets", description: "On the event day, scan attendees' ticket QR codes in LP管理 > チケット > 受付, mark them as checked in (once per ticket per day), undo a mistaken check-in, and see the day's check-in list with ticket holder names", domain: "lp", dangerous: false },
   { key: "app:lp:view", name: "Open LP管理 app", description: "Open and view the LP管理 app", domain: "app", dangerous: false },
   { key: "app:lp:edit", name: "Edit in LP管理 app", description: "Manage LP versions inside the LP管理 app (implies view)", domain: "app", dangerous: false },
   { key: "app:commander:view", name: "Open Commander app", description: "Open and view the Commander app (drives the local Claude Code exec bridge)", domain: "app", dangerous: true },
@@ -135,12 +137,15 @@ export const PERMISSION_CATALOG = [
   { key: "goals:read", name: "Read team goals", description: "View every team's monthly goals, KPIs and progress", domain: "goals", dangerous: false },
   { key: "app:goals:view", name: "Open 目標管理 app", description: "Open and view the 目標管理 app", domain: "app", dangerous: false },
   { key: "app:goals:edit", name: "Edit in 目標管理 app", description: "Set and change team goals and KPIs (implies view)", domain: "app", dangerous: false },
+  { key: "accounting:read", name: "Read accounting settings", description: "View the organization's issuer details (legal name, address, invoice registration number) used on receipts", domain: "accounting", dangerous: false },
+  { key: "app:accounting:view", name: "Open 会計 app", description: "Open and view the 会計 app", domain: "app", dangerous: false },
+  { key: "app:accounting:edit", name: "Edit in 会計 app", description: "Change the issuer details printed on receipts (implies view)", domain: "app", dangerous: false },
   // 代理表示 (admin impersonation). Own domain so ロール管理 shows it under 「その他」 as its own
   // group (it is an org-wide capability, not part of the roster app's 詳細設定).
   { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 97 keys (open `${string}:${string}` template retired).
+// Closed union of the 102 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

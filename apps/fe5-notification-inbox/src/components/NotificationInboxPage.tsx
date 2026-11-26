@@ -74,7 +74,7 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
     if (!selected) return;
     const target = resolveLinkUrl(itemLinkUrl(selected));
     if (target) {
-      if (target.fellBack) toast.show("info", "Opening your inbox.");
+      if (target.fellBack) toast.show("info", "通知一覧を開きます。");
       navigate(target.path);
     }
     setSelected(null);
@@ -85,7 +85,7 @@ export function NotificationInboxPage(props: NotificationInboxPageProps): ReactN
   return (
     <Stack gap={4} testId="fe5-inbox-page">
       <PageHeader
-        title="Notifications"
+        title="通知"
         actions={
           <MarkAllReadButton
             onClick={() => void inbox.markAllRead()}

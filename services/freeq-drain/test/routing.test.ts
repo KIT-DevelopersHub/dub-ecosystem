@@ -44,7 +44,7 @@ describe("deliver (audit.record + live evt.*)", () => {
 
     expect(res).toMatchObject({ claimed: 1, delivered: 1, retried: 0, failed: 0 });
     expect(audit.calls).toHaveLength(1);
-    expect(audit.calls[0]!.url).toBe("https://audit-log/internal/audit-async");
+    expect(audit.calls[0]!.url).toBe("https://svc/internal/audit-async");
     expect(audit.calls[0]!.method).toBe("POST");
     expect(audit.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
     expect(audit.calls[0]!.body).toEqual(payload); // forwarded verbatim
@@ -61,7 +61,7 @@ describe("deliver (audit.record + live evt.*)", () => {
     const res = await drain(d1, makeDeliver(env), OPTS);
 
     expect(res.delivered).toBe(1);
-    expect(task.calls[0]!.url).toBe("https://task-service/internal/events-async");
+    expect(task.calls[0]!.url).toBe("https://svc/internal/events-async");
     expect(task.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
     expect(task.calls[0]!.body).toEqual(envelope);
     expect(readRow(raw, "r2")).toMatchObject({ status: "done" });
@@ -76,7 +76,7 @@ describe("deliver (audit.record + live evt.*)", () => {
     const res = await drain(d1, makeDeliver(env), OPTS);
 
     expect(res.delivered).toBe(1);
-    expect(gh.calls[0]!.url).toBe("https://github-sync/internal/events-async");
+    expect(gh.calls[0]!.url).toBe("https://svc/internal/events-async");
     expect(readRow(raw, "r3")).toMatchObject({ status: "done" });
   });
 
@@ -90,10 +90,23 @@ describe("deliver (audit.record + live evt.*)", () => {
     const res = await drain(d1, makeDeliver(env), OPTS);
 
     expect(res.delivered).toBe(1);
-    expect(auto.calls[0]!.url).toBe("https://mail-automation/internal/events-async");
+    expect(auto.calls[0]!.url).toBe("https://svc/internal/events-async");
     expect(auto.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
     expect(auto.calls[0]!.body).toEqual(envelope);
     expect(readRow(raw, "r4")).toMatchObject({ status: "done" });
+  });
+
+  it("POSTs evt.chat to SVC_CHAT https://svc/internal/events-async (#850 times channel)", async () => {
+    const { d1, raw } = makeD1();
+    const chatSvc = fakeSvc(200);
+    const env = { SVC_CHAT: chatSvc.svc } as unknown as Env;
+    const envelope = { id: "evt_c1", name: "identity.user.activated", payload: { userId: "usr_a" } };
+    seed(raw, "rc", "evt.chat", envelope);
+    const res = await drain(d1, makeDeliver(env), OPTS);
+    expect(res.delivered).toBe(1);
+    expect(chatSvc.calls[0]!.url).toBe("https://svc/internal/events-async");
+    expect(chatSvc.calls[0]!.headers[HDR_INTERNAL]).toBe(INTERNAL_HEADER_VALUE);
+    expect(readRow(raw, "rc")).toMatchObject({ status: "done" });
   });
 
   it("keeps evt.mail-automation PENDING (retries) when the binding is absent — never acked (改善#5)", async () => {

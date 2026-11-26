@@ -74,6 +74,10 @@ export class IdentityService {
    *  stops counting for all of them (role membership lists active users only). */
   private async notifyStatusChange(ctx: RequestCtx, orgId: string, userId: string, before: string, after: string): Promise<void> {
     if ((before === "active") === (after === "active")) return;
+    if (after === "active" && this.d.events) {
+      const u = await this.d.repo.getUser(userId);
+      if (u) await this.d.events.userActivated({ orgId, userId, email: u.email, displayName: u.displayName }, ctx);
+    }
     const roleIds = (await this.d.repo.listAssignmentsByUser(userId, orgId)).map((a) => a.roleId);
     await this.notifyMembership(ctx, orgId, userId, after === "active" ? "added" : "removed", roleIds, after === "active" ? "activate" : "deactivate");
   }

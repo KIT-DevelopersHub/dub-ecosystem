@@ -199,6 +199,10 @@ export interface TextareaProps extends TestableProps {
   rows?: number;
   invalid?: boolean;
   disabled?: boolean;
+  /** 入力に合わせて高さを伸ばす (スクロールバーを出さない)。`rows` は最小の行数になる。 */
+  autoGrow?: boolean;
+  /** 改行を入れない 1 行の値 (Enter を無視・貼り付けた改行は空白に)。長い文は折り返して表示する。 */
+  singleLine?: boolean;
   "aria-describedby"?: string;
 }
 

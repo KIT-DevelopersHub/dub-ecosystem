@@ -13,8 +13,11 @@ ALLOWED_ORIGINS = "https://app.developershub.jp,https://dub-fe2-app-shell.develo
 DEFAULT_MAX_BODY_BYTES = "10485760"    # 10 MiB default request body cap
 FILES_MAX_BODY_BYTES = "26214400"      # 25 MiB for /api/v1/files/* (file-meta 8-6 numeric agreement)
 MAIL_MAX_BODY_BYTES = "36700160"       # 35 MiB: 25 MiB of mail attachments as base64 JSON
-# Rate-limit policy (optional; defaults 100 / 60000ms when unset). Wire-signal only — see §7.
-RATE_LIMIT_MAX = "100"
+# Rate-limit policy (all optional; code defaults below). Wire-signal only — see §7.
+# Credentialed requests: per session + a per-IP ceiling; anonymous: per IP (#856).
+RATE_LIMIT_USER_MAX = "600"      # per session credential / window
+RATE_LIMIT_IP_MAX = "300"        # per IP, requests without a credential / window
+RATE_LIMIT_IP_CEILING = "6000"   # per IP, all credentialed requests combined / window
 RATE_LIMIT_WINDOW_MS = "60000"
 # Login URL written into the account-issue mail (handlers/account-mail.ts).
 APP_BASE_URL = "https://dub-fe2-app-shell.developershub-site.workers.dev"

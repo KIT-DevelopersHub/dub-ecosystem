@@ -3,7 +3,7 @@
 // api-gateway `/api/v1/chat/*` (design §2-4). In the real SPA this is backed by
 // FE2's `chat: ResourceClient` (theme5 1-2-7); here we ship a fetch-based impl and
 // an in-memory mock (mock-client.ts) so the unit is complete without chat-service.
-import type { common, identity } from "@dub/types";
+import type { chat, common, identity } from "@dub/types";
 import { isErrorResponse, type ErrorResponse } from "@dub/errors";
 import { normalizeMessage, reactionsFromWire } from "../store/timeline";
 import type {
@@ -98,6 +98,11 @@ export interface ChatApiClient {
   customEmojiImage(name: string): Promise<Blob>;
   /** One bounded import batch after `after` (null = from the top). */
   importSlackEmojis(after: string | null): Promise<EmojiImportResult>;
+  // ---- times channels in chat (#850; 編集 + chat:times). Optional: absent = no entry. ----
+  /** Dry run: members without a times channel and the planned names. Nothing is created. */
+  previewTimes?(): Promise<chat.TimesPreviewResponse>;
+  /** One bounded batch; call again while `remaining > 0`. */
+  bulkCreateTimes?(userIds?: string[]): Promise<chat.TimesBulkResponse>;
 }
 
 /** GET /api/v1/members/me/mention-teams のレスポンス。 */
@@ -348,6 +353,12 @@ export class HttpChatClient implements ChatApiClient {
   }
   importSlackEmojis(after: string | null): Promise<EmojiImportResult> {
     return this.request<EmojiImportResult>("POST", `${CHAT}/custom-emojis/slack-import`, { after });
+  }
+  previewTimes(): Promise<chat.TimesPreviewResponse> {
+    return this.request<chat.TimesPreviewResponse>("GET", `${CHAT}/times/preview`);
+  }
+  bulkCreateTimes(userIds?: string[]): Promise<chat.TimesBulkResponse> {
+    return this.request<chat.TimesBulkResponse>("POST", `${CHAT}/times/bulk`, userIds ? { userIds } : {});
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {
