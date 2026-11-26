@@ -5,7 +5,7 @@
   "description": "Public conference LP (北陸ITカンファレンス) — Next.js (App Router) rebuild. SSG (output: export), light-fixed marketing page. Renders a read-only publish snapshot; never calls internal services live. Delivered as a separate assets-only Cloudflare Worker.",
   "scripts": {
     "dev": "next dev -p 4321",
-    "build": "next build",
+    "build": "next build && node scripts/inline-css.mjs out",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit -p tsconfig.json",
