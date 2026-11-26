@@ -270,6 +270,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   // team accent colour per task (team-grouped rows), and a legend of the teams
   // actually present on the board — drives the row stripe / bar cap / legend chips.
   const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t] as const)), [teams]);
+  const teamNameById = useMemo(() => new Map(teams.map((t) => [t.id as string, t.name] as const)), [teams]);
   const teamColorById = useMemo(() => {
     const m = new Map<common.TaskId, string>();
     for (const t of tasks) {
@@ -1320,6 +1321,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
           openStateKey={eventId}
+          teamNameById={teamNameById}
         />
       )}
 

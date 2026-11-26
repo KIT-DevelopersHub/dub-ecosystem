@@ -40,6 +40,7 @@ import {
 } from "../domain/timeline-axis";
 import { reorderSelectionWithinSiblings } from "../domain/row-order";
 import { visibleTreeRows } from "../domain/gantt-layout";
+import { buildGanttTable, downloadGanttCsv } from "../domain/gantt-export";
 import { allExpanded, collapseAll, expandAll, loadOpenParents, saveOpenParents } from "../domain/gantt-expand";
 import { clampBulkResizeDelta } from "../domain/bulk-resize";
 import styles from "../styles/app.module.css";
@@ -137,6 +138,8 @@ export interface GanttViewProps {
   canWrite?: boolean;
   /** 指定時は親タスクの開閉状態をこのイベントの表示設定として保存・復元する。 */
   openStateKey?: common.EventId;
+  /** teamId -> チーム名（CSV 書き出し用）。無ければ teamLegend の名前を使う。 */
+  teamNameById?: ReadonlyMap<string, string>;
 }
 
 // Granularity chips (month/week/day), built on the shared @dub/ui SegmentedControl
@@ -320,6 +323,7 @@ export function GanttView({
   onBulkReorderTo,
   canWrite = true,
   openStateKey,
+  teamNameById,
 }: GanttViewProps) {
   const [zoom, setZoom] = useState<gantt.GanttZoom>(zoomProp);
   const [win, setWin] = useState<AxisWindow>(() => initialWindow(dto.rows, zoomProp));
@@ -530,6 +534,20 @@ export function GanttView({
       allExpanded(parentIdList, cur) ? collapseAll(parentIdList, cur) : expandAll(parentIdList, cur),
     );
   }, [parentIdList]);
+
+  // 書き出しは読み込み済みの全行（折りたたみで隠れた子も含む）を画面の並び順で。
+  const exportCsv = useCallback(() => {
+    const teamNames = teamNameById ?? new Map((teamLegend ?? []).map((t) => [t.id, t.name] as const));
+    downloadGanttCsv(
+      buildGanttTable(rolledRows, {
+        numberById,
+        statusById: effectiveStatusById,
+        childProgressById: effectiveChildProgressById,
+        assigneeNameById,
+        teamNameById: teamNames,
+      }),
+    );
+  }, [rolledRows, numberById, effectiveStatusById, effectiveChildProgressById, assigneeNameById, teamNameById, teamLegend]);
 
   // taskId -> the ROLLED row (parent dates are the union of their children). Drag
   // start/end must read these displayed dates, not the parent's pre-rollup seed.
@@ -1167,6 +1185,17 @@ export function GanttView({
               data-testid="fe4-gantt-toggle-all"
             >
               {everyOpen ? "すべて折りたたむ" : "すべて展開"}
+            </button>
+          )}
+          {!presenting && dto.rows.length > 0 && (
+            <button
+              type="button"
+              className={styles.tlTodayBtn}
+              onClick={exportCsv}
+              title="表示中のガントを CSV で書き出す"
+              data-testid="fe4-gantt-export-csv"
+            >
+              CSV書き出し
             </button>
           )}
           <button type="button" className={styles.tlTodayBtn} onClick={() => scrollToToday(true)} data-testid="fe4-gantt-today-btn">
