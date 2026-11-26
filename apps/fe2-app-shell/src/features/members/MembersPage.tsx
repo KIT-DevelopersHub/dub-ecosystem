@@ -20,7 +20,7 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import { useScopedOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
-import { EventStaffBar, EventStaffDialog } from "./EventStaffPanel.tsx";
+import { EventStaffSection } from "./EventStaffPanel.tsx";
 import { TeamsView } from "./TeamsView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { TeamFormDialog } from "./TeamFormDialog.tsx";
@@ -34,7 +34,6 @@ export function MembersPage(): JSX.Element {
   const gate = usePermissionGate({ appId: "members", locked: !canEdit });
   // イベントを選んでいる時は、そのイベントの運営メンバー・班だけ (全体の名簿から選んだもの)。
   const overview = useScopedOverview();
-  const [staffOpen, setStaffOpen] = useState(false);
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
 
@@ -95,19 +94,7 @@ export function MembersPage(): JSX.Element {
         />
       </div>
 
-      {overview.eventId && overview.staff && overview.full ? (
-        <>
-          <EventStaffBar eventId={overview.eventId} staff={overview.staff} full={overview.full} onEdit={() => setStaffOpen(true)} />
-          <EventStaffDialog
-            open={staffOpen}
-            onClose={() => setStaffOpen(false)}
-            eventId={overview.eventId}
-            staff={overview.staff}
-            full={overview.full}
-            canEdit={canEdit}
-          />
-        </>
-      ) : null}
+      <EventStaffSection scoped={overview} canEdit={canEdit} />
 
       <TeamsView
         teams={teams}

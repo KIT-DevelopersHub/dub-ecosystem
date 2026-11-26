@@ -164,6 +164,52 @@ export class MemberService {
     return this.getEventStaff(ctx, eventId);
   }
 
+  /**
+   * 招待: アカウントのある (identity に紐付いた) 名簿の人を、このイベントの運営メンバーに入れて
+   * 「〇〇の運営に招待されました」を通知する。承諾の手順は無く、すぐ入る。アカウントの無い人は
+   * 招待できない (参加届から入ってもらう)。通知は best-effort で、結果を `notified` で返す。
+   */
+  async inviteToEvent(
+    ctx: ReqCtx,
+    eventIdRaw: unknown,
+    body: member.InviteEventStaffRequest,
+  ): Promise<member.InviteEventStaffResponse> {
+    const eventId = requiredEventId(eventIdRaw);
+    const personId = optText((body as { personId?: unknown } | null)?.personId, "personId");
+    if (!personId) throw errors.validationFailed([{ field: "personId", reason: "required" }]);
+    const rawTitle = (body as { eventTitle?: unknown } | null)?.eventTitle;
+    if (rawTitle !== undefined && (typeof rawTitle !== "string" || rawTitle.length > member.EVENT_INVITE_TITLE_MAX)) {
+      throw errors.validationFailed([{ field: "eventTitle", reason: "invalid" }]);
+    }
+    const eventTitle = (typeof rawTitle === "string" && rawTitle.trim()) || "イベント";
+    const p = await this.deps.repo.getPerson(personId);
+    if (!p || p.orgId !== this.deps.orgId || p.archivedAt !== null) throw errPersonNotFound(personId);
+    if (!p.identityUserId) {
+      throw errors.validationFailed(
+        [{ field: "personId", reason: "no_account" }],
+        "アカウントの無い人は招待できません。参加届から入ってもらってください",
+      );
+    }
+    const current = await this.deps.repo.getEventStaff(eventId);
+    if (current.personIds.includes(personId)) {
+      throw new DubError("MEMBER_EVENT_ALREADY_STAFF", `member ${personId} is already staff of ${eventId}`, {
+        status: 409,
+        details: [{ field: "personId", reason: "already_staff" }],
+      });
+    }
+    await this.deps.repo.addEventPerson(eventId, personId, ctx.userId, this.deps.now());
+    let notified = false;
+    if (this.deps.notifyEventInvite) {
+      try {
+        await this.deps.notifyEventInvite(ctx, { eventId, eventTitle, personId, identityUserId: p.identityUserId });
+        notified = true;
+      } catch {
+        // best-effort: the invite (追加) stands; the screen says the notification did not go out.
+      }
+    }
+    return { staff: await this.getEventStaff(ctx, eventId), notified };
+  }
+
   /** Put a person on an event's staff when a write names one (追加・参加届・採用). */
   async enrollInEvent(ctx: ReqCtx, eventId: string | undefined, personId: string): Promise<void> {
     if (eventId) await this.deps.repo.addEventPerson(eventId, personId, ctx.userId, this.deps.now());
@@ -698,6 +744,8 @@ export class MemberService {
     const { schoolEmail, gmail } = profile;
     const desiredTeamId = await this.optTeamId(body.desiredTeamId);
     const position = optPosition(body.position);
+    // この 参加届 を出したイベント (フォームの URL ?event=)。名簿へ反映した時にその運営メンバーにも入る。
+    const eventId = parseEventScopeId((body as { eventId?: unknown }).eventId) ?? null;
 
     // 名簿への反映は管理者が一覧で確定する（B案）。提出時は 参加届 を記録するだけで、
     // roster には一切書き込まない（自動追加による重複を根絶）。再提出は既存行の
@@ -717,6 +765,7 @@ export class MemberService {
       schoolEmail,
       gmail,
       desiredTeamId,
+      eventId,
       position,
       status: "submitted",
       // matchKind は未処理時は意味を持たない placeholder（reviewState で表示制御）。
@@ -728,6 +777,8 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.upsertParticipation(row);
+    // 反映済みの人の再提出 (別のイベントへの参加届): 名簿にはもう居るので、そのイベントの運営メンバーにだけ入れる。
+    if (row.reviewState === "added" && row.memberId && eventId) await this.enrollInEvent(ctx, eventId, row.memberId);
     const participation = toParticipation(row);
     // 参加届が届いたら管理者へ通知（best-effort・失敗しても提出は成功させる）。
     if (this.deps.notifyParticipationSubmitted) {
@@ -800,8 +851,10 @@ export class MemberService {
     const p = await this.deps.repo.getParticipation(participationId);
     if (!p || p.orgId !== this.deps.orgId) throw errParticipationNotFound(participationId);
     const action = (body as { action?: unknown } | null)?.action;
-    // link/create: also put the person on the event chosen in the form (null/省略 = どこにも入れない).
-    const eventId = parseEventScopeId((body as { eventId?: unknown } | null)?.eventId);
+    // link/create: the person also joins an event's 運営メンバー — the one the 参加届 was submitted
+    // for, unless the reviewer picked another (eventId) or none (null).
+    const rawEventId = (body as { eventId?: unknown } | null)?.eventId;
+    const eventId = rawEventId === undefined ? (p.eventId ?? undefined) : parseEventScopeId(rawEventId);
     const now = this.deps.now();
 
     if (action === "skip") {

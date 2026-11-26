@@ -147,6 +147,8 @@ export const POLICY_TABLE = definePolicyTable({
   "PUT /members/events/:eventId/people/:personId": appLevel("members", "edit"),
   "DELETE /members/events/:eventId/people/:personId": appLevel("members", "edit"),
   "PUT /members/events/:eventId/teams/:teamId": appLevel("members", "edit"),
+  // アカウントのある人をこのイベントの運営に招待 (追加＋本人へ in-app 通知)。
+  "POST /members/events/:eventId/invitations": appLevel("members", "edit"),
   "DELETE /members/events/:eventId/teams/:teamId": appLevel("members", "edit"),
 
   // チーム・役職ロールの一括付与。全員のロール割当を書き換えるので、ロール管理と同じ

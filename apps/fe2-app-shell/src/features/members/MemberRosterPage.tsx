@@ -23,7 +23,8 @@ import type { SelectOption } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { usePermissionGate } from "../../auth/PermissionGate.tsx";
-import { useMembersOverview, useDeleteMember, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
+import { useScopedOverview, useDeleteMember, useIdentityUsers, useUnlinkIdentity } from "./hooks.ts";
+import { EventStaffSection } from "./EventStaffPanel.tsx";
 import { useMembersApi } from "./MembersProvider.tsx";
 import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import { ListView } from "./ListView.tsx";
@@ -59,7 +60,8 @@ export function MemberRosterPage(): JSX.Element {
       ? { appId: "members", locked: !canEdit, scope: "scope", reason: "運営名簿は編集範囲の外のため、編集できません。" }
       : { appId: "members", locked: !canEdit },
   );
-  const overview = useMembersOverview();
+  // イベントを選んでいる時は、そのイベントの運営メンバー (参加届・招待で入った人) だけ。
+  const overview = useScopedOverview();
   const deleteMember = useDeleteMember();
   const identityUsers = useIdentityUsers();
   const unlinkIdentity = useUnlinkIdentity();
@@ -75,8 +77,11 @@ export function MemberRosterPage(): JSX.Element {
   // アカウント発行メール: opened after a link (only when the member has a Gmail) or from the row.
   const [mailTarget, setMailTarget] = useState<AccountMailTarget | null>(null);
 
-  const teams = overview.data?.teams ?? [];
   const members = overview.data?.members ?? [];
+  // 編集・紐付け・リーダー名は全体の名簿で引く (イベントで絞った行のまま保存すると他の班が外れるため)。
+  const teams = overview.full?.teams ?? overview.data?.teams ?? [];
+  const fullMembers = overview.full?.members ?? members;
+  const fullById = useMemo(() => new Map(fullMembers.map((m) => [m.id, m])), [fullMembers]);
   const teamsById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
 
   // identity userId -> display label for the linked-account column, and the set of
@@ -94,16 +99,16 @@ export function MemberRosterPage(): JSX.Element {
     accountMailTarget(m.identityUserId, m.name, m.gmail, m.identityUserId ? accountEmails.get(m.identityUserId) : null);
   const openAccountMail = (m: OrgMember) => setMailTarget(mailTargetOf(m));
   const takenIds = useMemo(
-    () => new Set(members.map((m) => m.identityUserId).filter((id): id is string => !!id)),
-    [members],
+    () => new Set(fullMembers.map((m) => m.identityUserId).filter((id): id is string => !!id)),
+    [fullMembers],
   );
 
   // リーダー列の表示名解決(leaderId -> 氏名)。
   const leaderNames = useMemo(() => {
     const map = new Map<string, string>();
-    for (const m of members) map.set(m.id, m.name);
+    for (const m of fullMembers) map.set(m.id, m.name);
     return map;
-  }, [members]);
+  }, [fullMembers]);
 
   // 表示順 = 組織図順(オーガナイザー→各リーダー→配下→残り)。ステータスで絞ってから
   // 並べ替え、最後に検索で絞る(検索は順序を保つ)。既定は「在籍者(辞退以外)」。
@@ -128,7 +133,7 @@ export function MemberRosterPage(): JSX.Element {
   const STATUS_FILTER_OPTIONS: SelectOption<RosterStatusFilter>[] = ROSTER_FILTER_OPTIONS;
 
   const openAddMember = () => setMemberDialog({ open: true, editing: null });
-  const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: m });
+  const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: fullById.get(m.id) ?? m });
 
   // 画面に出ている行(状態フィルタ・検索・並び順を反映)をそのまま書き出す。
   const toast = useToast();
@@ -221,6 +226,8 @@ export function MemberRosterPage(): JSX.Element {
         }
       />
 
+      <EventStaffSection scoped={overview} canEdit={canEdit} />
+
       <div className={styles.toolbar}>
         <div className={styles.searchField}>
           <TextField
@@ -277,7 +284,7 @@ export function MemberRosterPage(): JSX.Element {
         onClose={() => setMemberDialog({ open: false, editing: null })}
         teams={teams}
         editing={memberDialog.editing}
-        members={members}
+        members={fullMembers}
         onUpdated={(saved, before) => {
           // 紐付け済みの人に Gmail が後から入った時も「3つが揃った瞬間」なので聞く。
           if (!(before.gmail ?? "").trim()) openAccountMail(saved);

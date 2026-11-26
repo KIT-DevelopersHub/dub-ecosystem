@@ -197,6 +197,10 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.delete("/members/events/:eventId/people/:personId", async (c) => {
     return c.json(await svc.setEventPerson(reqCtx(c), c.req.param("eventId"), c.req.param("personId"), false));
   });
+  app.post("/members/events/:eventId/invitations", async (c) => {
+    const body = await readJson<member.InviteEventStaffRequest>(c);
+    return c.json(await svc.inviteToEvent(reqCtx(c), c.req.param("eventId"), body));
+  });
   app.put("/members/events/:eventId/teams/:teamId", async (c) => {
     return c.json(await svc.setEventTeam(reqCtx(c), c.req.param("eventId"), c.req.param("teamId"), true));
   });

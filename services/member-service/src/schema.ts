@@ -645,6 +645,15 @@ CREATE INDEX IF NOT EXISTS idx_member_event_teams_team ON member_event_teams(tea
 `.trim(),
 };
 
+// 0030: the event a 参加届 was submitted for (mirrors 0030_participation_event.sql). Additive.
+export const MEMBER_PARTICIPATION_EVENT_MIGRATION: Migration = {
+  id: "0030_participation_event",
+  namespace: "member",
+  up: `
+ALTER TABLE member_participations ADD COLUMN event_id TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -676,4 +685,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_HR_BOOKED_BACKFILL_MIGRATION,
   MEMBER_ACCOUNTING_ISSUER_MIGRATION,
   MEMBER_EVENT_STAFF_MIGRATION,
+  MEMBER_PARTICIPATION_EVENT_MIGRATION,
 ];

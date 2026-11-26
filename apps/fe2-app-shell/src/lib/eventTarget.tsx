@@ -27,11 +27,12 @@ export function useEventTitle(eventId: string | null): string | null {
   return (eventId && events.find((e) => e.id === eventId)?.title) || null;
 }
 
-/** [eventId | null, set] — starts at the header's current event. */
-export function useEventTarget(): [string | null, (id: string | null) => void] {
+/** [eventId | null, set] — starts at `initial` (e.g. the 参加届's event) or the header's current event. */
+export function useEventTarget(initial: string | null = null): [string | null, (id: string | null) => void] {
   const current = useCurrentEventId();
-  const [target, setTarget] = useState<string | null>(current);
-  useEffect(() => setTarget(current), [current]);
+  const start = initial ?? current;
+  const [target, setTarget] = useState<string | null>(start);
+  useEffect(() => setTarget(start), [start]);
   return [target, setTarget];
 }
 

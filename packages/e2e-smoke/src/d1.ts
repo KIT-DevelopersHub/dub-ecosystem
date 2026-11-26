@@ -9,6 +9,7 @@ import type { D1Database } from "@cloudflare/workers-types";
 
 import { EVENT_SCHEMA_MIGRATION } from "../../../services/event-service/src/index";
 import { TASK_MIGRATIONS } from "../../../services/task-service/src/migrations";
+import { MEMBER_MIGRATIONS } from "../../../services/member-service/src/schema";
 
 // Load node:sqlite through createRequire so Vitest's transform pipeline never tries
 // to bundle it (it would strip "node:" and 404). Same trick as the service adapters.
@@ -28,8 +29,12 @@ export function allSchemas(): string[] {
     sqlFile("../../../infra/d1/migrations/event/0006_event_ai_digest.sql"),
     // Per-event enabled apps: createEvent writes the default set into event_event_apps.
     sqlFile("../../../infra/d1/migrations/event/0007_event_enabled_apps.sql"),
+    // member namespace up to 0028 (mirrors), then the physical files this branch adds.
+    ...MEMBER_MIGRATIONS.filter((m) => m.id < "0029").map((m) => m.up),
     // 運営メンバー per event (member_event_people / member_event_teams).
     sqlFile("../../../infra/d1/migrations/member/0029_event_staff.sql"),
+    // The event a 参加届 was submitted for (member_participations.event_id).
+    sqlFile("../../../infra/d1/migrations/member/0030_participation_event.sql"),
     ...TASK_MIGRATIONS.map((m) => m.up),
     // #260: the gantt WBS/team columns (team_id/parent_id/wbs) live in a physical
     // migration that is intentionally NOT mirrored into TASK_MIGRATIONS (pinned to

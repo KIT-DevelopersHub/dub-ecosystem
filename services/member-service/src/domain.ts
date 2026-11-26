@@ -110,6 +110,7 @@ export function toParticipation(r: ParticipationRow): member.Participation {
     schoolEmail: r.schoolEmail,
     gmail: r.gmail,
     desiredTeamId: r.desiredTeamId,
+    eventId: r.eventId,
     position: r.position,
     desiredActivity: r.desiredActivity,
     note: r.note,

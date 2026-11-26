@@ -21,6 +21,7 @@ import { createD1SponsorMailRepo } from "./sponsor-mail-repo";
 import { mailContactsVia } from "./sponsor-mail-client";
 import { notifyAdminsOfParticipation } from "./participationNotify";
 import { sendProfileReminderVia } from "./profileReminder";
+import { eventInviteNotifierVia } from "./eventInvite";
 import { createIdentityRoleSync } from "./roleSync";
 import { createIdentityActivation } from "./identityActivation";
 import type { Env } from "./env";
@@ -80,6 +81,7 @@ export function buildDeps(env: Env, requestId?: string, exec?: ExecutionContext)
     notifyParticipationSubmitted: (ctx, participation) =>
       notifyAdminsOfParticipation(env.SVC_NOTIFICATION, ctx, participation).then(() => undefined),
     ...(env.SVC_NOTIFICATION ? { sendProfileReminder: sendProfileReminderVia(env.SVC_NOTIFICATION) } : {}),
+    ...(env.SVC_NOTIFICATION ? { notifyEventInvite: eventInviteNotifierVia(env.SVC_NOTIFICATION) } : {}),
   };
 }
 

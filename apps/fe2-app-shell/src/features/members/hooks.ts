@@ -67,7 +67,7 @@ export function useScopedOverview() {
   };
 }
 
-/** 全体の名簿からこのイベントに入れる / 外す (人・班)。楽観的: 先に反映 → 失敗で戻す。 */
+/** このイベントから外す (人) / 班を使う・使わない。楽観的: 先に反映 → 失敗で戻す。 */
 export function useToggleEventStaff() {
   const api = useMembersApi();
   const qc = useQueryClient();
@@ -91,6 +91,40 @@ export function useToggleEventStaff() {
     onError: (err, { eventId }, ctx) => {
       qc.setQueryData(EVENT_STAFF_KEY(eventId), ctx?.prev);
       toast.show({ kind: "error", title: messageFor(err, "イベントの運営メンバーを変更できませんでした") });
+    },
+    onSettled: (_d, _e, { eventId }) => {
+      void qc.invalidateQueries({ queryKey: EVENT_STAFF_KEY(eventId) });
+    },
+  });
+}
+
+/** このイベントに招待: アカウントのある人をすぐ運営メンバーに入れ、本人へ通知する。楽観的に先に入れる。 */
+export function useInviteToEvent() {
+  const api = useMembersApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  type Vars = { eventId: string; eventTitle: string; personId: string; name: string };
+  return useMutation<member.InviteEventStaffResponse, unknown, Vars, { prev: member.EventStaff | undefined }>({
+    mutationFn: ({ eventId, eventTitle, personId }) => api.inviteToEvent(eventId, { personId, eventTitle }),
+    onMutate: async ({ eventId, personId }) => {
+      const key = EVENT_STAFF_KEY(eventId);
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<member.EventStaff>(key);
+      const base = prev ?? { eventId, personIds: [], teamIds: [] };
+      qc.setQueryData<member.EventStaff>(key, { ...base, personIds: [...new Set([...base.personIds, personId])] });
+      return { prev };
+    },
+    onSuccess: (res, { eventId, name }) => {
+      qc.setQueryData(EVENT_STAFF_KEY(eventId), res.staff);
+      toast.show(
+        res.notified
+          ? { kind: "success", title: `${name}さんを招待し、通知を送りました` }
+          : { kind: "warning", title: `${name}さんを運営メンバーに入れましたが、通知は送れませんでした` },
+      );
+    },
+    onError: (err, { eventId }, ctx) => {
+      qc.setQueryData(EVENT_STAFF_KEY(eventId), ctx?.prev);
+      toast.show({ kind: "error", title: messageFor(err, "招待できませんでした") });
     },
     onSettled: (_d, _e, { eventId }) => {
       void qc.invalidateQueries({ queryKey: EVENT_STAFF_KEY(eventId) });

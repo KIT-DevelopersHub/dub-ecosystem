@@ -149,6 +149,7 @@ const ROSTER_WRITES = [
   "POST /members/people/:id/profile-reminder",
   "POST /members/teams",
   "PUT /members/events/:eventId/people/:personId",
+  "POST /members/events/:eventId/invitations",
   "PUT /members/events/:eventId/teams/:teamId",
 ];
 // 参加届: 自分の届を出す (閲覧) / 他人の届を見る (閲覧 + identity:read) / 反映確定 (編集).

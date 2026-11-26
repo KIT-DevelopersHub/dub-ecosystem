@@ -147,6 +147,22 @@ export interface EventStaff {
   teamIds: string[];
 }
 
+/** POST /members/events/{eventId}/invitations — invite a roster person who already HAS an
+ *  account (identity_user_id) to this event's 運営メンバー. No accept step yet: they join at
+ *  once and get an in-app 「〇〇の運営に招待されました」. People without an account join an event
+ *  through its 参加届 instead (400 no_account). Already staff = 409. */
+export interface InviteEventStaffRequest {
+  personId: string;
+  /** The event's name for the notification text (member-service does not own events). */
+  eventTitle?: string;
+}
+export const EVENT_INVITE_TITLE_MAX = 200;
+export interface InviteEventStaffResponse {
+  staff: EventStaff;
+  /** false = joined, but the notification could not be sent (best-effort). */
+  notified: boolean;
+}
+
 /** Narrow an org-wide overview to one event's staff + 班 (teamIds per member filtered too). */
 export function scopeOverviewToEvent(overview: MembersOverview, staff: EventStaff): MembersOverview {
   const people = new Set(staff.personIds);
@@ -520,6 +536,9 @@ export interface Participation extends PersonProfile {
   gmail: string;
   /** 希望チーム — references Team.id (canonical member_teams). */
   desiredTeamId: string | null;
+  /** この 参加届 を出したイベント (フォーム URL の ?event=)。名簿に反映するとその運営メンバーにも入る。
+   *  旧データ・指定なしは null/省略。 */
+  eventId?: string | null;
   /** 役職 (参加届で本人が選ぶ)。旧データは null/省略。 */
   position?: MemberPosition | null;
   status: "submitted";
@@ -552,6 +571,8 @@ export interface SubmitParticipationRequest extends Partial<PersonProfile> {
   nameRomaji?: string | null;
   contact?: string | null;
   desiredTeamId?: string | null;
+  /** 参加届を出すイベント (公開フォームの ?event=)。省略 = 指定なし。 */
+  eventId?: string | null;
   /** 役職。フォームでは必須だが、旧クライアント互換で API は省略を許す。 */
   position?: MemberPosition | null;
 }
@@ -631,6 +652,8 @@ export interface ListParticipationCandidatesResponse {
  *  - `skip`   : 名簿に反映しない（対象外）。
  *  - `unlink` : 反映(紐付け)を取り消して未処理(pending)に戻す。名簿のメンバー自体は
  *               消さない・状態も戻さない（他の編集を巻き戻さないため。直すなら名簿側で）。 */
+// link/create の `eventId`: 省略 = その 参加届 を出したイベント (Participation.eventId) の運営メンバーにも入れる。
+// 別のイベントを指定すればそちら、null ならどのイベントにも入れない。
 export type ResolveParticipationRequest =
   | { action: "link"; memberId: string; expectedVersion: number; eventId?: string | null }
   | { action: "create"; eventId?: string | null }

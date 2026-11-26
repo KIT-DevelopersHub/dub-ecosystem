@@ -43,6 +43,8 @@ export interface MembersApi {
   getEventStaff(eventId: string): Promise<member.EventStaff>;
   /** 全体の名簿の 1 人をこのイベントの運営メンバーに入れる (on) / 外す (off)。 */
   setEventPerson(eventId: string, personId: string, on: boolean): Promise<member.EventStaff>;
+  /** アカウントのある名簿の人をこのイベントの運営に招待 (すぐ入る＋本人へ通知)。 */
+  inviteToEvent(eventId: string, body: member.InviteEventStaffRequest): Promise<member.InviteEventStaffResponse>;
   /** 全体のチーム 1 つをこのイベントの班として使う (on) / 使わない (off)。 */
   setEventTeam(eventId: string, teamId: string, on: boolean): Promise<member.EventStaff>;
 }
@@ -86,6 +88,12 @@ export function createMembersApi(api: ApiClient): MembersApi {
       api.request<member.EventStaff>({
         method: on ? "PUT" : "DELETE",
         path: `${BASE}/events/${encodeURIComponent(eventId)}/people/${encodeURIComponent(personId)}`,
+      }),
+    inviteToEvent: (eventId, body) =>
+      api.request<member.InviteEventStaffResponse>({
+        method: "POST",
+        path: `${BASE}/events/${encodeURIComponent(eventId)}/invitations`,
+        body,
       }),
     setEventTeam: (eventId, teamId, on) =>
       api.request<member.EventStaff>({

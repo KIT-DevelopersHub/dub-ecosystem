@@ -26,6 +26,13 @@ const TEAM_FIELD_ID = "participation-team";
 const POSITION_FIELD_ID = "participation-position";
 const POSITION_OPTIONS = MEMBER_POSITIONS.map((p) => ({ value: p, label: POSITION_LABEL[p] }));
 
+/** 公開フォームの URL の ?event= (イベントごとの参加届)。形が不正なら無視する。 */
+function eventFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const v = new URLSearchParams(window.location.search).get("event");
+  return v && /^[A-Za-z0-9_-]{1,100}$/.test(v) ? v : null;
+}
+
 export function ParticipationForm(): JSX.Element {
   const submit = useSubmitParticipation();
   // チームの選択肢は名簿のチーム (公開してよい部分だけを返す公開案内 API)。
@@ -54,6 +61,8 @@ export function ParticipationForm(): JSX.Element {
       {
         ...profile,
         desiredTeamId: team === "" || team === NO_TEAM ? null : team,
+        // イベントごとの参加届 URL (/participate?event=<id>)。出した人は反映時にそのイベントの運営メンバーに入る。
+        ...(eventFromUrl() ? { eventId: eventFromUrl() } : {}),
         position,
         schoolEmail: profile.schoolEmail ?? "",
         gmail: profile.gmail ?? "",

@@ -68,6 +68,16 @@ describe("POST /api/v1/public/participation", () => {
     expect(forwarded.rosterNumber).toBe("3EP2-26");
   });
 
+  it("forwards the event the 参加届 is for (?event= on the form)", async () => {
+    const member = memberBinding("created_new");
+    const env = makeEnv({ SVC_MEMBER: member.fetcher });
+    const app = createApp({ ...NO_RL, turnstile: async () => true });
+    const res = await app.fetch(post({ ...validBody, eventId: "evt_2" }), env, execCtx);
+    expect(res.status).toBe(200);
+    const forwarded = (await member.requests[0]!.json()) as Record<string, unknown>;
+    expect(forwarded.eventId).toBe("evt_2");
+  });
+
   it("forwards 役職 (position) and rejects an unknown one before any forward", async () => {
     const member = memberBinding("created_new");
     const env = makeEnv({ SVC_MEMBER: member.fetcher });

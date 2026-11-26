@@ -6,6 +6,7 @@ import type { DbClient } from "@dub/db";
 import { createApp, makeDeps, call } from "./harness";
 import { createD1MemberRepo } from "../src/d1-repo";
 import { MEMBER_MIGRATIONS } from "../src/schema";
+import { buildEventInvite, EVENT_INVITED_TYPE } from "../src/eventInvite";
 
 const EV = "acd75449-c875-4c13-83d8-2dd8f8ce8a33";
 const EV2 = "event_01M8C4ZK8020EFG6KYFT7S5B2N";
@@ -68,6 +69,99 @@ describe("event staff (member_event_people / member_event_teams)", () => {
 
     const staff = (await call(app, "GET", `/members/events/${EV}/staff`)).json;
     expect(staff.personIds.sort()).toEqual([created, joined.json.memberId].sort());
+  });
+});
+
+describe("このイベントに招待 (POST /members/events/:eventId/invitations)", () => {
+  async function linkedPerson(app: ReturnType<typeof createApp>, name: string, identityUserId: string) {
+    const m = (await call(app, "POST", "/members/people", { body: { name, status: "added", teamIds: [] } })).json;
+    await call(app, "POST", `/members/people/${m.id}/identity-link`, { body: { identityUserId, version: m.version } });
+    return m.id as string;
+  }
+
+  it("adds an account holder at once and sends 「〇〇の運営に招待されました」 linking to the event", async () => {
+    const sent: unknown[] = [];
+    const app = createApp(makeDeps({ notifyEventInvite: async (_ctx, t) => void sent.push(buildEventInvite(t)) }));
+    const id = await linkedPerson(app, "山田 花", "usr_yamada");
+    const res = await call(app, "POST", `/members/events/${EV}/invitations`, { body: { personId: id, eventTitle: "北陸ITカンファレンス 2027" } });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ staff: { eventId: EV, personIds: [id], teamIds: [] }, notified: true });
+    expect(sent).toEqual([
+      expect.objectContaining({
+        type: EVENT_INVITED_TYPE,
+        recipientIds: ["usr_yamada"],
+        title: "「北陸ITカンファレンス 2027」の運営に招待されました",
+        resourceType: "event",
+        resourceId: EV,
+      }),
+    ]);
+    // already staff
+    expect((await call(app, "POST", `/members/events/${EV}/invitations`, { body: { personId: id } })).status).toBe(409);
+  });
+
+  it("refuses people without an account (they come in through 参加届) and unknown people", async () => {
+    const app = createApp(makeDeps());
+    const { p } = await (async () => ({ p: (await call(app, "POST", "/members/people", { body: { name: "無 垢", status: "added", teamIds: [] } })).json }))();
+    const r = await call(app, "POST", `/members/events/${EV}/invitations`, { body: { personId: p.id } });
+    expect(r.status).toBe(400);
+    expect((await call(app, "GET", `/members/events/${EV}/staff`)).json.personIds).toEqual([]);
+    expect((await call(app, "POST", `/members/events/${EV}/invitations`, { body: { personId: "member_nope" } })).status).toBe(404);
+    expect((await call(app, "POST", `/members/events/${EV}/invitations`, { body: {} })).status).toBe(400);
+  });
+
+  it("a failed notification still invites, reported as notified:false", async () => {
+    const app = createApp(makeDeps({ notifyEventInvite: async () => { throw new Error("down"); } }));
+    const id = await linkedPerson(app, "佐藤 一", "usr_sato");
+    const res = await call(app, "POST", `/members/events/${EV}/invitations`, { body: { personId: id } });
+    expect(res.json).toEqual({ staff: { eventId: EV, personIds: [id], teamIds: [] }, notified: false });
+  });
+});
+
+describe("参加届を出したイベント (member_participations.event_id)", () => {
+  const form = { schoolEmail: "s@example.ac.jp", gmail: "s@gmail.com", position: "member" };
+
+  it("reflecting a 届 puts the person on the event it was submitted for (no eventId in resolve)", async () => {
+    const app = createApp(makeDeps());
+    const sub = await call(app, "POST", "/members/participation", { body: { ...form, name: "届 太郎", eventId: EV2 } });
+    expect(sub.status).toBe(201);
+    expect(sub.json.participation.eventId).toBe(EV2);
+    const res = await call(app, "POST", `/members/participation/${sub.json.participation.id}/resolve`, { body: { action: "create" } });
+    expect((await call(app, "GET", `/members/events/${EV2}/staff`)).json.personIds).toEqual([res.json.member.id]);
+  });
+
+  it("resolve eventId:null puts them nowhere; an already reflected person resubmitting for another event joins it", async () => {
+    const app = createApp(makeDeps());
+    const sub = await call(app, "POST", "/members/participation", { body: { ...form, name: "届 花子", eventId: EV2 } });
+    const res = await call(app, "POST", `/members/participation/${sub.json.participation.id}/resolve`, { body: { action: "create", eventId: null } });
+    expect((await call(app, "GET", `/members/events/${EV2}/staff`)).json.personIds).toEqual([]);
+    await call(app, "POST", "/members/participation", { body: { ...form, name: "届 花子", eventId: EV } });
+    expect((await call(app, "GET", `/members/events/${EV}/staff`)).json.personIds).toEqual([res.json.member.id]);
+    expect((await call(app, "POST", "/members/participation", { body: { ...form, name: "x", eventId: "bad id" } })).status).toBe(400);
+  });
+
+  it("d1 repo stores event_id", async () => {
+    const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+    const raw = new DatabaseSync(":memory:");
+    for (const m of MEMBER_MIGRATIONS) raw.exec(m.up);
+    type Bind = string | number | null;
+    const db = {
+      namespace: "member",
+      first: async (sql: string, ...b: Bind[]) => raw.prepare(sql).get(...b) ?? null,
+      all: async (sql: string, ...b: Bind[]) => raw.prepare(sql).all(...b),
+      run: async (sql: string, ...b: Bind[]) => {
+        const r = raw.prepare(sql).run(...b);
+        return { success: true, meta: { changes: Number(r.changes), durationMs: 0 } };
+      },
+    } as unknown as DbClient;
+    const deps = makeDeps();
+    const app = createApp(deps);
+    const sub = await call(app, "POST", "/members/participation", { body: { ...form, name: "永続 太郎", eventId: EV } });
+    const row = (await deps.repo.getParticipation(sub.json.participation.id))!;
+    const repo = createD1MemberRepo(db);
+    await repo.upsertParticipation(row);
+    expect((await repo.getParticipation(row.id))?.eventId).toBe(EV);
+    const rows = raw.prepare("SELECT event_id FROM member_participations").all() as Array<{ event_id: string }>;
+    expect(rows.map((r) => r.event_id)).toEqual([EV]);
   });
 });
 

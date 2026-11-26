@@ -4422,9 +4422,10 @@ function createMembersStore() {
     mk("member_o1", "久米 宏", "オーガナイザー", "added", ["team_ops"], 10, null, "機械工学科", "3年"),
     mk("member_o2", "中村 蓮", "進行リーダー", "added", ["team_ops"], 11, null, "経営情報学科", "2年", null, "member_o1"),
     mk("member_o3", "大野 翼", "メンバー", "on_leave", ["team_ops"], 12, null, "機械工学科", "2年", null, "member_o2"),
-    mk("member_o4", "木下 悠", "メンバー", "added", ["team_ops"], 13, null, "機械工学科", "1年", null, "member_o2"),
+    // 高橋・渡辺 はアカウント (メール名簿) あり: 「このイベントに招待」の候補になる確認用。
+    mk("member_o4", "高橋 文人", "メンバー", "added", ["team_ops"], 13, null, "機械工学科", "1年", "usr_frank", "member_o2"),
     mk("member_o5", "佐々木 誠", "進行リーダー", "added", ["team_ops"], 14, null, "経営情報学科", "3年", null, "member_o1"),
-    mk("member_o6", "島田 拓", "メンバー", "added", ["team_ops"], 15, null, "機械工学科", "2年", null, "member_o5"),
+    mk("member_o6", "渡辺 花", "メンバー", "added", ["team_ops"], 15, null, "機械工学科", "2年", "usr_hana", "member_o5"),
     // スポンサー — リーダー配下2人。
     mk("member_s1", "吉岡 誠一", "オーガナイザー", "added", ["team_sponsor"], 16, null, "経営情報学科", "3年"),
     mk("member_s2", "前田 直樹", "渉外リーダー", "added", ["team_sponsor"], 17, null, "情報工学科", "2年", null, "member_s1"),
@@ -4601,7 +4602,7 @@ function createMembersStore() {
     },
     {
       // 未処理・招待中に該当なし → 「追加する」で新規追加フローを確認できる。
-      id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
+      id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実", eventId: "evt_2",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
       grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", studentNumber: "1401123", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
@@ -4920,6 +4921,28 @@ function createMembersStore() {
       else set.delete(id);
       return json(staffJson(eventId));
     }
+    // このイベントに招待 (member-service と同じ: アカウントのある人だけ・すぐ入る・本人へ通知)。
+    ev = /^\/api\/v1\/members\/events\/([^/]+)\/invitations$/.exec(pathname);
+    if (ev && method === "POST") {
+      const eventId = decodeURIComponent(ev[1]!);
+      const mem = members.find((x) => x.id === body?.personId);
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (!mem.identityUserId) {
+        return json({ error: { code: "VALIDATION_FAILED", message: "アカウントの無い人は招待できません。参加届から入ってもらってください", retryable: false } }, 400);
+      }
+      if (staffOf(eventId).people.has(mem.id)) {
+        return json({ error: { code: "MEMBER_EVENT_ALREADY_STAFF", message: "すでにこのイベントの運営メンバーです", retryable: false } }, 409);
+      }
+      staffOf(eventId).people.add(mem.id);
+      const title = (typeof body?.eventTitle === "string" && body.eventTitle.trim()) || "イベント";
+      // デモは 1 人で見るので、招待された本人宛ての通知をこの受信箱にも出して文面を確認できるようにする。
+      NOTIFICATIONS.unshift({
+        id: nid("ntf"), type: "member.event_invited", title: `「${title}」の運営に招待されました`,
+        body: `「${title}」の運営メンバーに追加されました。開いてイベントを確認してください。（デモ: ${mem.name}さん宛ての通知）`,
+        readAt: null, createdAt: new Date().toISOString(), resourceType: "event", resourceId: eventId,
+      });
+      return json({ staff: staffJson(eventId), notified: true });
+    }
 
     // teams
     if (method === "POST" && pathname === "/api/v1/members/teams") {
@@ -5082,12 +5105,17 @@ function createMembersStore() {
         contact: body?.contact ?? null,
         schoolEmail: profile.schoolEmail ?? "", gmail: profile.gmail ?? "",
         desiredTeamId: body?.desiredTeamId ?? null,
+        eventId: typeof body?.eventId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(body.eventId) ? body.eventId : null,
         position: memberValues.isMemberPosition(body?.position) ? body.position : null,
         status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
         submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
       };
       if (existing) participations[participations.indexOf(existing)] = participation;
       else participations.unshift(participation);
+      // 反映済みの人の再提出 (別のイベントへの参加届) は、そのイベントの運営メンバーにだけ入れる。
+      if (participation.reviewState === "added" && participation.memberId && participation.eventId) {
+        enroll(participation.eventId, participation.memberId);
+      }
       return { participation };
     };
 
@@ -5147,6 +5175,8 @@ function createMembersStore() {
       const p = participations.find((x) => x.id === decodeURIComponent(resMatch[1]!));
       if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
       const action = body?.action;
+      // 省略 = この参加届を出したイベント (実サーバと同じ)。null = どこにも入れない。
+      const resolveEventId = body?.eventId === undefined ? p.eventId : body.eventId;
       if (action === "skip") {
         p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: null });
@@ -5172,7 +5202,7 @@ function createMembersStore() {
         }
         mem.version += 1; mem.updatedAt = isoNow();
         p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
-        enroll(body?.eventId, mem.id);
+        enroll(resolveEventId, mem.id);
         return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
       }
       if (action === "create") {
@@ -5184,7 +5214,7 @@ function createMembersStore() {
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(created);
-        enroll(body?.eventId, created.id);
+        enroll(resolveEventId, created.id);
         p.memberId = created.id; p.matchKind = "created_new"; p.reviewState = "added"; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
       }

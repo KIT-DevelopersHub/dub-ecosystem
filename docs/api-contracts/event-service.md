@@ -351,6 +351,17 @@ nothing is duplicated, roles stay org-wide). Type `member.EventStaff`
 | `GET /api/v1/members/events/:eventId/staff` | 運営メンバー 閲覧 | `EventStaff` (ids only; read rows via overview / org-overview) |
 | `PUT\|DELETE /api/v1/members/events/:eventId/people/:personId` | 運営メンバー 編集 | add / remove one roster person (idempotent) ⇒ `EventStaff` |
 | `PUT\|DELETE /api/v1/members/events/:eventId/teams/:teamId` | 運営メンバー 編集 | use / stop using one 班 (idempotent) ⇒ `EventStaff` |
+| `POST /api/v1/members/events/:eventId/invitations` | 運営メンバー 編集 | `InviteEventStaffRequest { personId, eventTitle? }` ⇒ `InviteEventStaffResponse { staff, notified }`. Only a person with an account (`identity_user_id`); no account ⇒ `400 no_account`, already staff ⇒ `409 MEMBER_EVENT_ALREADY_STAFF`. Joins at once (no accept step yet) and the person gets an in-app `member.event_invited` 「〇〇の運営に招待されました」 (`resourceType: "event"` ⇒ `/events/:id`; best-effort, `notified: false` if it failed) |
+
+How a person joins an event's 運営メンバー:
+1. **参加届 for that event** — the public form URL carries it (`/participate?event=<id>` ⇒
+   `SubmitParticipationRequest.eventId` ⇒ `member_participations.event_id`, member migration 0030).
+   When an admin reflects the 届 (`resolve` link / create) the person joins that event; `resolve`
+   `eventId` overrides it (`null` = none). A person already reflected who submits again for
+   another event joins it directly.
+2. **招待** — the invitations route above, for people who already have an account.
+
+The メール名簿 (identity users) stays org-wide and is never scoped to an event.
 
 Optional `eventId` on `POST /members/people`, `POST /members/teams`,
 `POST /members/participation/:id/resolve` (link / create) and `POST /members/hr/applicants/:id/join`

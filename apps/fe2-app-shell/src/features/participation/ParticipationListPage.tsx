@@ -14,7 +14,8 @@ import type { ColumnDef, BadgeTone } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { usePermissionGate } from "../../auth/PermissionGate.tsx";
-import { EventTargetSelect, useEventTarget } from "../../lib/eventTarget.tsx";
+import { EventTargetSelect, useEventCatalog, useEventTarget } from "../../lib/eventTarget.tsx";
+import { useCurrentEventId } from "@dub/fe3-event-action";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
 import { POSITION_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
@@ -86,6 +87,11 @@ export function ParticipationListPage(): JSX.Element {
   const canIssueMail = can("members:onboard_mail");
   const list = useParticipationList();
   const teamsQuery = useParticipationTeams();
+  // 参加届 URL はヘッダーで選んでいるイベント用 (?event=)。出した人は反映時にそのイベントの運営メンバーに入る。
+  const currentEventId = useCurrentEventId();
+  const events = useEventCatalog();
+  const eventTitle = (id: string | null | undefined) => (id ? events.find((e) => e.id === id)?.title ?? "（別のイベント）" : "—");
+  const currentEventTitle = currentEventId ? events.find((e) => e.id === currentEventId)?.title ?? null : null;
   const resolveMut = useResolveParticipation();
   const [selected, setSelected] = useState<Participation | null>(null);
   // 「追加する」フロー対象 (候補ダイアログを開く) / 「対象外」確認対象。
@@ -160,6 +166,7 @@ export function ParticipationListPage(): JSX.Element {
     ...PROFILE_DISPLAY_COLUMNS.map(
       (c): ColumnDef<Participation> => ({ key: c.id, header: c.header, noWrap: true, minWidth: "7rem", cell: (p) => c.value(p) || "—" }),
     ),
+    { key: "event", header: "参加するイベント", noWrap: true, minWidth: "10rem", cell: (p) => eventTitle(p.eventId) },
     { key: "team", header: "所属チーム", noWrap: true, minWidth: "8rem", cell: (p) => teamName(p.desiredTeamId) },
     { key: "position", header: "役職", noWrap: true, minWidth: "7rem", cell: (p) => positionLabel(p) },
     { key: "submittedAt", header: "提出日時", noWrap: true, minWidth: "11rem", cell: (p) => fmtDateTime(p.submittedAt) },
@@ -192,9 +199,13 @@ export function ParticipationListPage(): JSX.Element {
         <p className={styles.sectionHint}>送信された参加届を確認できます（運営のみ）。左端で運営メンバーに追加するか選べます。行をクリックすると詳細が開きます。</p>
         <div className={styles.listShare}>
           <PublicUrlCard
-            title="参加届フォームの URL"
-            hint="ログイン不要の公開フォームです。参加してほしい人に送ると、回答がこの一覧に届きます。"
-            path={PUBLIC_PARTICIPATION_PATH}
+            title={currentEventTitle ? `「${currentEventTitle}」の参加届フォームの URL` : "参加届フォームの URL"}
+            hint={
+              currentEventId
+                ? "ログイン不要の公開フォームです。この URL から出した人は、追加するとこのイベントの運営メンバーに入ります。別のイベント用はヘッダーでイベントを切り替えてください。"
+                : "ログイン不要の公開フォームです。イベントを選ぶと、そのイベント用の URL になります。"
+            }
+            path={currentEventId ? `${PUBLIC_PARTICIPATION_PATH}?event=${encodeURIComponent(currentEventId)}` : PUBLIC_PARTICIPATION_PATH}
             testId="participation-public-link"
           />
         </div>
@@ -221,8 +232,8 @@ export function ParticipationListPage(): JSX.Element {
             participation={addTarget}
             pending={resolveMut.isPending}
             onCancel={() => setAddTarget(null)}
-            onLink={(t, eventId) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version, ...(eventId ? { eventId } : {}) })}
-            onCreate={(eventId) => doResolve(addTarget.id, { action: "create", ...(eventId ? { eventId } : {}) })}
+            onLink={(t, eventId) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version, ...(eventId !== undefined ? { eventId } : {}) })}
+            onCreate={(eventId) => doResolve(addTarget.id, { action: "create", ...(eventId !== undefined ? { eventId } : {}) })}
             onSkip={() => doResolve(addTarget.id, { action: "skip" })}
           />
         ) : null}
@@ -288,15 +299,18 @@ function ResolveDialog({
   participation: Participation;
   pending: boolean;
   onCancel: () => void;
-  onLink: (target: LinkTarget, eventId: string | null) => void;
-  onCreate: (eventId: string | null) => void;
+  /** eventId: undefined = サーバの既定 (参加届を出したイベント)・null = どこにも入れない。 */
+  onLink: (target: LinkTarget, eventId: string | null | undefined) => void;
+  onCreate: (eventId: string | null | undefined) => void;
   onSkip: () => void;
 }): JSX.Element {
   const [manual, setManual] = useState(false);
-  // 反映する人を入れるイベント (既定 = ヘッダーで選んでいるイベント)。
-  const [eventTarget, setEventTarget] = useEventTarget();
-  const link = (t: LinkTarget) => onLink(t, eventTarget);
-  const create = () => onCreate(eventTarget);
+  // 反映する人を入れるイベント (既定 = この参加届を出したイベント。無ければヘッダーで選んでいるイベント)。
+  const [eventTarget, setEventTarget] = useEventTarget(participation.eventId ?? null);
+  // イベント一覧が読めない (選択欄が出ない) 時は送らず、サーバの既定 (参加届を出したイベント) に任せる。
+  const chosen = useEventCatalog().length > 0 ? eventTarget : undefined;
+  const link = (t: LinkTarget) => onLink(t, chosen);
+  const create = () => onCreate(chosen);
   const candidatesQuery = useParticipationCandidates(participation.id);
   const candidates = candidatesQuery.data?.candidates ?? [];
   const loading = candidatesQuery.isLoading;
