@@ -44,6 +44,18 @@ const OK_HOME: gateway.BffHomeResponse = {
   partialErrors: [],
 };
 
+describe("HomeScreen load failure (#855)", () => {
+  it("shows an error + 再試行 when /bff/home itself fails, not a dashboard of 0s", async () => {
+    const { ApiError } = await import("../../lib/api-client.tsx");
+    const api = {
+      bff: { home: () => Promise.reject(new ApiError(429, { error: { code: "RATE_LIMITED", message: "m", retryable: true } })) },
+    } as unknown as ApiClient;
+    render(wrap(<HomeScreen api={api} />));
+    expect(await screen.findByTestId("fe2-home-error")).toHaveTextContent("ダッシュボードを読み込めませんでした");
+    expect(screen.queryByTestId("fe2-home-unread-count")).not.toBeInTheDocument();
+  });
+});
+
 describe("HomeScreen", () => {
   beforeEach(() => {
     localStorage.clear();

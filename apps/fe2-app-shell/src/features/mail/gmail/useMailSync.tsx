@@ -122,9 +122,9 @@ export function useMailSync(): void {
           base.set(f.threadId, { starred: f.starred, archived: f.archived, trashed: f.trashed, purged: f.purged, noReplyAt: f.noReplyAt ?? null });
         flagBaseline.current = base;
         flagsReady.current = true;
-      } catch {
-        // keep existing threads; just drop the skeleton
-        if (alive) dispatch({ type: "LIST_FAILED" });
+      } catch (error) {
+        // keep existing threads; drop the skeleton and record the failure (error state)
+        if (alive) dispatch({ type: "LIST_FAILED", error });
       }
     })();
     return () => {
