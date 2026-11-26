@@ -592,6 +592,9 @@
 .aiHeadSpacer {
   flex: 1;
 }
+.aiPanel .sectionHeadTitle {
+  white-space: nowrap;
+}
 .aiLines,
 .aiList {
   margin: 0;

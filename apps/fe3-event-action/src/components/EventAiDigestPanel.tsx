@@ -1,16 +1,22 @@
 // 「AI のまとめ」 (#879): a read-only digest of the event gathered from other apps, each
 // line with its source link, a 食い違い banner when a source disagrees with the event's
-// own fields, an admin 「今すぐ要約」 button, and a Q&A box. Every state is explicit:
-// skeleton while loading, 「停止中」 when the flag is OFF or the Mac mini is offline.
-// Release-gated: admins only until AI_DIGEST_RELEASED (lib/aiDigestRelease.ts).
+// own fields, an admin 「今すぐ要約」 button, and a Q&A box. Shown to every member.
+// While the flag is OFF the server sends a no-LLM preview (the event's own facts +
+// 食い違い); with nothing to show, the 公開予定 notice. The chat is closed until
+// AI_CHAT_AVAILABLE (lib/aiDigestRelease.ts).
 import { useState } from "react";
 import type { event } from "@dub/types";
 import { Badge, Button, Icon, SkeletonLoader, Textarea } from "@dub/ui";
-import { useCan } from "../contracts/fe2";
 import { useNavigation } from "../contracts/navigation";
 import { useEventDigestQuery } from "../hooks/useEventQueries";
 import { useAskEvent, useRunEventDigest } from "../hooks/useEventMutations";
-import { aiDigestVisible, AI_DIGEST_RELEASED, fieldLabel, isExternalLink, sourceLabel } from "../lib/aiDigestRelease";
+import {
+  AI_CHAT_AVAILABLE,
+  AI_UNAVAILABLE_MESSAGE,
+  fieldLabel,
+  isExternalLink,
+  sourceLabel,
+} from "../lib/aiDigestRelease";
 import { normalizeError } from "../lib/errorMap";
 import styles from "./components.module.css";
 
@@ -49,6 +55,31 @@ function StoppedNotice({ reason }: { reason: "disabled" | "offline" }) {
   );
 }
 
+function ComingSoonNotice({ testId, prefix }: { testId: string; prefix?: string }) {
+  return (
+    <div className={styles.aiStopped} role="status" data-testid={testId}>
+      <Icon name="clock" />
+      <span>
+        {prefix}
+        {AI_UNAVAILABLE_MESSAGE}
+      </span>
+    </div>
+  );
+}
+
+function CitedLines({ lines, testId }: { lines: event.EventDigestLine[]; testId: string }) {
+  return (
+    <ul className={styles.aiLines} data-testid={testId}>
+      {lines.map((l, i) => (
+        <li key={`${l.link}-${i}`} className={styles.aiLine}>
+          <span>{l.text}</span>
+          <SourceLink link={l.link} label={sourceLabel(l.source)} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Discrepancies({ items }: { items: event.EventDigestDiscrepancy[] }) {
   if (items.length === 0) return null;
   return (
@@ -57,12 +88,16 @@ function Discrepancies({ items }: { items: event.EventDigestDiscrepancy[] }) {
         <Icon name="alert-triangle" /> 食い違いがあります（直すのは人です。AI は書き換えません）
       </div>
       <ul className={styles.aiList}>
-        {items.map((d, i) => (
-          <li key={`${d.field}-${d.source}-${i}`}>
-            {fieldLabel(d.field)}: イベントは「{d.eventValue}」、{sourceLabel(d.source)}は「{d.sourceValue}」{" "}
-            <SourceLink link={d.link} label={`${sourceLabel(d.source)}を開く`} />
-          </li>
-        ))}
+        {items.map((d, i) => {
+          // source "event" = the legacy free-text 詳細欄 disagreeing with the event's own field.
+          const name = d.source === "event" ? "詳細欄" : sourceLabel(d.source);
+          return (
+            <li key={`${d.field}-${d.source}-${i}`}>
+              {fieldLabel(d.field)}: イベントは「{d.eventValue}」、{name}は「{d.sourceValue}」{" "}
+              <SourceLink link={d.link} label={`${name}を開く`} />
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -72,6 +107,7 @@ function AskBox({ eventId, stopped }: { eventId: string; stopped: "disabled" | "
   const [q, setQ] = useState("");
   const ask = useAskEvent(eventId);
   const res = ask.data;
+  const closed = !AI_CHAT_AVAILABLE || stopped !== null;
   return (
     <div className={styles.aiAsk} data-testid="fe3-ai-ask">
       <label className={styles.aiAskLabel} htmlFor="fe3-ai-ask-input">
@@ -82,8 +118,14 @@ function AskBox({ eventId, stopped }: { eventId: string; stopped: "disabled" | "
         value={q}
         onChange={setQ}
         rows={2}
-        placeholder={stopped ? "停止中のため質問できません" : "例: 会場の予約は済んでいますか？"}
-        disabled={stopped !== null || ask.isPending}
+        placeholder={
+          !AI_CHAT_AVAILABLE
+            ? AI_UNAVAILABLE_MESSAGE
+            : stopped
+              ? "停止中のため質問できません"
+              : "例: 会場の予約は済んでいますか？"
+        }
+        disabled={closed || ask.isPending}
         testId="fe3-ai-ask-input"
       />
       <div>
@@ -91,12 +133,13 @@ function AskBox({ eventId, stopped }: { eventId: string; stopped: "disabled" | "
           variant="secondary"
           iconLeft={<Icon name="send" />}
           onClick={() => ask.mutate(q.trim())}
-          disabled={stopped !== null || q.trim() === "" || ask.isPending}
+          disabled={closed || q.trim() === "" || ask.isPending}
           testId="fe3-ai-ask-submit"
         >
           質問する
         </Button>
       </div>
+      {!AI_CHAT_AVAILABLE ? <ComingSoonNotice testId="fe3-ai-chat-unavailable" /> : null}
       {ask.isPending ? <SkeletonLoader lines={2} /> : null}
       {ask.isError ? <div className={styles.errorText}>{normalizeError(ask.error).message}</div> : null}
       {res && res.status !== "answered" ? <StoppedNotice reason={res.status} /> : null}
@@ -119,11 +162,8 @@ function AskBox({ eventId, stopped }: { eventId: string; stopped: "disabled" | "
 }
 
 export function EventAiDigestPanel({ eventId, canRun }: { eventId: string; canRun: boolean }) {
-  const isAdmin = useCan("identity:admin");
-  const visible = aiDigestVisible(isAdmin);
-  const q = useEventDigestQuery(eventId, visible);
+  const q = useEventDigestQuery(eventId);
   const run = useRunEventDigest(eventId);
-  if (!visible) return null;
 
   const data = q.data;
   const stopped: "disabled" | "offline" | null = !data
@@ -134,14 +174,15 @@ export function EventAiDigestPanel({ eventId, canRun }: { eventId: string; canRu
         ? "offline"
         : null;
   const digest = data?.digest ?? null;
+  const preview = !digest && stopped === "disabled" ? (data?.preview ?? null) : null;
+  const hasPreview = preview !== null && (preview.lines.length > 0 || preview.discrepancies.length > 0);
 
   return (
     <section className={`${styles.section} ${styles.aiPanel}`} data-testid="fe3-ai-digest">
       <div className={styles.sectionHead}>
         <Icon name="info" />
         <span className={styles.sectionHeadTitle}>AI のまとめ</span>
-        <Badge tone="info">AI が作った要約です</Badge>
-        {!AI_DIGEST_RELEASED ? <Badge tone="neutral">未公開・管理者だけに表示</Badge> : null}
+        {digest ? <Badge tone="info">AI が作った要約です</Badge> : null}
         <span className={styles.aiHeadSpacer} />
         {canRun ? (
           <Button
@@ -162,19 +203,24 @@ export function EventAiDigestPanel({ eventId, canRun }: { eventId: string; canRu
         <div className={styles.errorText}>{normalizeError(q.error).message}</div>
       ) : (
         <>
-          {stopped ? <StoppedNotice reason={stopped} /> : null}
+          {stopped === "offline" ? <StoppedNotice reason={stopped} /> : null}
+          {hasPreview && preview ? (
+            <>
+              <Discrepancies items={preview.discrepancies} />
+              {preview.lines.length > 0 ? <CitedLines lines={preview.lines} testId="fe3-ai-preview-lines" /> : null}
+              <div className={styles.aiMeta} data-testid="fe3-ai-preview-meta">
+                {formatDateTime(preview.collectedAt)} 時点でイベントから集めた情報です。AI による要約は
+                {AI_UNAVAILABLE_MESSAGE}
+              </div>
+            </>
+          ) : stopped === "disabled" ? (
+            <ComingSoonNotice testId="fe3-ai-digest-coming-soon" prefix="AI のまとめは" />
+          ) : null}
           {digest ? (
             <>
               <Discrepancies items={digest.discrepancies} />
               {digest.lines.length > 0 ? (
-                <ul className={styles.aiLines} data-testid="fe3-ai-lines">
-                  {digest.lines.map((l, i) => (
-                    <li key={`${l.link}-${i}`} className={styles.aiLine}>
-                      <span>{l.text}</span>
-                      <SourceLink link={l.link} label={sourceLabel(l.source)} />
-                    </li>
-                  ))}
-                </ul>
+                <CitedLines lines={digest.lines} testId="fe3-ai-lines" />
               ) : (
                 <div className={styles.sectionEmpty}>まとめる内容がありませんでした。</div>
               )}

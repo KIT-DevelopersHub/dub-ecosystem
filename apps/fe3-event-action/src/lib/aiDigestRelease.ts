@@ -1,11 +1,9 @@
-// Release gate for the event AI digest (#879). Not released to members yet: the panel
-// renders only for full admins (identity:admin), mirroring fe2's releaseGate rule
-// (unreleased = admin/dev only). Releasing it is this one line → `true`.
-export const AI_DIGEST_RELEASED = false;
-
-export function aiDigestVisible(isAdmin: boolean): boolean {
-  return AI_DIGEST_RELEASED || isAdmin;
-}
+// Release state of the event AI digest (#879). The panel is shown to every member who can
+// see the event. The AI chat stays closed until the release date below; change the date
+// here only, and flip AI_CHAT_AVAILABLE when the Mac mini is live.
+export const AI_RELEASE_DATE_LABEL = "12/3";
+export const AI_CHAT_AVAILABLE = false;
+export const AI_UNAVAILABLE_MESSAGE = `現在は利用できません。${AI_RELEASE_DATE_LABEL} 公開予定です。`;
 
 const SOURCE_LABELS: Record<string, string> = {
   event: "イベント",
