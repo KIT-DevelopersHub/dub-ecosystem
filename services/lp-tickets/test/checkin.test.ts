@@ -54,6 +54,7 @@ async function setup(kind: RepoKind, grants: ("lp:checkin" | "lp:publish")[] = [
       resolvedBy: null,
       resolvedAt: null,
       clientKey: null,
+      receiptName: null,
     };
     expect(await h.repo.insertOrderIfAvailable(row, new Map([[typeId, null]]), now)).toEqual({ ok: true });
     expect(await h.repo.markOrderPaid(id, { paidAt: now, sessionId: null, paymentIntentId: null })).toBe("paid");
