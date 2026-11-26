@@ -2,8 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { member } from "@dub/types";
 import type { OrgMember } from "./contracts.ts";
-import { orgChartOrder } from "./orgChartOrder.ts";
-import { rosterOrder } from "./rosterHierarchy.ts";
+import { orgChartOrder, rosterOrder } from "./orgChartOrder.ts";
 
 const P0 = member.emptyPersonProfile();
 const base = { orgId: "o", status: "added" as const, teamIds: [], department: null, grade: null, contact: null, note: null, gmail: null, identityUserId: null, version: 1, createdAt: "t", updatedAt: "t" };
@@ -29,6 +28,15 @@ describe("rosterOrder", () => {
     const chart = orgChartOrder(members).map((m) => m.id);
     const inTier = rosterOrder(members).filter((m) => m.roleTitle === null).map((m) => m.id);
     expect(inTier).toEqual(chart.filter((id) => inTier.includes(id)));
+  });
+
+  it("prefers explicit position over roleTitle", () => {
+    const withPos = [
+      { ...mk("a", null, 1), position: "leader" as const },
+      { ...mk("b", "オーガナイザー", 2), position: "member" as const },
+      mk("c", null, 3),
+    ];
+    expect(rosterOrder(withPos).map((m) => m.id)).toEqual(["a", "b", "c"]);
   });
 
   it("does not mutate input and leaves orgChartOrder interleaved", () => {

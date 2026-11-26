@@ -1,5 +1,4 @@
-// 運営名簿 — 運営メンバー全員の情報を並べる名簿ビュー。既定は「階層で見る」(#873: オーガナイザー →
-// リーダー → 各リーダーの配下を横並びの列で表示)、「表で見る」で従来の一覧（DataTable）。
+// 運営名簿 — 運営メンバー全員の情報をフラットな一覧（DataTable）で並べる名簿ビュー。
 // 「運営メンバー」タブ(/members: チーム別/組織図) がチーム軸・組織図軸の見せ方なのに対し、
 // こちらは 1 行 = 1 人で 氏名/ローマ字/学科/学年/役割/ステータス/紐付けアカウント/所属チーム/
 // 連絡先/メール を横並びで見渡す「名簿」ビュー。データ源は member-service (useMembersOverview)
@@ -16,7 +15,6 @@ import {
   FormField,
   ConfirmDialog,
   SkeletonLoader,
-  SegmentedControl,
   ErrorState,
   Menu,
   useToast,
@@ -33,8 +31,7 @@ import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { OrgMember } from "./contracts.ts";
 import { ROSTER_FILTER_OPTIONS, canRemind, hasMissingProfile, matchesRosterFilter, type RosterStatusFilter } from "./memberStatus.ts";
-import { buildRosterHierarchy, flattenRosterHierarchy } from "./rosterHierarchy.ts";
-import { RosterHierarchyView } from "./RosterHierarchyView.tsx";
+import { rosterOrder } from "./orgChartOrder.ts";
 import { buildRosterTable, exportRoster, type RosterExportFormat } from "./rosterExport.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import styles from "./members.module.css";
@@ -46,18 +43,12 @@ const PROFILE_FILTER_OPTIONS: SelectOption<ProfileFilter>[] = [
 ];
 const REMIND_CONCURRENCY = 4;
 
-export type RosterView = "hierarchy" | "table";
-const VIEW_OPTIONS = [
-  { value: "hierarchy" as const, label: "階層で見る", testId: "member-roster-view-hierarchy" },
-  { value: "table" as const, label: "表で見る", testId: "member-roster-view-table" },
-];
-
 function remindMessage(targets: OrgMember[]): string {
   const who = targets.length === 1 ? `「${targets[0]?.name ?? ""}」さん` : `${targets.length}人`;
   return `${who}に、未入力の項目を入力するよう通知を送ります。同じ人への通知は1日1回までです。`;
 }
 
-export function MemberRosterPage({ initialView = "hierarchy" }: { initialView?: RosterView } = {}): JSX.Element {
+export function MemberRosterPage(): JSX.Element {
   // 書き込みは app:members:edit + 編集範囲が メール名簿以外 以上 (members:roster_edit)。
   const { canEdit: canEditApp } = useAppCapability("members");
   const { can } = usePermissions();
@@ -74,7 +65,6 @@ export function MemberRosterPage({ initialView = "hierarchy" }: { initialView?: 
   const unlinkIdentity = useUnlinkIdentity();
   const membersApi = useMembersApi();
 
-  const [view, setView] = useState<RosterView>(initialView);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<RosterStatusFilter>("roster");
   const [profileFilter, setProfileFilter] = useState<ProfileFilter>("all");
@@ -115,26 +105,25 @@ export function MemberRosterPage({ initialView = "hierarchy" }: { initialView?: 
     return map;
   }, [members]);
 
-  // 表示順 = オーガナイザー → リーダー → 各リーダーの配下 → リーダー未設定(組織図順)。
-  // 状態・未入力・検索で絞った人だけを出し、リーダーの解決は名簿全体で行う(配下だけ合っても列は出る)。
-  // 既定は「在籍者(辞退以外)」。表で見る・書き出し・催促は flatten した同じ並び。
-  const hierarchy = useMemo(() => {
+  // 表示順 = 役職順(オーガナイザー→リーダー→メンバー、同じ役職内は組織図順)。ステータスで絞ってから
+  // 並べ替え、最後に検索で絞る(検索は順序を保つ)。既定は「在籍者(辞退以外)」。
+  const filteredMembers = useMemo(() => {
+    const byStatus = members.filter(
+      (m) => matchesRosterFilter(m.status, statusFilter) && (profileFilter === "all" || hasMissingProfile(m)),
+    );
+    const ordered = rosterOrder(byStatus);
     const q = search.trim().toLowerCase();
+    if (!q) return ordered;
     // 一覧に出る値 (人物プロフィール列は表示ラベル: 学年は「3年」) をそのまま検索対象にする。
-    const matchesSearch = (m: OrgMember) =>
-      !q ||
+    return ordered.filter((m) =>
       [
         m.name,
         m.roleTitle ?? "",
         `${m.lastNameKana ?? ""}${m.firstNameKana ?? ""}`,
         ...PROFILE_DISPLAY_COLUMNS.map((c) => c.value(m)),
-      ].some((v) => v.toLowerCase().includes(q));
-    return buildRosterHierarchy(
-      members,
-      (m) => matchesRosterFilter(m.status, statusFilter) && (profileFilter === "all" || hasMissingProfile(m)) && matchesSearch(m),
+      ].some((v) => v.toLowerCase().includes(q)),
     );
   }, [members, search, statusFilter, profileFilter]);
-  const filteredMembers = useMemo(() => flattenRosterHierarchy(hierarchy), [hierarchy]);
 
   const STATUS_FILTER_OPTIONS: SelectOption<RosterStatusFilter>[] = ROSTER_FILTER_OPTIONS;
 
@@ -200,7 +189,7 @@ export function MemberRosterPage({ initialView = "hierarchy" }: { initialView?: 
         title="運営名簿"
         description={
           canEdit
-            ? "運営メンバー全員の情報を表示します。カード（表では行）をクリックすると情報を編集できます"
+            ? "運営メンバー全員の情報を一覧で表示します。行をクリックすると情報を編集できます"
             : "運営メンバー全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
         }
         actions={
@@ -268,38 +257,20 @@ export function MemberRosterPage({ initialView = "hierarchy" }: { initialView?: 
         </p>
       ) : null}
 
-      <div className={styles.viewToggle}>
-        <SegmentedControl<RosterView>
-          aria-label="名簿の見せ方"
-          value={view}
-          onChange={setView}
-          options={VIEW_OPTIONS}
-          testId="member-roster-view"
-        />
-      </div>
-
-      {view === "hierarchy" ? (
-        <RosterHierarchyView
-          hierarchy={hierarchy}
-          teamsById={teamsById}
-          {...(canEdit ? { onOpen: openEditMember } : {})}
-        />
-      ) : (
-        <ListView
-          members={filteredMembers}
-          teamsById={teamsById}
-          accountLabels={accountLabels}
-          leaderNames={leaderNames}
-          readOnly={!canEdit}
-          onEdit={gate.guard(openEditMember)}
-          onDelete={gate.guard((m: OrgMember) => setConfirm(m))}
-          onLink={gate.guard((m: OrgMember) => setLinkDialog({ open: true, member: m }))}
-          onUnlink={gate.guard((m: OrgMember) => unlinkIdentity.mutate({ id: m.id, version: m.version }))}
-          onSendAccountMail={gate.guard(openAccountMail)}
-          canSendAccountMail={(m) => mailTargetOf(m) !== null}
-          {...(remind.isPending ? {} : { onRemind: gate.guard((m: OrgMember) => setRemindTargets([m])) })}
-        />
-      )}
+      <ListView
+        members={filteredMembers}
+        teamsById={teamsById}
+        accountLabels={accountLabels}
+        leaderNames={leaderNames}
+        readOnly={!canEdit}
+        onEdit={gate.guard(openEditMember)}
+        onDelete={gate.guard((m: OrgMember) => setConfirm(m))}
+        onLink={gate.guard((m: OrgMember) => setLinkDialog({ open: true, member: m }))}
+        onUnlink={gate.guard((m: OrgMember) => unlinkIdentity.mutate({ id: m.id, version: m.version }))}
+        onSendAccountMail={gate.guard(openAccountMail)}
+        canSendAccountMail={(m) => mailTargetOf(m) !== null}
+        {...(remind.isPending ? {} : { onRemind: gate.guard((m: OrgMember) => setRemindTargets([m])) })}
+      />
 
       <MemberFormDialog
         open={memberDialog.open}

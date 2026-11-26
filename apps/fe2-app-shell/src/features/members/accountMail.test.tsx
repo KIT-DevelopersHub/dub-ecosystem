@@ -79,7 +79,7 @@ describe("運営名簿 — アカウント発行メール", () => {
   it("紐付け成功 → 送信確認ダイアログ → 送る で API を呼び toast を出す", async () => {
     const api = makeApi();
     const user = userEvent.setup();
-    render(wrap(<MemberRosterPage initialView="table" />, api));
+    render(wrap(<MemberRosterPage />, api));
     await linkTo(user, "m1", "u1");
 
     const dialog = await screen.findByTestId("account-mail-dialog");
@@ -97,7 +97,7 @@ describe("運営名簿 — アカウント発行メール", () => {
   it("Gmail が無いメンバーを紐付けてもダイアログは出ない", async () => {
     const api = makeApi();
     const user = userEvent.setup();
-    render(wrap(<MemberRosterPage initialView="table" />, api));
+    render(wrap(<MemberRosterPage />, api));
     await linkTo(user, "m2", "u1");
     await waitFor(() => expect(api.linkIdentity).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId("members-link-dialog")).not.toBeInTheDocument());
@@ -107,7 +107,7 @@ describe("運営名簿 — アカウント発行メール", () => {
   it("行アクションは紐付け済み + Gmail ありの行だけに出て、押すとダイアログを開く", async () => {
     const api = makeApi();
     const user = userEvent.setup();
-    render(wrap(<MemberRosterPage initialView="table" />, api));
+    render(wrap(<MemberRosterPage />, api));
     await screen.findByTestId("members-account-mail-m3");
     expect(screen.queryByTestId("members-account-mail-m1")).not.toBeInTheDocument();
     expect(screen.queryByTestId("members-account-mail-m2")).not.toBeInTheDocument();
@@ -119,7 +119,7 @@ describe("運営名簿 — アカウント発行メール", () => {
   it("紐付け済みの人に Gmail を後から登録して保存すると送信確認を出す", async () => {
     const api = makeApi();
     const user = userEvent.setup();
-    render(wrap(<MemberRosterPage initialView="table" />, api));
+    render(wrap(<MemberRosterPage />, api));
     await user.click(await screen.findByTestId("members-edit-m4"));
     const form = await screen.findByTestId("members-form-dialog");
     await user.type(within(form).getByTestId("members-form-gmail"), "jiro.takahashi@gmail.com");
@@ -132,7 +132,7 @@ describe("運営名簿 — アカウント発行メール", () => {
   it("もともと Gmail がある人を編集して保存しても送信確認は出ない", async () => {
     const api = makeApi();
     const user = userEvent.setup();
-    render(wrap(<MemberRosterPage initialView="table" />, api));
+    render(wrap(<MemberRosterPage />, api));
     await user.click(await screen.findByTestId("members-edit-m3"));
     const form = await screen.findByTestId("members-form-dialog");
     await user.click(within(form).getByTestId("members-form-submit"));
@@ -144,7 +144,7 @@ describe("運営名簿 — アカウント発行メール", () => {
   it("@developershub.jp ではないアカウントに紐付けても送信確認は出ない", async () => {
     const api = makeApi();
     const user = userEvent.setup();
-    render(wrap(<MemberRosterPage initialView="table" />, api));
+    render(wrap(<MemberRosterPage />, api));
     await linkTo(user, "m1", "u5");
     await waitFor(() => expect(api.linkIdentity).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByTestId("members-link-dialog")).not.toBeInTheDocument());

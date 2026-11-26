@@ -441,7 +441,7 @@ describe("MemberRosterPage (運営名簿から編集)", () => {
 
   it("行クリックで編集ダイアログが開き、保存で updateMember を呼ぶ", async () => {
     const api = makeApi();
-    render(wrap(<MemberRosterPage initialView="table" />, api));
+    render(wrap(<MemberRosterPage />, api));
     await userEvent.click(await screen.findByText("山田太郎"));
     const dialog = await screen.findByTestId("members-form-dialog");
     expect(within(dialog).getByText("メンバーを編集")).toBeInTheDocument();
@@ -451,83 +451,18 @@ describe("MemberRosterPage (運営名簿から編集)", () => {
   });
 
   it("行内のボタン (紐付け) は編集ダイアログを開かない", async () => {
-    render(wrap(<MemberRosterPage initialView="table" />, makeApi()));
+    render(wrap(<MemberRosterPage />, makeApi()));
     await userEvent.click(await screen.findByTestId("members-link-m1"));
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
   });
 
   it("閲覧のみ: 行クリックでは何も開かず、編集ボタンは権限不足ダイアログを出す", async () => {
-    render(wrap(<MemberRosterPage initialView="table" />, makeApi(), viewerPermissions("members", ["identity:read", "members:roster_view"])));
+    render(wrap(<MemberRosterPage />, makeApi(), viewerPermissions("members", ["identity:read", "members:roster_view"])));
     await userEvent.click(await screen.findByText("山田太郎"));
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId("members-edit-m1"));
     expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
-  });
-});
-
-describe("MemberRosterPage — 階層で見る (#873)", () => {
-  const person = { ...P0, orgId: "o", status: "added" as const, teamIds: [], contact: null, identityUserId: null, version: 1, createdAt: "t", updatedAt: "t" };
-  const overview: MembersOverview = {
-    teams: [{ id: "t1", key: "dev", name: "開発", color: null, description: null }],
-    members: [
-      { ...person, id: "o1", name: "大島", roleTitle: "オーガナイザー", sortOrder: 1 },
-      { ...person, id: "o2", name: "小川", roleTitle: "代表", sortOrder: 2 },
-      { ...person, id: "l1", name: "林", roleTitle: "開発リーダー", teamIds: ["t1"], leaderId: "o1", sortOrder: 3 },
-      { ...person, id: "l2", name: "森", roleTitle: "広報リーダー", leaderId: "o2", sortOrder: 4 },
-      { ...person, id: "a1", name: "青木", roleTitle: "フロント担当", teamIds: ["t1"], leaderId: "l1", sortOrder: 5 },
-      { ...person, id: "b1", name: "馬場", roleTitle: null, leaderId: "l2", sortOrder: 6 },
-      { ...person, id: "f1", name: "藤井", roleTitle: null, sortOrder: 7 },
-    ],
-  };
-  const api = () => makeApi({ getOverview: () => Promise.resolve(overview) });
-
-  it("既定は階層: オーガナイザー横並び、リーダー列の下に配下、未設定は別列", async () => {
-    render(wrap(<MemberRosterPage />, api()));
-    const orgTier = await screen.findByTestId("member-roster-tier-organizer");
-    expect(within(orgTier).getByText("大島")).toBeInTheDocument();
-    expect(within(orgTier).getByText("小川")).toBeInTheDocument();
-    const col1 = screen.getByTestId("member-roster-column-l1");
-    expect(within(col1).getByText("林")).toBeInTheDocument();
-    expect(within(col1).getByText("青木")).toBeInTheDocument();
-    expect(within(col1).getByText("フロント担当")).toBeInTheDocument();
-    expect(within(col1).getAllByText("開発")).toHaveLength(2);
-    expect(within(screen.getByTestId("member-roster-column-l2")).getByText("馬場")).toBeInTheDocument();
-    const rest = screen.getByTestId("member-roster-column-unassigned");
-    expect(within(rest).getByText("リーダー未設定")).toBeInTheDocument();
-    expect(within(rest).getByText("藤井")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-  });
-
-  it("検索で絞っても配下はリーダーの列に残り、空の列は消える", async () => {
-    render(wrap(<MemberRosterPage />, api()));
-    await userEvent.type(await screen.findByTestId("member-roster-search"), "青木");
-    await waitFor(() => expect(screen.queryByTestId("member-roster-column-l2")).not.toBeInTheDocument());
-    expect(screen.queryByTestId("member-roster-tier-organizer")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("member-roster-column-unassigned")).not.toBeInTheDocument();
-    const col1 = screen.getByTestId("member-roster-column-l1");
-    expect(within(col1).getByText("青木")).toBeInTheDocument();
-    expect(screen.getByTestId("member-roster-card-l1")).toHaveAttribute("data-muted", "true");
-  });
-
-  it("カードのクリックで編集ダイアログが開く", async () => {
-    render(wrap(<MemberRosterPage />, api()));
-    await userEvent.click(await screen.findByTestId("member-roster-card-a1"));
-    const dialog = await screen.findByTestId("members-form-dialog");
-    expect(within(dialog).getByText("メンバーを編集")).toBeInTheDocument();
-  });
-
-  it("閲覧のみではカードを押せない", async () => {
-    render(wrap(<MemberRosterPage />, api(), viewerPermissions("members", ["identity:read", "members:roster_view"])));
-    const card = await screen.findByTestId("member-roster-card-a1");
-    expect(card.tagName).toBe("DIV");
-  });
-
-  it("「表で見る」で従来の表に切り替わる", async () => {
-    render(wrap(<MemberRosterPage />, api()));
-    await userEvent.click(await screen.findByTestId("member-roster-view-table"));
-    expect(await screen.findByRole("table")).toBeInTheDocument();
-    expect(screen.queryByTestId("member-roster-hierarchy")).not.toBeInTheDocument();
   });
 });
