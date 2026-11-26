@@ -339,10 +339,18 @@
   gap: var(--dub-space-2);
 }
 
-/* 班が 2 つ以上のチーム: カードを中身の幅まで広げ、班を横に並べる。 */
+/* 班が 2 つ以上のチーム: 班の数ぶんの幅をカードに取り、班を横 1 列に並べる。
+   中身の幅(max-content)任せにすると、配下の居ない班は細く見積もられて縦に積まれる。
+   画面より広い時だけ 100% に収め、班は折り返す。 */
 .orgCol.orgColWide {
-  flex: 0 1 auto;
+  --squad-w: 190px;
+  flex: 0 0 auto;
+  width: min(
+    100%,
+    calc(var(--squads) * var(--squad-w) + (var(--squads) - 1) * var(--dub-space-3) + 2 * var(--dub-space-3) + 4px)
+  );
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* ── 班 ─────────────────────────────────────────────────────────────
@@ -355,7 +363,7 @@
 }
 .squad {
   flex: 1 1 170px;
-  min-width: 160px;
+  min-width: 170px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

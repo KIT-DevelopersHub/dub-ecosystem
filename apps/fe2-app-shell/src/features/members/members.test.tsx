@@ -398,6 +398,56 @@ describe("MembersPage", () => {
     expect(screen.getByTestId("members-orgsquad-L2").getAttribute("aria-label")).toBe("中田班");
   });
 
+  // 本番の集客広報と同じ形: 役職(position)はほぼ未設定で roleTitle だけ。リーダー4人に配下は無く、
+  // メンバーの一部はオーガナイザーを leaderId に持つ。リーダーごとに 1 班ずつ、4 班が横 1 列に並ぶこと。
+  it("組織図 makes one 班 per leader even without reports (roleTitle-only, production shape)", async () => {
+    const p = { ...squadBase, teamIds: ["pr"], position: null };
+    const overview: MembersOverview = {
+      teams: [{ id: "pr", key: "pr", name: "集客広報", color: "#db2777", description: null }],
+      members: [
+        { ...p, id: "O1", name: "大西 修", roleTitle: "オーガナイザー", leaderId: null, sortOrder: 1 },
+        { ...p, id: "O2", name: "片山 美咲", roleTitle: "オーガナイザー", leaderId: null, sortOrder: 2 },
+        { ...p, id: "L1", name: "川口 隼", roleTitle: "リーダー", leaderId: null, sortOrder: 3 },
+        { ...p, id: "L2", name: "北村 楓", roleTitle: "リーダー", leaderId: null, sortOrder: 4 },
+        { ...p, id: "L3", name: "久保 蒼", roleTitle: "リーダー", leaderId: null, sortOrder: 5 },
+        { ...p, id: "L4", name: "小松 遥", roleTitle: "リーダー", leaderId: null, sortOrder: 6 },
+        { ...p, id: "M1", name: "斉藤 湊", roleTitle: "メンバー", leaderId: "O1", sortOrder: 7 },
+        { ...p, id: "M2", name: "坂本 杏", roleTitle: "メンバー", leaderId: "O1", sortOrder: 8 },
+        { ...p, id: "M3", name: "杉山 翔", roleTitle: "メンバー", leaderId: "O1", sortOrder: 9 },
+        { ...p, id: "M4", name: "関 美月", roleTitle: "メンバー", leaderId: null, sortOrder: 10 },
+        { ...p, id: "N1", name: "高木 陸斗", roleTitle: null, leaderId: null, sortOrder: 11 },
+        { ...p, id: "N2", name: "竹内 心", roleTitle: null, leaderId: null, sortOrder: 12 },
+        { ...p, id: "P1", name: "千葉 悠真", roleTitle: null, position: "member", leaderId: null, sortOrder: 13 },
+        { ...p, id: "P2", name: "土屋 七海", roleTitle: null, position: "member", leaderId: null, sortOrder: 14 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+
+    const row = screen.getByTestId("members-orgsquads-pr");
+    const squads = [...row.children];
+    expect(squads.map((e) => e.getAttribute("data-testid"))).toEqual([
+      "members-orgsquad-L1",
+      "members-orgsquad-L2",
+      "members-orgsquad-L3",
+      "members-orgsquad-L4",
+    ]);
+    expect(squads.map((e) => e.getAttribute("aria-label"))).toEqual(["川口班", "北村班", "久保班", "小松班"]);
+    // 各班のリーダーは 1 人ずつ(全員が 1 班にまとまらない)。
+    for (const id of ["L1", "L2", "L3", "L4"]) {
+      const chips = screen.getByTestId(`members-orgsquad-leaders-${id}`).querySelectorAll("[data-testid^='members-orgchip-']");
+      expect([...chips].map((e) => e.getAttribute("data-testid"))).toEqual([`members-orgchip-${id}`]);
+    }
+    // 班の数ぶんの幅をカードに渡す(中身の幅任せだと配下の無い班が縦に積まれる)。
+    const col = screen.getByTestId("members-orgcol-pr");
+    expect(col.style.getPropertyValue("--squads")).toBe("4");
+    // オーガナイザー・その配下・どのリーダーにもつかない人は班の外(カード上部)。
+    for (const id of ["O1", "O2", "M1", "M2", "M3", "M4", "N1", "N2", "P1", "P2"]) {
+      expect(within(row).queryByTestId(`members-orgchip-${id}`)).not.toBeInTheDocument();
+      expect(within(col).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    }
+  });
+
   it("組織図 keeps a team without leaders as the plain leaderId tree (no 班)", async () => {
     const overview: MembersOverview = {
       teams: [{ id: "net", key: "network", name: "ネットワーク", color: "#0891b2", description: null }],

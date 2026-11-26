@@ -228,7 +228,11 @@ function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] 
   const cls = [styles.orgCol, squads.length > 1 ? styles.orgColWide : ""].filter(Boolean).join(" ");
 
   return (
-    <div className={cls} style={{ ["--team" as string]: color } as CSSProperties} data-testid={`members-orgcol-${team.id}`}>
+    <div
+      className={cls}
+      style={{ ["--team" as string]: color, ["--squads" as string]: squads.length } as CSSProperties}
+      data-testid={`members-orgcol-${team.id}`}
+    >
       <div className={styles.colHead}>
         <div className={styles.colName}>{team.name}</div>
         {team.description ? <div className={styles.colDesc}>{team.description}</div> : null}

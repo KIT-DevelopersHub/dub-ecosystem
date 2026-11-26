@@ -4368,11 +4368,33 @@ function createMembersStore() {
     mk("member_e7", "村上 千尋", "広報リーダー", "added", ["team_pr"], 30, null, "メディア情報学科", "2年", null, "member_e2"),
     mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 31, null, "メディア情報学科", "2年", null, "member_e1"),
     mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 32, null, "メディア情報学科", "1年", null, "member_e8"),
+    // ネットワーク — 本番の集客広報と同じ形(position 未設定・役割は roleTitle だけ)の確認用。
+    // リーダー4人に配下は居ない / メンバー3人はオーガナイザーを leaderId に持つ / 役割も役職も無い人。
+    mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 33, null, "情報工学科", "3年"),
+    mk("member_n2", "片山 美咲", "オーガナイザー", "added", ["team_network"], 34, null, "情報工学科", "3年"),
+    mk("member_n3", "川口 隼", "リーダー", "added", ["team_network"], 35, null, "情報工学科", "2年"),
+    mk("member_n4", "北村 楓", "リーダー", "added", ["team_network"], 36, null, "電気電子工学科", "2年"),
+    mk("member_n5", "久保 蒼", "リーダー", "added", ["team_network"], 37, null, "情報工学科", "2年"),
+    mk("member_n6", "小松 遥", "リーダー", "added", ["team_network"], 38, null, "電気電子工学科", "2年"),
+    mk("member_n7", "斉藤 湊", "メンバー", "added", ["team_network"], 39, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n8", "坂本 杏", "メンバー", "added", ["team_network"], 40, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n9", "杉山 翔", "メンバー", "invited", ["team_network"], 41, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n10", "関 美月", "メンバー", "added", ["team_network"], 42, null, "電気電子工学科", "1年"),
+    mk("member_n11", "高木 陸斗", null, "added", ["team_network"], 43, null, "情報工学科", "1年"),
+    mk("member_n12", "竹内 心", null, "added", ["team_network"], 44, null, "情報工学科", "1年"),
+    mk("member_n13", "千葉 悠真", null, "added", ["team_network"], 45, null, "電気電子工学科", "1年"),
+    mk("member_n14", "土屋 七海", null, "added", ["team_network"], 46, null, "電気電子工学科", "1年"),
     // 辞退 — 名簿一覧では既定で隠れ、辞退者フィルタでのみ表示される確認用。
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 33),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 47),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 34, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 48, null, "情報工学科", "1年"),
   ];
+
+  // ネットワークは本番と同じく役職(position)未設定。最後の2人だけ position=member。
+  for (const mem of members) {
+    if (!mem.id.startsWith("member_n")) continue;
+    mem.position = mem.id === "member_n13" || mem.id === "member_n14" ? "member" : null;
+  }
 
   // フリガナ(読み仮名)の seed。参加届からの流入を模して 姓/名 の分割カナを各メンバーへ付与し、
   // 名簿一覧の「フリガナ」列・カナ検索・(fe7 側の)五十音ソートを実データで確認できるようにする。
