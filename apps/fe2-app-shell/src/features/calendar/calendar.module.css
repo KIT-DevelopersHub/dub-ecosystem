@@ -551,7 +551,13 @@
   border-radius: 8px;
   box-shadow: 0 24px 38px 3px rgba(0, 0, 0, 0.14), 0 9px 46px 8px rgba(0, 0, 0, 0.12), 0 11px 15px -7px rgba(0, 0, 0, 0.2);
   color: var(--dub-color-text-primary);
+  /* Never taller than the viewport (max-height is set inline): the bar stays, the body scrolls. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
+.floating > .panelBar { flex: none; }
+.floating > .panelBody { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .panelBar {
   display: flex;
   justify-content: flex-end;
@@ -579,6 +585,7 @@
 /* @dub/ui DatePicker draws its own icon; keep Chromium's native one clickable but invisible. */
 .dateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
 .timeField { width: 84px; }
+.durationField { width: 120px; }
 .labelField { width: 220px; max-width: 100%; }
 .whenDash { color: var(--dub-color-text-secondary); }
 .formError { color: var(--dub-color-danger-600); font-size: var(--dub-font-size-xs); }
@@ -725,16 +732,3 @@
   font-size: var(--dub-font-size-xs);
   line-height: 1.6;
 }
-
-/* Meeting dialog: up to three fields per row, wraps on narrow dialogs.
-   Own names: reusing .formRow/.dateField overrode the event form's icon grid. */
-.meetingFormRow {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
-  gap: var(--dub-space-4);
-}
-
-/* @dub/ui DatePicker draws its own icon; hide Chromium's native one (kept clickable). */
-.meetingDateField { display: block; }
-.meetingDateField input::-webkit-calendar-picker-indicator { opacity: 0; cursor: pointer; }
-

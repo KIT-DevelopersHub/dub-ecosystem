@@ -3,8 +3,8 @@
 // through the canonical task-service API, so they also show up in マイタスク/ガント.
 // No new backend: reads GET /api/v1/tasks (self-scoped), writes POST/PATCH/DELETE.
 // ミーティング (drive-share-service /meetings) are drawn alongside as their own calendars.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, ConfirmDialog, Icon, IconButton, Menu, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Button, ConfirmDialog, Icon, IconButton, Menu, Modal, SkeletonLoader, useMediaQuery, useToast } from "@dub/ui";
 import { keepPreviousData, useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { common, identity, meeting, task } from "@dub/types";
@@ -34,6 +34,7 @@ import {
   toCalendarItems,
   VACATION_TITLE,
   visibleDays,
+  withKind,
   type CalendarItem,
   type CalendarView,
   type EventDraft,
@@ -52,9 +53,18 @@ import { DayListPanel, DetailPanel, EventDialog, ItemTitleProvider, canRepeat, t
 import { MiniCalendar, MonthGrid, ScheduleList, TimeGrid, type SlotGhost } from "./CalendarViews.tsx";
 import { MeetingDetailDialog } from "./MeetingDetailDialog.tsx";
 import { MeetingFilter } from "./MeetingFilter.tsx";
-import { MeetingFormDialog } from "./MeetingFormDialog.tsx";
+import { MeetingForm } from "./MeetingForm.tsx";
 import { useUserPref } from "./calendar-prefs";
-import { isMeetingTargetVisible, isMeetingVisible, meetingFormFromDraft, parseMeetingTargetChoices, type MeetingFormValues, type MeetingTargetChoices } from "./meeting-form";
+import {
+  emptyMeetingForm,
+  isMeetingTargetVisible,
+  isMeetingVisible,
+  meetingFormFromDraft,
+  meetingToForm,
+  parseMeetingTargetChoices,
+  type MeetingFormValues,
+  type MeetingTargetChoices,
+} from "./meeting-form";
 import { formatOccurrence, meetingTasks, type MeetingOccurrence } from "./meeting-occurrences";
 import { ItemDragProvider, useItemDrag } from "./useItemDrag.tsx";
 import { useMeetingMutations, useMeetingTargetsQuery, useMeetingsAccess, useMeetingsQuery } from "./useMeetings.tsx";
@@ -125,7 +135,9 @@ export const MEETINGS_FEATURE_MARKER = "cal-meet-v1";
 const DRIVE_SETTINGS_URL = "/driveshare?setting=google-account";
 
 type Panel =
-  | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null; recurrence: meeting.MeetingRecurrence }
+  // `meeting` = the ミーティング tab's values (set once the tab registers a real meeting).
+  | { kind: "create"; draft: EventDraft; ghost: SlotGhost | null; recurrence: meeting.MeetingRecurrence; meeting: MeetingFormValues | null }
+  | { kind: "meetingEdit"; editing: meeting.Meeting; form: MeetingFormValues }
   | { kind: "edit"; item: CalendarItem; draft: EventDraft }
   | { kind: "detail"; item: CalendarItem; anchor: AnchorRect | null }
   | { kind: "day"; day: number; anchor: AnchorRect | null };
@@ -214,7 +226,6 @@ export function CalendarScreen(): JSX.Element {
     (id: string) => isMeetingTargetVisible(id, targetChoices, targetState, createdTargets),
     [targetChoices, targetState, createdTargets],
   );
-  const [meetingForm, setMeetingForm] = useState<{ editing: meeting.Meeting | null; initial?: MeetingFormValues } | null>(null);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingOccurrence | null>(null);
   const account = meetingsQ.data?.account ?? null;
   const accountReady = !!account?.email && account.calendarReady;
@@ -479,18 +490,27 @@ export function CalendarScreen(): JSX.Element {
     setView("day");
   };
   const openCreate = (draft: EventDraft, ghost: SlotGhost | null = null) => {
-    if (canWrite) setPanel({ kind: "create", draft, ghost, recurrence: "none" });
+    if (canWrite) setPanel({ kind: "create", draft, ghost, recurrence: "none", meeting: null });
   };
   const openCreateDialog = () => openCreate(nextHourDraft(anchorDay));
+  // 「ミーティングを設定」 = the same 作成 dialog, opened on its ミーティング tab.
+  const openMeetingDialog = () =>
+    setPanel({ kind: "create", draft: withKind(nextHourDraft(anchorDay), "meeting"), ghost: null, recurrence: "none", meeting: emptyMeetingForm() });
+  /** A 作成 draft change; landing on the ミーティング tab starts its form from what was typed. */
+  const changeCreateDraft = (p: Extract<Panel, { kind: "create" }>, draft: EventDraft) =>
+    setPanel({
+      ...p,
+      draft,
+      meeting: p.meeting ?? (repeatOffered && draft.kind === "meeting" ? meetingFormFromDraft(draft, p.recurrence, targets) : null),
+    });
   const selectItem = (item: CalendarItem, anchor: AnchorRect) => {
     if (isMeetingTask(item.task)) {
       setPanel(null);
       setSelectedMeeting(meetingOcc.byId.get(item.task.id) ?? null);
     } else setPanel({ kind: "detail", item, anchor });
   };
-  const submitMeeting = (body: meeting.CreateMeetingRequest) => {
-    const editing = meetingForm?.editing ?? null;
-    setMeetingForm(null);
+  const submitMeeting = (body: meeting.CreateMeetingRequest, editing: meeting.Meeting | null) => {
+    setPanel(null);
     // The calendar just written to is shown, even if it was unticked (it lands where the user looks).
     const hidden = (body.targets ?? []).filter((t) => t.kind !== "person" && !isTargetVisible(t.id)).map((t) => t.id);
     if (hidden.length > 0) setTargetChoices((prev) => ({ ...prev, ...Object.fromEntries(hidden.map((id) => [id, true])) }));
@@ -576,7 +596,7 @@ export function CalendarScreen(): JSX.Element {
   // Google's single-key shortcuts: t 今日 / j,n 次 / k,p 前 / d w m a 表示 / c 作成.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target) || panel || meetingForm || selectedMeeting || meetingMove || dragging) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target) || panel || selectedMeeting || meetingMove || dragging) return;
       const k = e.key.toLowerCase();
       if (k === "t") setAnchorDay(today);
       else if (k === "j" || k === "n") setAnchorDay((a) => shiftAnchor(view, a, 1));
@@ -589,7 +609,7 @@ export function CalendarScreen(): JSX.Element {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [panel, view, today, anchorDay, canWrite, meetingForm, selectedMeeting, meetingMove, dragging]);
+  }, [panel, view, today, anchorDay, canWrite, selectedMeeting, meetingMove, dragging]);
 
   const meetingNotice = !access.canView ? null : meetingsQ.isError ? (
     <div className={styles.meetingNotice} role="alert" data-testid="calendar-meetings-error">
@@ -748,7 +768,7 @@ export function CalendarScreen(): JSX.Element {
                     variant="secondary"
                     size="sm"
                     iconLeft={<Icon name="plus" />}
-                    onClick={() => setMeetingForm({ editing: null })}
+                    onClick={openMeetingDialog}
                     disabled={!accountReady || createMeeting.isPending}
                     loading={createMeeting.isPending}
                     testId="calendar-meetings-create"
@@ -898,17 +918,38 @@ export function CalendarScreen(): JSX.Element {
             editing={false}
             draft={panel.draft}
             labels={labels}
-            onChange={(draft) => setPanel({ ...panel, draft })}
+            onChange={(draft) => changeCreateDraft(panel, draft)}
             onSave={() => {
-              setPanel(null);
-              // A repeating 予定 is a 定例ミーティング: hand what was typed to the meeting form.
+              // A repeating 予定 is a 定例ミーティング: continue on the ミーティング tab with what was typed.
               if (repeatOffered && panel.recurrence !== "none" && canRepeat(panel.draft)) {
-                setMeetingForm({ editing: null, initial: meetingFormFromDraft(panel.draft, panel.recurrence, targets) });
-              } else createMut.mutate(panel.draft);
+                setPanel({ ...panel, draft: withKind(panel.draft, "meeting"), meeting: meetingFormFromDraft(panel.draft, panel.recurrence, targets) });
+              } else {
+                setPanel(null);
+                createMut.mutate(panel.draft);
+              }
             }}
             onClose={close}
             saving={createMut.isPending}
             {...(repeatOffered ? { repeat: { value: panel.recurrence, onChange: (recurrence) => setPanel({ ...panel, recurrence }) } } : {})}
+            {...(repeatOffered && panel.meeting
+              ? {
+                  meetingForm: (kindSwitch: ReactNode) => (
+                    <MeetingForm
+                      form={panel.meeting!}
+                      onChange={(m) => setPanel({ ...panel, meeting: m })}
+                      editing={null}
+                      targets={targets}
+                      people={meetingPeople}
+                      targetsLoading={targetsQ.isPending}
+                      accountEmail={account?.email ?? null}
+                      // Tabs other than ミーティング need 予定 write permission.
+                      kindSwitch={canWrite ? kindSwitch : null}
+                      onSubmit={(body) => submitMeeting(body, null)}
+                      onCancel={close}
+                    />
+                  ),
+                }
+              : {})}
           />
         )}
 
@@ -967,7 +1008,7 @@ export function CalendarScreen(): JSX.Element {
             onClose={() => setSelectedMeeting(null)}
             onEdit={(m) => {
               setSelectedMeeting(null);
-              setMeetingForm({ editing: m });
+              setPanel({ kind: "meetingEdit", editing: m, form: meetingToForm(m) });
             }}
             onDelete={(m) => {
               setSelectedMeeting(null);
@@ -981,18 +1022,20 @@ export function CalendarScreen(): JSX.Element {
           />
         )}
 
-        {access.canEdit && (
-          <MeetingFormDialog
-            open={meetingForm != null}
-            editing={meetingForm?.editing ?? null}
-            initial={meetingForm?.initial ?? null}
-            targets={targets}
-            people={meetingPeople}
-            targetsLoading={targetsQ.isPending}
-            accountEmail={account?.email ?? null}
-            onClose={() => setMeetingForm(null)}
-            onSubmit={submitMeeting}
-          />
+        {panel?.kind === "meetingEdit" && access.canEdit && (
+          <Modal open onClose={close} title="ミーティングを編集" size="md" testId="calendar-meeting-edit-dialog">
+            <MeetingForm
+              form={panel.form}
+              onChange={(form) => setPanel({ ...panel, form })}
+              editing={panel.editing}
+              targets={targets}
+              people={meetingPeople}
+              targetsLoading={targetsQ.isPending}
+              accountEmail={account?.email ?? null}
+              onSubmit={(body) => submitMeeting(body, panel.editing)}
+              onCancel={close}
+            />
+          </Modal>
         )}
 
         <ConfirmDialog

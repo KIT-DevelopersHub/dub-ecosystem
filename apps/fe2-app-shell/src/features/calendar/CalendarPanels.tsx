@@ -82,7 +82,9 @@ const MARGIN = 8;
 const BOTTOM_MARGIN = 48;
 
 /** Fixed panel placed beside `anchor` (right, else left, else centered), clamped
- *  to the viewport. Closes on Escape and on a pointer-down outside it. */
+ *  to the viewport — never taller than it: the body scrolls under a fixed action bar.
+ *  Re-places itself when its content or the window resizes. Closes on Escape and on a
+ *  pointer-down outside it. */
 export function Floating({
   anchor,
   width,
@@ -99,29 +101,40 @@ export function Floating({
   children: ReactNode;
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const w = Math.min(width, vw - MARGIN * 2);
-    const h = el.offsetHeight;
-    let left: number;
-    let top: number;
-    if (!anchor) {
-      left = (vw - w) / 2;
-      top = Math.max(MARGIN, (vh - h) / 3);
-    } else {
-      if (anchor.right + GAP + w <= vw - MARGIN) left = anchor.right + GAP;
-      else if (anchor.left - GAP - w >= MARGIN) left = anchor.left - GAP - w;
-      else left = (vw - w) / 2;
-      top = anchor.top;
-    }
-    top = Math.max(MARGIN, Math.min(top, vh - h - BOTTOM_MARGIN));
-    left = Math.max(MARGIN, Math.min(left, vw - w - MARGIN));
-    setPos({ left, top });
+    const place = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const maxHeight = Math.max(0, vh - MARGIN - BOTTOM_MARGIN);
+      const w = Math.min(width, vw - MARGIN * 2);
+      const h = Math.min(el.scrollHeight, maxHeight);
+      let left: number;
+      let top: number;
+      if (!anchor) {
+        left = (vw - w) / 2;
+        top = Math.max(MARGIN, (vh - h) / 3);
+      } else {
+        if (anchor.right + GAP + w <= vw - MARGIN) left = anchor.right + GAP;
+        else if (anchor.left - GAP - w >= MARGIN) left = anchor.left - GAP - w;
+        else left = (vw - w) / 2;
+        top = anchor.top;
+      }
+      top = Math.max(MARGIN, Math.min(top, vh - h - BOTTOM_MARGIN));
+      left = Math.max(MARGIN, Math.min(left, vw - w - MARGIN));
+      setPos((p) => (p && p.left === left && p.top === top && p.maxHeight === maxHeight ? p : { left, top, maxHeight }));
+    };
+    place();
+    window.addEventListener("resize", place);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    ro?.observe(el);
+    return () => {
+      window.removeEventListener("resize", place);
+      ro?.disconnect();
+    };
   }, [anchor, width]);
 
   useEffect(() => {
@@ -149,6 +162,7 @@ export function Floating({
       style={{
         width,
         maxWidth: `calc(100vw - ${MARGIN * 2}px)`,
+        maxHeight: pos?.maxHeight ?? `calc(100vh - ${MARGIN + BOTTOM_MARGIN}px)`,
         left: pos?.left ?? 0,
         top: pos?.top ?? 0,
         visibility: pos ? "visible" : "hidden",
@@ -186,6 +200,12 @@ const KIND_OPTIONS: SegmentedOption<ItemKind>[] = ITEM_KINDS.map((k) => ({
   icon: KIND_ICON[k],
   testId: `calendar-kind-${k}`,
 }));
+
+/** The 作成 dialog's 種類 tabs (予定 / ミーティング / 休暇 / リハーサル). Shared by EventForm and
+ *  the ミーティング form so switching tabs keeps the same dialog. */
+export function KindSwitch({ value, onChange }: { value: ItemKind; onChange: (k: ItemKind) => void }): JSX.Element {
+  return <SegmentedControl options={KIND_OPTIONS} value={value} onChange={onChange} size="sm" aria-label="種類" testId="calendar-kind-switch" />;
+}
 
 /** Label choices; keeps a label whose role is gone (or not loaded yet) selectable. */
 function labelOptions(labels: readonly CalendarLabel[], current: string): { value: string; label: string }[] {
@@ -266,14 +286,7 @@ export function EventForm({
           testId="calendar-form-title"
         />
       </span>
-      <SegmentedControl
-        options={KIND_OPTIONS}
-        value={draft.kind}
-        onChange={(k) => onChange(withKind(draft, k))}
-        size="sm"
-        aria-label="種類"
-        testId="calendar-kind-switch"
-      />
+      <KindSwitch value={draft.kind} onChange={(k) => onChange(withKind(draft, k))} />
 
       <div className={styles.formRow}>
         <span className={styles.formRowIcon}>
@@ -432,7 +445,9 @@ export function EventForm({
   );
 }
 
-/** Create / edit dialog — the standard @dub/ui Modal (slot click, 作成, 編集). */
+/** Create / edit dialog — the standard @dub/ui Modal (slot click, 作成, ミーティングを設定, 編集).
+ *  `meetingForm` = the ミーティング tab registers a real meeting: given the tabs, it renders the
+ *  one MeetingForm in this same dialog (absent = the tab stays a plain 予定). */
 export function EventDialog({
   editing,
   draft,
@@ -442,6 +457,7 @@ export function EventDialog({
   onClose,
   saving,
   repeat,
+  meetingForm,
 }: {
   editing: boolean;
   draft: EventDraft;
@@ -451,16 +467,22 @@ export function EventDialog({
   onClose: () => void;
   saving: boolean;
   repeat?: RepeatChoice;
+  meetingForm?: (kindSwitch: ReactNode) => ReactNode;
 }): JSX.Element {
+  const meetingTab = !editing && draft.kind === "meeting" && meetingForm;
   return (
     <Modal
       open
       onClose={onClose}
-      title={editing ? "予定を編集" : "予定を作成"}
+      title={editing ? "予定を編集" : meetingTab ? "ミーティングを作成" : "予定を作成"}
       size="md"
       testId={editing ? "calendar-edit-dialog" : "calendar-create-panel"}
     >
-      <EventForm draft={draft} labels={labels} onChange={onChange} onSubmit={onSave} onCancel={onClose} saving={saving} {...(repeat ? { repeat } : {})} />
+      {meetingTab ? (
+        meetingForm(<KindSwitch value={draft.kind} onChange={(k) => onChange(withKind(draft, k))} />)
+      ) : (
+        <EventForm draft={draft} labels={labels} onChange={onChange} onSubmit={onSave} onCancel={onClose} saving={saving} {...(repeat ? { repeat } : {})} />
+      )}
     </Modal>
   );
 }
