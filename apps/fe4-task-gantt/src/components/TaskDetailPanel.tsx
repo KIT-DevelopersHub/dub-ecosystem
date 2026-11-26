@@ -74,6 +74,8 @@ export interface TaskDetailPanelProps {
   fieldErrors?: Record<string, string>;
   canWrite: boolean;
   canDelete: boolean;
+  /** #881: shown at the top when the task is read-only for this viewer (not assignee/creator). */
+  readOnlyHint?: string;
   /** Debounce window (ms) before an edit auto-saves. Defaults to {@link AUTOSAVE_DEBOUNCE_MS};
    *  tests override it (e.g. 0) to assert the save synchronously. */
   autosaveDebounceMs?: number;
@@ -101,6 +103,7 @@ export function TaskDetailPanel({
   fieldErrors,
   canWrite,
   canDelete,
+  readOnlyHint,
   autosaveDebounceMs = AUTOSAVE_DEBOUNCE_MS,
 }: TaskDetailPanelProps) {
   const [title, setTitle] = useState(t.title);
@@ -272,6 +275,11 @@ export function TaskDetailPanel({
         <div className={styles.panelHeadInfo}>
           <TaskStatusBadge status={statusLockedToChildren ? displayStatus : t.status} />
         </div>
+        {readOnlyHint && (
+          <p className={styles.readOnlyHint} role="note" data-testid="fe4-detail-readonly-hint">
+            {readOnlyHint}
+          </p>
+        )}
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-detail-title">

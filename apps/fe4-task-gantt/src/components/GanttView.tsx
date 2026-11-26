@@ -136,6 +136,11 @@ export interface GanttViewProps {
    *  手動 mode only. Absent ⇒ a group drag falls back to a single-row `onReorder`. */
   onBulkReorderTo?: (ids: readonly common.TaskId[], draggedId: common.TaskId, overId: common.TaskId) => void;
   canWrite?: boolean;
+  /** #881: may this bar be moved/resized? (assignee/creator or task:edit_all; a parent needs its
+   *  whole subtree). Absent ⇒ every bar follows `canWrite`. A false bar still opens detail. */
+  canEditBar?: (taskId: common.TaskId) => boolean;
+  /** Tooltip suffix on a bar `canEditBar` refuses. */
+  readOnlyBarHint?: string;
   /** 指定時は親タスクの開閉状態をこのイベントの表示設定として保存・復元する。 */
   openStateKey?: common.EventId;
   /** teamId -> チーム名（CSV 書き出し用）。無ければ teamLegend の名前を使う。 */
@@ -322,6 +327,8 @@ export function GanttView({
   onBulkMoveVertical,
   onBulkReorderTo,
   canWrite = true,
+  canEditBar,
+  readOnlyBarHint,
   openStateKey,
   teamNameById,
 }: GanttViewProps) {
@@ -345,6 +352,7 @@ export function GanttView({
   const [presenting, setPresenting] = useState(false);
   // 拡大中は編集不可（editing）・タップで詳細も開かない（interactive）＝純粋な閲覧。
   const editing = canWrite && !presenting;
+  const barEditable = (taskId: common.TaskId): boolean => editing && (canEditBar ? canEditBar(taskId) : true);
   const interactive = !presenting;
   // ---- marquee multi-select (範囲ドラッグ) ----
   // The set of bars selected by a marquee (or additive shift/⌘ marquee). Bulk delete
@@ -827,7 +835,7 @@ export function GanttView({
 
   // ---- bar pointer session (move + resize + click-to-open) ----
   const beginDrag = (e: React.PointerEvent, bar: TimelineBar, mode: DragMode) => {
-    if (!editing || !onSchedule) {
+    if (!barEditable(bar.taskId) || !onSchedule) {
       // read-only: a tap still opens detail — but NOT in the 拡大 viewing mode
       // (interactive=false), which is strictly look-only.
       if (mode === "move" && interactive) onSelect?.(bar.taskId);
@@ -1541,10 +1549,12 @@ export function GanttView({
                   // mix instead of one flat progress fill, plus a "n/m 完了" count.
                   const prog = effectiveChildProgressById.get(b.taskId);
                   const countText = prog ? `${prog.doneCount}/${prog.total} 完了` : null;
-                  const barTitle = prog
-                    ? `${title} — 子孫タスク ${prog.doneCount}/${prog.total} 完了` +
-                      (prog.inProgressCount ? `・進行中 ${prog.inProgressCount}` : "")
-                    : title;
+                  const locked = editing && !barEditable(b.taskId);
+                  const barTitle =
+                    (prog
+                      ? `${title} — 子孫タスク ${prog.doneCount}/${prog.total} 完了` +
+                        (prog.inProgressCount ? `・進行中 ${prog.inProgressCount}` : "")
+                      : title) + (locked && readOnlyBarHint ? `（${readOnlyBarHint}）` : "");
                   return (
                     <div
                       key={b.taskId}
@@ -1554,6 +1564,7 @@ export function GanttView({
                       data-testid={`fe4-gantt-bar-${b.taskId}`}
                       data-child-done={prog ? prog.doneCount : undefined}
                       data-child-total={prog ? prog.total : undefined}
+                      data-readonly={locked ? "true" : undefined}
                       onPointerDown={(e) => beginDrag(e, b, "move")}
                       {...(selectedIds.has(b.taskId) ? { "data-fe4-keep-selection": "true" } : {})}
                     >
@@ -1575,7 +1586,7 @@ export function GanttView({
                       ) : (
                         <div className={styles.barProgress} style={{ width: `${b.progressPercent}%` }} aria-hidden />
                       )}
-                      {editing && onSchedule && (
+                      {barEditable(b.taskId) && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleL}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-l`}
@@ -1593,7 +1604,7 @@ export function GanttView({
                           )}
                         </span>
                       )}
-                      {editing && onSchedule && (
+                      {barEditable(b.taskId) && onSchedule && (
                         <span
                           className={styles.barHandle + " " + styles.barHandleR}
                           data-testid={`fe4-gantt-bar-${b.taskId}-rz-r`}
