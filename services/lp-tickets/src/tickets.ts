@@ -3,7 +3,7 @@
 import { DubError, errors, type FieldError } from "@dub/errors";
 import { consoleSink, type LogLevel } from "@dub/observability";
 import { lp, lpTickets } from "@dub/types";
-import { TicketDelivery, jstDay, type DeliverySummary, type PublicPass } from "./delivery";
+import { TicketDelivery, jstDay, refundMailOf, type DeliverySummary, type PublicPass } from "./delivery";
 import { issuePreviewToken, verifyPreviewToken } from "./preview-token";
 import { StripeRequestError, stripeId, toCheckoutSession, verifyStripeSignature, type CheckoutSession } from "./stripe";
 import { ordersCsv } from "./ticket-csv";
@@ -832,11 +832,12 @@ export class TicketService {
     });
 
     if (order.amountJpy === 0) {
-      if (!(await this.repo.markOrderRefunded(id, this.deps.now()))) {
+      const now = this.deps.now();
+      if (!(await this.repo.markOrderRefunded(id, now, refundMailOf(id, now)))) {
         throw refundRefused("not_refundable", "この注文は返金・取消できません", { status: order.status });
       }
       log("warn", "lp ticket free order cancelled", { orderId: id, by: ctx.userId });
-      await this.delivery.onRefunded(id);
+      this.delivery.onRefunded(id);
       return done("cancelled");
     }
 
@@ -867,7 +868,8 @@ export class TicketService {
     }
     log("warn", "lp ticket refund requested", { orderId: id, by: ctx.userId, refundId: refund.id, refundStatus: refund.status });
     if (refund.status === "succeeded") {
-      if (await this.repo.markOrderRefunded(id, this.deps.now())) await this.delivery.onRefunded(id);
+      const now = this.deps.now();
+      if (await this.repo.markOrderRefunded(id, now, refundMailOf(id, now))) this.delivery.onRefunded(id);
       return done("refunded");
     }
     return done("refund_pending");
@@ -1076,6 +1078,7 @@ export class TicketService {
     }
     if (type === "charge.dispute.closed") {
       const status = typeof obj.status === "string" ? obj.status : "";
+      // Lost chargeback: the card company returned the money, so no refund notice from us.
       if (status === "lost") await this.repo.markOrderRefunded(order.id, this.deps.now());
       // warning_closed = an inquiry that never became a chargeback: the money stayed with us.
       else if (
@@ -1093,7 +1096,8 @@ export class TicketService {
       log("info", "lp ticket partial refund: order unchanged", { orderId: order.id, amount, refunded });
       return;
     }
-    if (await this.repo.markOrderRefunded(order.id, this.deps.now())) await this.delivery.onRefunded(order.id);
+    const now = this.deps.now();
+    if (await this.repo.markOrderRefunded(order.id, now, refundMailOf(order.id, now))) this.delivery.onRefunded(order.id);
   }
 
   /** Stripe webhook (raw body). Bad / missing signature → 400. Unknown events / orders / other mode → ignored. */

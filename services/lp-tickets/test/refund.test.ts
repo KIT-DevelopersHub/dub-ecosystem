@@ -3,8 +3,13 @@ import { describe, it, expect } from "vitest";
 import { lpTickets } from "@dub/types";
 import type { Mailer, OutboundMail } from "../src/mailer";
 import { createStripeClient, signStripePayload } from "../src/stripe";
-import type { LpTicketCoupon, LpTicketRefundResponse, LpTicketTypeSummary } from "../src/types";
-import { get, makeApp, send, type RepoKind } from "./harness";
+import { createDbClient } from "@dub/db";
+import { memoryD1 } from "../../../infra/d1/src/node-d1";
+import { createD1TicketRepo } from "../src/d1-repo";
+import { OUTBOX_MAX_ATTEMPTS, OUTBOX_TRANSIENT_RETRY_MS, TicketDelivery } from "../src/delivery";
+import type { MailResult } from "../src/mailer";
+import type { LpTicketCoupon, LpTicketRefundResponse, LpTicketRepo, LpTicketTypeSummary, OutboxRow } from "../src/types";
+import { CHECKIN_SQL, DELIVERY_SQL, INIT_SQL, get, makeApp, send, type RepoKind } from "./harness";
 
 const body = async <T>(res: Response): Promise<T> => (await res.json()) as T;
 const INTERNAL = { "x-dub-internal": "1" };
@@ -80,14 +85,26 @@ const chargeRefunded = (pi: string) => ({
 });
 
 describe.each<RepoKind>(["memory", "d1"])("lp tickets refund (%s repo)", (kind) => {
-  async function setup(opts: { stripe?: ReturnType<typeof fakeStripe> | null; publish?: boolean } = {}) {
+  async function setup(
+    opts: { stripe?: ReturnType<typeof fakeStripe> | null; publish?: boolean; mailer?: Mailer | null; repo?: LpTicketRepo } = {},
+  ) {
     const stripe = opts.stripe === undefined ? fakeStripe() : opts.stripe;
     const mail = recordingMailer();
+    // The send right after a refund runs in waitUntil (defer); every request here waits for it.
+    const deferred: Promise<unknown>[] = [];
     const h = await makeApp(kind, "edit", opts.publish === false ? [] : ["lp:publish"], {
       stripe: stripe ? stripe.client : null,
       stripeWebhookSecret: WHSEC,
-      mailer: mail.mailer,
+      mailer: opts.mailer === undefined ? mail.mailer : opts.mailer,
+      defer: (p) => void deferred.push(p),
+      ...(opts.repo ? { repo: opts.repo } : {}),
     });
+    const rawFetch = h.app.fetch.bind(h.app);
+    h.app.fetch = (async (...a: Parameters<typeof rawFetch>) => {
+      const res = await rawFetch(...a);
+      while (deferred.length > 0) await Promise.all(deferred.splice(0));
+      return res;
+    }) as typeof h.app.fetch;
     expect((await h.app.fetch(send("POST", "/lp/tickets/enabled", { enabled: true }))).status).toBe(200);
     const res = await h.app.fetch(send("POST", "/lp/tickets/types", { name: "一般", description: "", priceJpy: 3000, capacity: 2, active: true }));
     const t = await body<LpTicketTypeSummary>(res);
@@ -179,6 +196,125 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets refund (%s repo)", (kind) 
     expect((await broken.app.fetch(refundReq(id))).status).toBe(200);
     expect((await repo.getOrder(SITE, id))!.status).toBe("refunded");
   });
+
+  const refundRows = async (repo: LpTicketRepo, id: string): Promise<OutboxRow[]> =>
+    (await repo.listOrderOutbox(id)).filter((r) => r.kind === "buyer_refund");
+  /** Order mails go out; the refund notice is held (Resend down), so its queued row stays visible. */
+  const refundHeld: Mailer = {
+    send: async (_m, key) =>
+      key.endsWith(":buyer_refund") ? { ok: false, failure: "transient", error: "resend_down" } : { ok: true, id: "re_order" },
+  };
+  const queuedOnce = async (repo: LpTicketRepo, id: string) => {
+    const rows = await refundRows(repo, id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: `${id}:buyer_refund`, orderId: id, kind: "buyer_refund", status: "pending", attempts: 0, createdAt: NOW });
+  };
+
+  it("outbox: each of the 3 refund paths queues the notice exactly once, in the refund itself (UNIQUE + changes() guard)", async () => {
+    const stripe = fakeStripe(() => ({ status: 200, json: { id: "re_3", status: "pending", amount: 3000 } }));
+    const { app, repo, buyPaid, buyFree } = await setup({ stripe, mailer: refundHeld });
+    // 1) 0 円の取消
+    const free = await buyFree();
+    expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(free)))).result).toBe("cancelled");
+    await app.fetch(refundReq(free)); // 409
+    await queuedOnce(repo, free);
+    // 2) charge.refunded（refund_pending の後・リプレイ込み）
+    const late = await buyPaid();
+    expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(late)))).result).toBe("refund_pending");
+    expect(await refundRows(repo, late)).toEqual([]);
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    await queuedOnce(repo, late);
+  });
+
+  it("outbox: an immediate Stripe refund queues once; the charge.refunded that follows adds nothing", async () => {
+    const { app, repo, buyPaid } = await setup({ mailer: refundHeld });
+    const id = await buyPaid();
+    expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(id)))).result).toBe("refunded");
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    await queuedOnce(repo, id);
+  });
+
+  it("outbox: a lost chargeback refunds the order without a refund notice (and a later charge.refunded adds none)", async () => {
+    const { app, repo, buyPaid } = await setup();
+    const id = await buyPaid();
+    const dispute = (type: string, status?: string) => ({
+      id: `evt_${type}_${status ?? ""}`,
+      type,
+      data: { object: { id: "dp_1", charge: "ch_1", payment_intent: "pi_cs_test_0", livemode: false, ...(status ? { status } : {}) } },
+    });
+    await webhook(app, dispute("charge.dispute.created"));
+    await webhook(app, dispute("charge.dispute.closed", "lost"));
+    expect((await repo.getOrder(SITE, id))!.status).toBe("refunded");
+    expect(await refundRows(repo, id)).toEqual([]);
+    // A charge.refunded that arrives after it changes nothing, so it queues nothing either.
+    await webhook(app, chargeRefunded("pi_cs_test_0"));
+    expect(await refundRows(repo, id)).toEqual([]);
+  });
+
+  it("retry: a failed send stays pending and the drain sends it later with the same Idempotency-Key", async () => {
+    const replies: MailResult[] = [];
+    const keys: string[] = [];
+    const flaky: Mailer = {
+      send: async (_m, key) => {
+        keys.push(key);
+        return replies.shift() ?? { ok: true, id: "re_ok" };
+      },
+    };
+    const { app, repo, clock, deps, buyFree } = await setup({ mailer: flaky });
+    const id = await buyFree();
+    keys.length = 0;
+    replies.push({ ok: false, failure: "transient", error: "resend_5xx" });
+    expect((await app.fetch(refundReq(id))).status).toBe(200); // the immediate send fails; the refund does not
+    const [row] = await refundRows(repo, id);
+    expect(row).toMatchObject({ status: "pending", attempts: 0, lastError: "resend_5xx" });
+    expect(Date.parse(row!.nextAttemptAt) - Date.parse(NOW)).toBe(OUTBOX_TRANSIENT_RETRY_MS);
+    const delivery = new TicketDelivery(deps);
+    expect((await delivery.drainPass()).mailSent).toBe(0); // not due yet
+    clock.set(new Date(Date.parse(NOW) + OUTBOX_TRANSIENT_RETRY_MS).toISOString());
+    expect((await delivery.drainPass()).mailSent).toBe(1);
+    expect((await refundRows(repo, id))[0]).toMatchObject({ status: "sent", lastError: null });
+    expect(keys).toEqual([`${id}:buyer_refund`, `${id}:buyer_refund`]);
+    expect((await delivery.drainPass()).mailSent).toBe(0); // sent once, never again
+  });
+
+  it("retry: refusals back off and give up after the same max attempts as the other mails", async () => {
+    let calls = 0;
+    const refusing: Mailer = {
+      send: async (_m, key) => {
+        if (!key.endsWith(":buyer_refund")) return { ok: true, id: "re_confirm" };
+        calls++;
+        return { ok: false, failure: "rejected", error: "resend_422" };
+      },
+    };
+    const { app, repo, clock, deps, buyFree } = await setup({ mailer: refusing });
+    const id = await buyFree();
+    await app.fetch(refundReq(id));
+    const delivery = new TicketDelivery(deps);
+    let t = Date.parse(NOW);
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS; i++) {
+      t += 2 * 60 * 60 * 1000;
+      clock.set(new Date(t).toISOString());
+      await delivery.drainPass();
+    }
+    expect((await refundRows(repo, id))[0]).toMatchObject({ status: "failed", attempts: OUTBOX_MAX_ATTEMPTS, lastError: "resend_422" });
+    expect(calls).toBe(OUTBOX_MAX_ATTEMPTS);
+  });
+
+  if (kind === "d1") {
+    it("before db/0004: the refund still goes through; the notice is not queued (the kind CHECK skips the row)", async () => {
+      const { db } = memoryD1();
+      await db.exec(INIT_SQL);
+      await db.exec(DELIVERY_SQL);
+      await db.exec(CHECKIN_SQL);
+      const old = createD1TicketRepo(createDbClient(db, { namespace: "lp" }));
+      const { app, repo, buyFree } = await setup({ repo: old });
+      const id = await buyFree();
+      expect((await body<LpTicketRefundResponse>(await app.fetch(refundReq(id)))).result).toBe("cancelled");
+      expect((await repo.getOrder(SITE, id))!.status).toBe("refunded");
+      expect(await refundRows(repo, id)).toEqual([]);
+    });
+  }
 
   it("deadline: open until the last event day 23:59:59.999 JST, 409 refund_window_closed from 00:00 the day after", async () => {
     expect(lpTickets.LP_TICKET_REFUND_CLOSES_AT).toBe("2027-09-14T15:00:00.000Z");
