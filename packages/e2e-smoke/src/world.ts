@@ -129,6 +129,7 @@ export function createWorld(): World {
       },
     },
     identity: { userExists: async () => true },
+    member: { myTeamIds: async () => [] }, // #881: no 名簿 teams in the smoke world
     idempotency: { wasProcessed: async () => false, markProcessed: async () => {} },
   };
   const taskApp = buildTaskApp(taskDeps);

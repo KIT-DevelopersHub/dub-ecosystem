@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { task, common } from "@dub/types";
 import { Badge, SkeletonTable, EmptyState, ErrorState, LoadMore, type BadgeTone } from "@dub/ui";
 import type { UserCache } from "../domain/user-cache";
-import { isOverdue } from "../domain/my-tasks";
+import { isOverdue, requesterOf } from "../domain/my-tasks";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { canTransition } from "../domain/status-transitions";
 import { FromToCell } from "./FromToCell";
@@ -154,7 +154,7 @@ export function MyTaskList({
                   </td>
                 )}
                 <td className={styles.colFromTo}>
-                  <FromToCell fromId={t.createdBy ?? null} toId={t.assigneeId} users={users} testId={`fe4-fromto-${t.id}`} />
+                  <FromToCell fromId={requesterOf(t)} toId={t.assigneeId} users={users} testId={`fe4-fromto-${t.id}`} />
                 </td>
                 <td className={styles.cellTitle}>{t.title}</td>
                 <td>{team ? <Badge tone="info">{team}</Badge> : <span className={styles.muted}>―</span>}</td>

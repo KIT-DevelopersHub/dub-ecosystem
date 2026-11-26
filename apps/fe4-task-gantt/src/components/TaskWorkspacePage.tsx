@@ -814,6 +814,9 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         ...(draft.description ? { description: draft.description } : {}),
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
+        // 依頼者 (#881): send the form value (null = なし). If the signed-in user is unknown the
+        // form starts empty — omit it then so the server defaults it to the caller.
+        ...(draft.requesterId !== null || currentUserId ? { requesterId: draft.requesterId } : {}),
         ...(teamId ? { teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
@@ -1360,6 +1363,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         parentOptions={allTaskOptions}
         scopeTasks={scopeTasks}
         onCreate={onCreate}
+        currentUserId={currentUserId ?? null}
       />
 
       {selectedTask && (

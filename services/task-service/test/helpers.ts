@@ -41,6 +41,7 @@ export class InMemoryTaskRepo implements TaskRepo {
       createdAt: input.now,
       updatedAt: input.now,
       createdBy: input.createdBy,
+      requesterId: input.requesterId ?? null,
       dueSoonNotifiedAt: null,
     };
     this.rows.set(rec.id, rec);
@@ -91,6 +92,7 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (patch.status !== undefined) r.status = patch.status;
     if (patch.priority !== undefined) r.priority = patch.priority;
     if (patch.assigneeId !== undefined) r.assigneeId = patch.assigneeId;
+    if (patch.requesterId !== undefined) r.requesterId = patch.requesterId;
     if (patch.teamId !== undefined) r.teamId = patch.teamId;
     if (patch.parentId !== undefined) r.parentTaskId = patch.parentId;
     if (patch.wbs !== undefined) r.wbs = patch.wbs;

@@ -3,8 +3,14 @@
 //   担当 (assigned): GET /tasks?assigneeId=<self>   — tasks assigned TO me
 //   依頼 (requested): GET /tasks?createdById=<self>  — tasks I issued (from me)
 // Both are self-scoped, so eventId may be omitted (server /me rule). The "すべて"
-// lens fetches both and de-duplicates. Requester = task.createdBy (from→to "from").
+// lens fetches both and de-duplicates. Requester (from→to "from") = task.requesterId (#881,
+// settable/optional); rows without the field fall back to createdBy (see requesterOf).
 import type { task, common } from "@dub/types";
+
+/** 依頼者 (from) of a task: `requesterId` (null = なし), or `createdBy` when the field is absent. */
+export function requesterOf(t: Pick<task.Task, "requesterId" | "createdBy">): common.UserId | null {
+  return t.requesterId !== undefined ? t.requesterId : t.createdBy ?? null;
+}
 
 export type MyTasksLens = "assigned" | "requested" | "all";
 export type DueBucket = "all" | "overdue" | "today" | "week" | "none";
@@ -96,7 +102,7 @@ export function applyMyTasksFilter(
     if (q && !t.title.toLowerCase().includes(q)) return false;
     if (statusSet.size > 0 && !statusSet.has(t.status)) return false;
     if (f.assigneeId && t.assigneeId !== f.assigneeId) return false;
-    if (f.requesterId && t.createdBy !== f.requesterId) return false;
+    if (f.requesterId && requesterOf(t) !== f.requesterId) return false;
     if (f.teamId && (t.teamId ?? null) !== f.teamId) return false;
     if (!matchesDue(t, f.due, now)) return false;
     return true;

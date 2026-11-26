@@ -111,6 +111,9 @@ export function TaskDetailPanel({
   const [status, setStatus] = useState<task.TaskStatus>(t.status);
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
+  // 依頼者 (#881). Only tracked when the row carries the field (undefined = not loaded/unknown).
+  const curRequester = t.requesterId;
+  const [requesterId, setRequesterId] = useState<common.UserId | null | undefined>(curRequester);
   const [teamId, setTeamId] = useState<common.TeamId | null>(t.teamId ?? null);
   // Seed the date fields so 開始日/期日 always equal what the bar (and the axis) show.
   //  - LEAF task: prefer its own start_at/due_at column, falling back to the bar's derived
@@ -187,6 +190,7 @@ export function TaskDetailPanel({
     status !== t.status ||
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
+    requesterId !== curRequester ||
     teamId !== curTeam ||
     datesChanged ||
     parentChanged ||
@@ -199,6 +203,7 @@ export function TaskDetailPanel({
     if (status !== t.status) patch.status = status;
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
+    if (requesterId !== undefined && requesterId !== curRequester) patch.requesterId = requesterId;
     if (teamId !== curTeam) patch.teamId = teamId;
     // Any 開始日/期日 change materialises BOTH edges (startsAt↔startAt, endsAt↔dueAt) so the
     // saved task carries an explicit window. The gantt bar then equals the detail values
@@ -228,13 +233,14 @@ export function TaskDetailPanel({
         status,
         priority,
         assigneeId,
+        requesterId ?? null,
         teamId,
         start,
         due,
         parentId,
         [...deps].sort(),
       ]),
-    [title, description, status, priority, assigneeId, teamId, start, due, parentId, deps],
+    [title, description, status, priority, assigneeId, requesterId, teamId, start, due, parentId, deps],
   );
   // The signature already handed to onSave. Seeded to the mount state (== server truth),
   // it guards against re-firing the same save after the confirmed task/props flow back in.
@@ -338,6 +344,20 @@ export function TaskDetailPanel({
             onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
             options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
             testId="fe4-detail-assignee"
+          />
+        </div>
+
+        <div className={styles.formField}>
+          <label className={styles.formLabel} htmlFor="fe4-detail-requester">
+            依頼者（任意）
+          </label>
+          <Select
+            id="fe4-detail-requester"
+            value={requesterId ?? ""}
+            disabled={!canWrite}
+            onChange={(v) => setRequesterId(v ? (v as common.UserId) : null)}
+            options={[{ value: "", label: "なし" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+            testId="fe4-detail-requester"
           />
         </div>
 

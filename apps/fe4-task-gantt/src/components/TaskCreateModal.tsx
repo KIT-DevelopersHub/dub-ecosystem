@@ -25,6 +25,7 @@ interface TaskCreateDraft {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  requesterId?: common.UserId | null;
   teamId: common.TeamId | null;
   start: string | null;
   due: string | null;
@@ -37,6 +38,8 @@ export interface TaskDraft {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  /** 依頼者 (#881). null = なし. */
+  requesterId: common.UserId | null;
   teamId: common.TeamId | null;
   startAt: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
@@ -66,13 +69,15 @@ export interface TaskCreateModalProps {
   initialParentId?: common.TaskId | null;
   /** predecessor ids preset when opened with a dependency already in mind. */
   initialDependsOn?: readonly common.TaskId[];
+  /** the signed-in user — the default 依頼者 (#881). */
+  currentUserId?: common.UserId | null;
 }
 
 // A newly-created task starts in "todo"; only todo-reachable states are offered.
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn, currentUserId = null }: TaskCreateModalProps) {
   // Seed once from any draft left by an accidental reload; otherwise the usual blank form.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialDraft = useMemo(() => peekDraft<TaskCreateDraft>(DRAFT_KEY), []);
@@ -80,6 +85,9 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   const [status, setStatus] = useState<task.TaskStatus>(initialDraft?.status ?? "todo");
   const [priority, setPriority] = useState<task.TaskPriority>(initialDraft?.priority ?? "medium");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(initialDraft?.assigneeId ?? null);
+  const [requesterId, setRequesterId] = useState<common.UserId | null>(
+    initialDraft && initialDraft.requesterId !== undefined ? initialDraft.requesterId : currentUserId,
+  );
   const [teamId, setTeamId] = useState<common.TeamId | null>(initialDraft?.teamId ?? null);
   const [start, setStart] = useState<string | null>(initialDraft?.start ?? null);
   const [due, setDue] = useState<string | null>(initialDraft?.due ?? null);
@@ -102,7 +110,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     deps.length > 0;
   const draft = useDraftAutosave<TaskCreateDraft>({
     storageKey: DRAFT_KEY,
-    value: { title, description, status, priority, assigneeId, teamId, start, due, parentId, deps },
+    value: { title, description, status, priority, assigneeId, requesterId, teamId, start, due, parentId, deps },
     dirty,
   });
 
@@ -134,6 +142,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     setStatus("todo");
     setPriority("medium");
     setAssigneeId(null);
+    setRequesterId(currentUserId);
     setTeamId(null);
     setStart(null);
     setDue(null);
@@ -157,6 +166,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         status,
         priority,
         assigneeId,
+        requesterId,
         // 子タスク作成時はチームを親に固定（UIは disabled だが念のため送信値も親で確定）。
         teamId: parentId ? teamOf(scopeTasks, parentId) : teamId,
         startAt: isoFromDateInput(start),
@@ -214,6 +224,8 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         users={users}
         assigneeId={assigneeId}
         onAssigneeChange={setAssigneeId}
+        requesterId={requesterId}
+        onRequesterChange={setRequesterId}
         teams={teams}
         teamId={teamId}
         onTeamIdChange={setTeamId}

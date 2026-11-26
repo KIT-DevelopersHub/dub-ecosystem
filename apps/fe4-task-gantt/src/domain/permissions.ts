@@ -25,7 +25,7 @@ export function taskCapabilities(perms: readonly PermissionKey[] | null): TaskCa
 
 /** The hint a read-only task shows (detail panel + bar tooltip). */
 export const READ_ONLY_TASK_HINT =
-  "担当者だけが編集できます（担当がチームならそのチームのメンバー、担当がいなければ作成者）。すべて編集するにはロール管理の「すべてのタスクを編集」が必要です";
+  "担当者と依頼者だけが編集できます（担当がチームならそのチームのメンバー、担当がいなければ作成者）。すべて編集するにはロール管理の「すべてのタスクを編集」が必要です";
 
 /**
  * Per-task edit check for the UI (#881), mirroring task-service via `task.canEditTask`.

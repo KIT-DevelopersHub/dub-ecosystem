@@ -31,6 +31,22 @@ describe("task.canEditTask", () => {
     expect(task.canEditTask(t, { userId: "usr_carol", teamIds: ["team_ops"] }, false)).toBe(false);
   });
 
+  it("依頼者あり: the 依頼者 edits too (person- or team-assigned or unassigned)", () => {
+    for (const t of [
+      { assigneeId: "usr_bob", requesterId: "usr_rita", createdBy: "usr_alice" },
+      { assigneeId: null, assigneeTeamId: "team_pr", requesterId: "usr_rita", createdBy: "usr_alice" },
+      { assigneeId: null, requesterId: "usr_rita", createdBy: "usr_alice" },
+    ]) {
+      expect(task.canEditTask(t, { userId: "usr_rita" }, false)).toBe(true);
+    }
+  });
+
+  it("依頼者なし: being the creator alone does not open a person-assigned task", () => {
+    const t = { assigneeId: "usr_bob", requesterId: null, createdBy: "usr_alice" };
+    expect(task.canEditTask(t, { userId: "usr_alice" }, false)).toBe(false);
+    expect(task.canEditTask(t, { userId: "usr_bob" }, false)).toBe(true);
+  });
+
   it("task:edit_all (admin / maintainer) edits any task", () => {
     expect(task.canEditTask({ assigneeId: "usr_bob" }, { userId: "usr_admin" }, true)).toBe(true);
     expect(task.canEditTask({ assigneeId: null, assigneeTeamId: "team_pr" }, { userId: "usr_admin" }, true)).toBe(true);

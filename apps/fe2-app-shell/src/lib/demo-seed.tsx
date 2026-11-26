@@ -3010,6 +3010,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const created: task.Task = {
         version: 1, id: `tsk_demo_${Date.now()}`, eventId: b.eventId ?? null, title: b.title, description: b.description ?? null,
         status: "todo", priority: b.priority ?? "medium", assigneeId: b.assigneeId ?? null, createdBy: ME_ID,
+        requesterId: b.requesterId !== undefined ? b.requesterId : ME_ID, // 依頼者 (#881)
         teamId: b.teamId ?? null, startAt: b.startAt ?? null, dueAt: b.dueAt ?? null, origin: "internal",
         archivedAt: null, createdAt: now, updatedAt: now,
       };

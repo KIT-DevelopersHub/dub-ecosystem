@@ -56,9 +56,9 @@ describe("task edit permission (#881)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("個人担当: the creator (not the assignee) gets 403 — only the assignee edits", async () => {
+  it("個人担当・依頼者なし: the creator (not the assignee) gets 403 — only the assignee edits", async () => {
     const { h, app } = setup();
-    const t = await seed(app);
+    const t = await seed(app, { requesterId: null });
     h.authz.denied.add("task:edit_all");
     const res = await app.request(`/tasks/${t.id}`, as("usr_alice", "PATCH", { version: 1, title: "renamed" }));
     expect(res.status).toBe(403);
@@ -88,6 +88,49 @@ describe("task edit permission (#881)", () => {
     expect(other.status).toBe(403);
     const mine = await app.request(`/tasks/${t.id}`, as("usr_alice", "PATCH", { version: 1, title: "renamed" }));
     expect(mine.status).toBe(200);
+  });
+
+  it("依頼者あり: the 依頼者 edits a task assigned to someone else", async () => {
+    const { h, app } = setup();
+    const t = await seed(app, { requesterId: "usr_rita" });
+    h.authz.denied.add("task:edit_all");
+    const res = await app.request(`/tasks/${t.id}`, as("usr_rita", "PATCH", { version: 1, title: "by requester" }));
+    expect(res.status).toBe(200);
+    // the creator is no longer the 依頼者 ⇒ read-only
+    const creator = await app.request(`/tasks/${t.id}`, as("usr_alice", "PATCH", { version: 2, title: "x" }));
+    expect(creator.status).toBe(403);
+  });
+
+  it("依頼者: defaults to the creator, and can be set / cleared (persisted)", async () => {
+    const { h, app } = setup();
+    const t = await seed(app);
+    expect(t.requesterId).toBe("usr_alice");
+    expect((await h.repo.getById(t.id))?.requesterId).toBe("usr_alice");
+
+    const set = await app.request(`/tasks/${t.id}`, as("usr_bob", "PATCH", { version: 1, requesterId: "usr_rita" }));
+    expect(set.status).toBe(200);
+    expect(((await set.json()) as task.Task).requesterId).toBe("usr_rita");
+    expect((await h.repo.getById(t.id))?.requesterId).toBe("usr_rita");
+
+    const cleared = await app.request(`/tasks/${t.id}`, as("usr_bob", "PATCH", { version: 2, requesterId: null }));
+    expect(cleared.status).toBe(200);
+    expect((await h.repo.getById(t.id))?.requesterId).toBeNull();
+
+    // 依頼者なしで作成もできる
+    const none = await seed(app, { requesterId: null });
+    expect(none.requesterId).toBeNull();
+  });
+
+  it("依頼者: an unknown user or a non-string is a 400", async () => {
+    const { h, app } = setup();
+    h.identity.unknown.add("usr_ghost");
+    const t = await seed(app);
+    const ghost = await app.request(`/tasks/${t.id}`, as("usr_bob", "PATCH", { version: 1, requesterId: "usr_ghost" }));
+    expect(ghost.status).toBe(400);
+    const bad = await app.request(`/tasks/${t.id}`, as("usr_bob", "PATCH", { version: 1, requesterId: 42 }));
+    expect(bad.status).toBe(400);
+    const onCreate = await app.request("/tasks", as("usr_alice", "POST", { eventId: "evt_1", title: "T", requesterId: "usr_ghost" }));
+    expect(onCreate.status).toBe(400);
   });
 
   it("a holder of task:edit_all edits any task", async () => {
@@ -161,7 +204,7 @@ describe("task edit permission (#881)", () => {
 
   it("チーム担当: a member of the 担当チーム edits; a non-member (even the creator) does not", async () => {
     const { h, app } = setup();
-    const t = await seed(app, { teamId: "team_pr" });
+    const t = await seed(app, { teamId: "team_pr", requesterId: null });
     assignToTeam(h, t, "team_ops");
     h.authz.denied.add("task:edit_all");
     h.member.teams.set("usr_dave", ["team_ops"]);

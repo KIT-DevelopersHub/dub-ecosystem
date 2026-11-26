@@ -21,6 +21,7 @@ export interface TaskRow {
   version: number;
   due_soon_notified_at: string | null;
   created_by: string;
+  requester_id: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -39,6 +40,7 @@ export function rowToTask(r: TaskRow): task.Task {
     parentTaskId: r.parent_id,
     wbs: r.wbs,
     createdBy: r.created_by,
+    requesterId: r.requester_id,
     startAt: r.start_at,
     dueAt: r.due_at,
     origin: r.origin,
@@ -64,6 +66,8 @@ export interface InsertTaskInput {
   dueAt: common.ISODateTime | null;
   origin: task.TaskOrigin;
   createdBy: common.UserId;
+  /** 依頼者 (#881); null/omitted = none. */
+  requesterId?: common.UserId | null;
   now: common.ISODateTime;
 }
 
@@ -74,6 +78,7 @@ export interface TaskPatch {
   status?: task.TaskStatus;
   priority?: task.TaskPriority;
   assigneeId?: common.UserId | null;
+  requesterId?: common.UserId | null;
   teamId?: common.TeamId | null;
   parentId?: common.TaskId | null;
   wbs?: string | null;
@@ -207,14 +212,14 @@ export function decodeCursor(cursor: string): string {
 }
 
 const ALL_COLUMNS =
-  "id, event_id, title, description, status, priority, assignee_id, team_id, parent_id, wbs, start_at, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at";
+  "id, event_id, title, description, status, priority, assignee_id, team_id, parent_id, wbs, start_at, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at, requester_id";
 
 export function createD1TaskRepo(db: DbClient): TaskRepo {
   return {
     async insert(input: InsertTaskInput): Promise<task.Task> {
       await db.run(
         `INSERT INTO task_tasks (${ALL_COLUMNS})
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL, ?)`,
         input.id,
         input.eventId,
         input.title,
@@ -231,6 +236,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         input.createdBy,
         input.now,
         input.now,
+        input.requesterId ?? null,
       );
       const row = await db.first<TaskRow>(`SELECT ${ALL_COLUMNS} FROM task_tasks WHERE id = ?`, input.id);
       if (!row) throw new Error("insert readback failed");
@@ -300,6 +306,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (patch.status !== undefined) col("status", patch.status);
       if (patch.priority !== undefined) col("priority", patch.priority);
       if (patch.assigneeId !== undefined) col("assignee_id", patch.assigneeId);
+      if (patch.requesterId !== undefined) col("requester_id", patch.requesterId);
       if (patch.teamId !== undefined) col("team_id", patch.teamId);
       if (patch.parentId !== undefined) col("parent_id", patch.parentId);
       if (patch.wbs !== undefined) col("wbs", patch.wbs);

@@ -279,6 +279,8 @@ export class MockApiClient implements ApiClient {
       assigneeId: body.assigneeId ?? null,
       teamId: body.teamId ?? null,
       createdBy: this.currentUserId, // server stamps created_by from the principal
+      // 依頼者 (#881): omitted ⇒ the caller, null ⇒ none (mirrors task-service).
+      requesterId: body.requesterId !== undefined ? body.requesterId : this.currentUserId,
       startAt: body.startAt ?? null,
       dueAt: body.dueAt ?? null,
       origin: body.origin ?? "internal",
@@ -309,6 +311,7 @@ export class MockApiClient implements ApiClient {
       ...(body.status !== undefined ? { status: body.status } : {}),
       ...(body.priority !== undefined ? { priority: body.priority } : {}),
       ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
+      ...(body.requesterId !== undefined ? { requesterId: body.requesterId } : {}),
       ...(body.teamId !== undefined ? { teamId: body.teamId } : {}),
       ...(body.startAt !== undefined ? { startAt: body.startAt } : {}),
       ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),

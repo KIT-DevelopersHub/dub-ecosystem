@@ -302,6 +302,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId !== undefined && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    checkOptString(body.requesterId, "requesterId", fe);
     checkOptString(body.teamId, "teamId", fe);
     checkOptString(body.parentTaskId, "parentTaskId", fe);
     checkOptString(body.wbs, "wbs", fe);
@@ -326,6 +327,10 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId) {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
+    }
+    if (body.requesterId) {
+      const exists = await deps.identity.userExists(ctx, body.requesterId);
+      if (!exists) throw errors.validationFailed([{ field: "requesterId", reason: "not_found" }]);
     }
 
     // 親子は同一チーム: 親を指定して作る子タスクは、親と同じチームでなければならない（親から
@@ -359,6 +364,8 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       dueAt: body.dueAt ?? null,
       origin: (isServiceRole(principal) ? body.origin : undefined) ?? "internal",
       createdBy: actorId,
+      // 依頼者 (#881): omitted ⇒ the creator (今までの「依頼者 = 作成者」), null ⇒ none.
+      requesterId: body.requesterId !== undefined ? body.requesterId : actorId,
       now,
     });
 
@@ -404,6 +411,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId !== undefined && body.assigneeId !== null && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    checkOptString(body.requesterId, "requesterId", fe);
     checkOptString(body.teamId, "teamId", fe);
     checkOptString(body.parentTaskId, "parentTaskId", fe);
     checkOptString(body.wbs, "wbs", fe);
@@ -437,6 +445,11 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
     }
+    const requesterChanged = body.requesterId !== undefined && body.requesterId !== (current.requesterId ?? null);
+    if (requesterChanged && body.requesterId) {
+      const exists = await deps.identity.userExists(ctx, body.requesterId);
+      if (!exists) throw errors.validationFailed([{ field: "requesterId", reason: "not_found" }]);
+    }
 
     // 親子は同一チーム (整合をサーバでも担保)。teamId か parentTaskId が変わるとき、このタスクと
     // その親・子のチームが食い違わないか検証する。null=未割当同士は一致。フロントは子作成時に
@@ -466,6 +479,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       status?: task.TaskStatus;
       priority?: task.TaskPriority;
       assigneeId?: common.UserId | null;
+      requesterId?: common.UserId | null;
       teamId?: common.TeamId | null;
       parentId?: common.TaskId | null;
       wbs?: string | null;
@@ -477,6 +491,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.status !== undefined) patch.status = body.status;
     if (body.priority !== undefined) patch.priority = body.priority;
     if (body.assigneeId !== undefined) patch.assigneeId = body.assigneeId;
+    if (body.requesterId !== undefined) patch.requesterId = body.requesterId;
     if (body.teamId !== undefined) patch.teamId = body.teamId;
     if (body.parentTaskId !== undefined) patch.parentId = body.parentTaskId;
     if (body.wbs !== undefined) patch.wbs = body.wbs;
@@ -496,7 +511,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const evt = current.eventId ? { eventId: current.eventId } : {};
     const specs: EventSpec[] = [];
     const changed: string[] = [];
-    for (const f of ["title", "description", "priority", "startAt", "dueAt"] as const) {
+    for (const f of ["title", "description", "priority", "requesterId", "startAt", "dueAt"] as const) {
       if (patch[f] !== undefined && current[f] !== updated[f]) changed.push(f);
     }
     if (changed.length > 0) {

@@ -13,6 +13,7 @@ import {
   mergeTasks,
   applyMyTasksFilter,
   sortMyTasks,
+  requesterOf,
 } from "../domain/my-tasks";
 import { MyTasksFilterBar } from "./MyTasksFilterBar";
 import { MyTaskList } from "./MyTaskList";
@@ -65,10 +66,6 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
     () => (people.length > 0 ? people : [...users.values()]),
     [people, users],
   );
-  const currentUserName = useMemo(
-    () => users.get(currentUserId)?.displayName ?? people.find((p) => p.id === currentUserId)?.displayName ?? "自分",
-    [users, people, currentUserId],
-  );
 
   // 親タスク / 先行タスク pickers draw from the tasks currently loaded in the hub
   // (real ids only — never the optimistic temp rows). Predecessors are team-scoped
@@ -108,7 +105,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
 
   // resolve requester + assignee display names (batched, cache-backed).
   useEffect(() => {
-    const ids = tasks.flatMap((t) => [t.createdBy ?? null, t.assigneeId]);
+    const ids = tasks.flatMap((t) => [requesterOf(t), t.assigneeId]);
     void ensureUsers(users, ids, (batch) => resolveUsers(client, batch)).then((c) => setUsers(new Map(c)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
@@ -165,6 +162,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
       teamId: draft.teamId,
       parentTaskId: draft.parentTaskId,
       createdBy: currentUserId,
+      requesterId: draft.requesterId,
       startAt: draft.startAt,
       dueAt: draft.dueAt,
       origin: "internal",
@@ -183,6 +181,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         ...(draft.description !== null ? { description: draft.description } : {}),
         priority: draft.priority,
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
+        requesterId: draft.requesterId,
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
@@ -289,7 +288,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         parentOptions={parentOptions}
         scopeTasks={scopeTasks}
         onCreate={onCreate}
-        requesterName={currentUserName}
+        currentUserId={currentUserId}
       />
     </section>
   );

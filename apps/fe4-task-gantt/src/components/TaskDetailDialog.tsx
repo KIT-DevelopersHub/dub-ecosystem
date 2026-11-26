@@ -4,7 +4,7 @@ import { Modal, Badge, Button, SkeletonList, type BadgeTone } from "@dub/ui";
 import type { UserCache } from "../domain/user-cache";
 import { useApiClient } from "../api/client-context";
 import { listTaskAttachments } from "../api/endpoints";
-import { isOverdue } from "../domain/my-tasks";
+import { isOverdue, requesterOf } from "../domain/my-tasks";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { FromToCell } from "./FromToCell";
 import { TaskStatusBadge } from "./TaskStatusBadge";
@@ -157,7 +157,7 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
             <div className={styles.detailRow}>
               <dt className={styles.detailLabel}>依頼 → 担当</dt>
               <dd className={styles.detailValue}>
-                <FromToCell fromId={t.createdBy ?? null} toId={t.assigneeId} users={users} testId="fe4-mytask-detail-fromto" />
+                <FromToCell fromId={requesterOf(t)} toId={t.assigneeId} users={users} testId="fe4-mytask-detail-fromto" />
               </dd>
             </div>
             <div className={styles.detailRow}>

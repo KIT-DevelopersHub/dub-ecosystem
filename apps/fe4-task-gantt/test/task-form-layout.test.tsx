@@ -10,6 +10,7 @@ import type { ScopeTask } from "../src/domain/task-hierarchy";
 //   タイトル                （全幅）
 //   ステータス   重要度      （2カラム・同一行）
 //   担当         チーム      （2カラム・同一行）
+//   依頼者                  （全幅・任意 #881）
 //   開始日       終了日      （2カラム・同一行）
 //   親タスク                （全幅）
 //   先行タスク              （全幅）
@@ -52,6 +53,11 @@ function assertSpecLayout(prefix: string) {
   // 3対の縦の並び順: ステータス行 → 担当行 → 日付行
   expect(precedes(rowOf(`${prefix}-status`), rowOf(`${prefix}-assignee`))).toBe(true);
   expect(precedes(rowOf(`${prefix}-assignee`), rowOf(`${prefix}-start`))).toBe(true);
+
+  // 依頼者（全幅・任意）は担当行と日付行の間
+  const requester = screen.getByTestId(`${prefix}-requester`);
+  expect(precedes(rowOf(`${prefix}-assignee`), requester)).toBe(true);
+  expect(precedes(requester, rowOf(`${prefix}-start`))).toBe(true);
 
   // 全幅フィールドの並び: 日付行 → 親タスク → 先行タスク → 詳細
   const dateRow = rowOf(`${prefix}-start`);

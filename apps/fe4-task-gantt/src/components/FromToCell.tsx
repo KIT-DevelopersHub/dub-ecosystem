@@ -5,7 +5,7 @@ import { displayName } from "../domain/user-cache";
 import styles from "../styles/app.module.css";
 
 export interface FromToCellProps {
-  /** requester — task.createdBy (the "from"). */
+  /** requester — 依頼者 (the "from"; domain/my-tasks requesterOf). */
   fromId: common.UserId | null;
   /** assignee — task.assigneeId (the "to"). */
   toId: common.UserId | null;

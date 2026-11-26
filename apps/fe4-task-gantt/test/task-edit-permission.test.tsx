@@ -66,6 +66,16 @@ describe("makeCanEditTask / makeCanEditBar", () => {
     expect(makeCanEditTask(tasks, ME, LEAD)("pr")).toBe(true);
   });
 
+  it("依頼者あり: the 依頼者 edits; 依頼者なし: the creator alone cannot edit a person-assigned task", () => {
+    const tasks = [
+      mk("asked", { assigneeId: "usr_bob", requesterId: ME }),
+      mk("made_noreq", { assigneeId: "usr_bob", createdBy: ME, requesterId: null }),
+    ];
+    const can = makeCanEditTask(tasks, ME, MEMBER);
+    expect(can("asked")).toBe(true);
+    expect(can("made_noreq")).toBe(false);
+  });
+
   it("担当なし: the owning team (teamId) grants nothing", () => {
     const tasks = [mk("owned", { teamId: "team_ops" })];
     expect(makeCanEditTask(tasks, ME, MEMBER, ["team_ops"])("owned")).toBe(false);
@@ -92,7 +102,7 @@ describe("gantt read-only rendering for tasks I may not edit", () => {
     renderAs(MEMBER);
     const theirs = await screen.findByTestId("fe4-gantt-bar-theirs");
     expect(theirs.getAttribute("data-readonly")).toBe("true");
-    expect(theirs.getAttribute("title")).toContain("担当者だけが編集できます");
+    expect(theirs.getAttribute("title")).toContain("担当者と依頼者だけが編集できます");
     expect(screen.queryByTestId("fe4-gantt-bar-theirs-rz-l")).toBeNull();
     expect(screen.queryByTestId("fe4-gantt-bar-theirs-rz-r")).toBeNull();
     expect(screen.getByTestId("fe4-gantt-bar-mine").getAttribute("data-readonly")).toBeNull();
