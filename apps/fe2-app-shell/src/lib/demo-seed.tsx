@@ -126,6 +126,30 @@ const EVENTS: event.EventSummary[] = [
   { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-09-01T00:00:00Z" },
 ];
 
+// AI のまとめ (#879) demo fixtures. Every line cites an in-app path or the public LP.
+const DEMO_DIGESTS: Record<string, event.EventDigest> = {};
+function demoDigestFor(eventId: string): event.EventDigest {
+  return {
+    eventId,
+    lines: [
+      { text: "タスク「会場の机・椅子レイアウト確定」期限 2026-08-02（遅れ）", source: "tasks", link: "/tasks/tsk_1" },
+      { text: "券種「一般」販売 182枚・残り 118枚", source: "tickets", link: "/lp?tab=tickets" },
+      { text: "協賛「株式会社サンプル」提案中", source: "sponsors", link: "/sponsor" },
+      { text: "会議 2026-08-03「運営定例」（議事録あり）", source: "meetings", link: "/calendar" },
+      { text: "チャットの決定「【決定】懇親会は 18:30 から 2F ラウンジ」", source: "chat", link: `/chat?eventId=${eventId}` },
+    ],
+    discrepancies: [
+      { field: "startsAt", eventValue: "2026-08-05", sourceValue: "2026-08-06", source: "lp", link: "https://hokuriku-it-conf.com" },
+    ],
+    model: "fake",
+    trigger: "schedule",
+    generatedAt: "2026-08-02T22:00:00Z",
+  };
+}
+function demoDigestState(eventId: string): event.GetEventDigestResponse {
+  return { enabled: true, provider: { id: "fake", status: "online" }, digest: DEMO_DIGESTS[eventId] ?? demoDigestFor(eventId) };
+}
+
 const EVENT_DETAIL: Record<string, event.EventDetail> = {
   evt_1: {
     version: 3,
@@ -136,6 +160,8 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
     phase: "preparing",
     startsAt: "2026-08-05T01:00:00Z",
     endsAt: "2026-08-05T09:00:00Z",
+    venue: "金沢工業大学 扇が丘キャンパス",
+    capacity: 300,
     archivedAt: null,
     createdAt: "2026-05-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -2858,6 +2884,22 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // AI のまとめ (#879) — demo uses the deterministic "fake" provider (no model): a sample
+  // digest with source links + one 食い違い, and the Q&A answering 「停止中」 the way
+  // production does until the Mac mini is connected.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/digest$/);
+    if (id && method === "GET") return json(demoDigestState(id));
+    const runId = seg(/^\/api\/v1\/events\/([^/]+)\/digest\/run$/);
+    if (runId && method === "POST") {
+      const digest = { ...demoDigestFor(runId), generatedAt: isoNow() };
+      DEMO_DIGESTS[runId] = digest;
+      return json({ ran: true, changedSources: ["tasks", "tickets"], digest } satisfies event.RunEventDigestResponse);
+    }
+    const askId = seg(/^\/api\/v1\/events\/([^/]+)\/ask$/);
+    if (askId && method === "POST") return json({ status: "offline", answer: null, sources: [] } satisfies event.AskEventResponse);
+  }
+
   // Shared section layout save — version-locked (see DemoSectionLayout above).
   {
     const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
@@ -2897,6 +2939,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         phase: b.phase ?? cur.phase,
         startsAt: b.startsAt !== undefined ? b.startsAt : cur.startsAt,
         endsAt: b.endsAt !== undefined ? b.endsAt : cur.endsAt,
+        venue: b.venue !== undefined ? b.venue : (cur.venue ?? null),
+        capacity: b.capacity !== undefined ? b.capacity : (cur.capacity ?? null),
         version: cur.version + 1,
         updatedAt: isoNow(),
       };

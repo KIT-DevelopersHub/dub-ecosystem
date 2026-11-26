@@ -7,7 +7,7 @@
 // outbox (freeq_outbox on the shared dub-core DB); a Cron-triggered drain forwards
 // audit rows to audit-log and defers domain events (kept durable/pending). When the
 // real Queue bindings ARE present (paid deploy, wrangler.toml) they are used unchanged.
-import type { D1Database, Fetcher, Queue } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, Fetcher, Queue } from "@cloudflare/workers-types";
 
 export interface Env {
   DB: D1Database; // shared dub-core D1 (event_* namespace + un-namespaced freeq_outbox)
@@ -26,4 +26,26 @@ export interface Env {
   AUDIT_QUEUE?: Queue; // audit channel (PAID plan only; absent => outbox fallback)
 
   DUB_DEFAULT_ORG_ID?: string;
+
+  // ---- AI digest + Q&A (#879). Everything below is OPTIONAL and the feature is OFF
+  // unless EVENT_AI_DIGEST_ENABLED is "1"/"true". See tools/event-digest-agent/README.md.
+  EVENT_AI_DIGEST_ENABLED?: string;
+  /** "relay" (Mac mini via DIGEST_HUB; default) | "fake" (demo/staging, no model) | "offline". */
+  EVENT_AI_DIGEST_PROVIDER?: string;
+  /** The user whose read permissions scheduled (alarm) runs carry. Absent => alarm runs skip. */
+  EVENT_AI_DIGEST_SYSTEM_USER_ID?: string;
+  /** The single Drive folder the digest may list (absent => the drive source is skipped). */
+  EVENT_AI_DIGEST_DRIVE_FOLDER_ID?: string;
+  /** Bearer secret the Mac mini agent presents on its outbound WebSocket. Absent => refused. */
+  DIGEST_AGENT_SECRET?: string;
+  /** EventDigestHub DO: alarm scheduler + Mac mini relay (src/digest-hub.ts). */
+  DIGEST_HUB?: DurableObjectNamespace;
+  LP_BASE_URL?: string;
+  // Read-only sources (each optional; absent => that source is skipped).
+  SVC_LP_TICKETS?: Fetcher;
+  SVC_LP_ANALYTICS?: Fetcher;
+  SVC_DRIVE_SHARE?: Fetcher;
+  SVC_CHAT?: Fetcher;
+  SVC_MAIL?: Fetcher;
+  SVC_DRIVE?: Fetcher;
 }

@@ -13,6 +13,7 @@ import { EventEditForm } from "../components/EventEditForm";
 import { PhaseBadge } from "../components/PhaseBadge";
 import { sampleEventDoc } from "../blockeditor";
 import { EventPageLayout } from "../components/EventPageLayout";
+import { EventAiDigestPanel } from "../components/EventAiDigestPanel";
 import { useCurrentEventId } from "../lib/currentEvent";
 import { useNavigation } from "../contracts/navigation";
 import { eventRoutes, chatHref } from "../lib/routes";
@@ -75,6 +76,16 @@ function HubBody({ eventId }: { eventId: string }) {
                 {schedule ? (
                   <span className={styles.heroMetaItem}>
                     <Icon name="calendar" /> {schedule}
+                  </span>
+                ) : null}
+                {ev.venue ? (
+                  <span className={styles.heroMetaItem} data-testid="fe3-hub-venue">
+                    <Icon name="flag" /> {ev.venue}
+                  </span>
+                ) : null}
+                {typeof ev.capacity === "number" ? (
+                  <span className={styles.heroMetaItem} data-testid="fe3-hub-capacity">
+                    <Icon name="users" /> 定員 {ev.capacity.toLocaleString("ja-JP")}人
                   </span>
                 ) : null}
               </div>
@@ -160,6 +171,7 @@ function HubBody({ eventId }: { eventId: string }) {
           <section data-testid="fe3-hub-layout">
             <EventPageLayout eventId={eventId} mode="view" canWrite={false} />
           </section>
+          <EventAiDigestPanel eventId={eventId} canRun={permissions.admin} />
           <EventDetailsPanel eventId={eventId} canWrite={permissions.write} />
         </>
       )}
