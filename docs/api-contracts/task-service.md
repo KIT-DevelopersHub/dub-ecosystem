@@ -96,10 +96,12 @@ single-task endpoint.
 | `GET /api/v1/tasks` | `task:read` (+`task:delete` if `includeArchived`) | `200` `Paginated<Task>` | List tasks in an event (or the caller's own). |
 | `POST /api/v1/tasks` | `task:write` | `201` `Task` | Create a task. |
 | `GET /api/v1/tasks/{id}` | `task:read` | `200` `Task` | Read one task. |
-| `PATCH /api/v1/tasks/{id}` | `task:write` | `200` `Task` | Partial update (optimistic-locked). |
-| `DELETE /api/v1/tasks/{id}` | `task:delete` | `200` `Task` | Soft-delete (archive). |
-| `PUT /api/v1/tasks/{id}/dependencies` | `task:write` | `200` `{ taskId, dependsOnIds }` | Full-replace this task's dependency edges. |
+| `PATCH /api/v1/tasks/{id}` | `task:write` + 担当/作成者 or `task:edit_all` | `200` `Task` | Partial update (optimistic-locked). |
+| `DELETE /api/v1/tasks/{id}` | `task:delete` + 担当/作成者 or `task:edit_all` | `200` `Task` | Soft-delete (archive). |
+| `PUT /api/v1/tasks/{id}/dependencies` | `task:write` + 担当/作成者 or `task:edit_all` | `200` `{ taskId, dependsOnIds }` | Full-replace this task's dependency edges. |
 | `GET /api/v1/tasks/dependencies` | `task:read` | `200` `{ items: TaskDependency[] }` | All dependency edges for an event. |
+
+Per-task edit (#881): the writes on one existing task (PATCH, DELETE, dependencies, attachments — also via `/tasks/calendar-events/:id` and gantt `PATCH /gantt/rows/:taskId`) additionally require the caller to be the task's assignee or creator, or to hold `task:edit_all`; otherwise `403 FORBIDDEN` (`details.reason = "not_task_assignee"`). Rule: `@dub/types` `task.canEditTask`. Service principals are not limited.
 
 Permission is resolved via identity-roster `/authz/check` (see `auth.md` §10); a denied
 key surfaces as `403 FORBIDDEN`. All mutations that carry a `version` follow the frozen

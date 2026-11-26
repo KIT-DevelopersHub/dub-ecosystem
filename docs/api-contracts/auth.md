@@ -313,7 +313,7 @@ Self-service keys carry a `:self` scope segment. Every entry declares `dangerous
 |---|---|
 | identity | `identity:read`, `identity:admin` ⚠ |
 | event | `event:read`, `event:write`, `event:admin` ⚠ |
-| task | `task:read`, `task:write`, `task:delete` |
+| task | `task:read`, `task:write`, `task:delete`, `task:edit_all` |
 | file | `file:read`, `file:write`, `file:admin` ⚠ |
 | notif | `notif:send`, `notif:admin`, `notif:inbox:self`, `notif:prefs:self` |
 | mail | `mail:send` ⚠, `mail:read`, `mail:admin` ⚠ |
