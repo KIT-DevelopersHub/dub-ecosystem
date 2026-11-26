@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type {
   CheckboxProps,
   DatePickerProps,
@@ -49,21 +49,53 @@ export function Textarea({
   rows = 4,
   invalid,
   disabled,
+  autoGrow,
+  singleLine,
   testId,
   ...rest
 }: TextareaProps) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!autoGrow || !el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      // border-box: scrollHeight は枠線を含まないので足す。
+      el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+    };
+    fit();
+    // 幅が変わると折り返し位置も変わるので測り直す。
+    if (typeof ResizeObserver === "undefined") return;
+    let lastWidth = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === lastWidth) return;
+      lastWidth = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [autoGrow, value]);
   return (
     <textarea
+      ref={ref}
       id={id}
       className={cx(styles.input, styles.textarea)}
       data-testid={testId}
+      data-autogrow={autoGrow || undefined}
       rows={rows}
       value={value}
       placeholder={placeholder}
       disabled={disabled}
       aria-invalid={invalid || undefined}
       aria-describedby={rest["aria-describedby"]}
-      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={
+        singleLine
+          ? (e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) e.preventDefault();
+            }
+          : undefined
+      }
+      onChange={(e) => onChange(singleLine ? e.target.value.replace(/\r?\n/g, " ") : e.target.value)}
     />
   );
 }

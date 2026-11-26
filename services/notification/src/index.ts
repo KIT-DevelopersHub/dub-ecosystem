@@ -1,6 +1,7 @@
 // notification Worker entry: HTTP (fetch), Queue consumer (dub-q-evt-notification),
 // scheduled Cron (daily retention purge). Deploy is out of scope for this unit.
 import type { ExecutionContext, MessageBatch, ScheduledController } from "@cloudflare/workers-types";
+import { isServiceBindingRequest } from "@dub/http";
 import type { DubEventEnvelope } from "@dub/events";
 import { createApp } from "./app";
 import { consumeEventQueue } from "./queue";
@@ -34,7 +35,7 @@ const handler = {
     // session — safe ONLY over the private service binding (host "svc"). With workers.dev
     // enabled for /ws, gate the header-trusting API to service-binding callers so a public
     // request cannot spoof x-dub-user-id. /internal/health stays public for uptime probes.
-    const viaServiceBinding = url.hostname === "svc";
+    const viaServiceBinding = isServiceBindingRequest(url);
     if (!viaServiceBinding && url.pathname !== "/internal/health") {
       return new Response("not found", { status: 404 });
     }
