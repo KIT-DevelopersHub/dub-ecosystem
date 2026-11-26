@@ -6,6 +6,8 @@ import type { CSSProperties } from "react";
 import { toCssVarName } from "@dub/tokens";
 import { Badge, Icon, Stack } from "@dub/ui";
 import { statusMeta, type ServiceGroupData } from "../usageStatus.ts";
+import type { UsageIssuesResult } from "../types.ts";
+import type { IssueLinkState } from "./EscalationPanel.tsx";
 import { ServiceUsageCard } from "./ServiceUsageCard.tsx";
 
 const heading: CSSProperties = {
@@ -27,9 +29,18 @@ export interface ServiceGroupProps {
   group: ServiceGroupData;
   now?: Date;
   testId?: string;
+  /** Open escalation Issues (#902): undefined = still loading. */
+  issues?: UsageIssuesResult;
+  issuesLoading?: boolean;
 }
 
-export function ServiceGroup({ group, now, testId }: ServiceGroupProps): JSX.Element {
+function issueState(metricKey: string, issues: UsageIssuesResult | undefined, loading: boolean): IssueLinkState {
+  if (loading) return { loading: true };
+  const issue = issues?.byMetric[metricKey];
+  return issue ? { loading: false, issue } : { loading: false };
+}
+
+export function ServiceGroup({ group, now, testId, issues, issuesLoading = false }: ServiceGroupProps): JSX.Element {
   const meta = statusMeta(group.worstStatus);
   const root = testId ?? `fe2-usage-group-${group.provider}`;
 
@@ -52,7 +63,12 @@ export function ServiceGroup({ group, now, testId }: ServiceGroupProps): JSX.Ele
         </Stack>
         <div style={grid} data-testid={`${root}-grid`}>
           {group.services.map((s) => (
-            <ServiceUsageCard key={`${s.provider}:${s.metricKey}`} service={s} now={now} />
+            <ServiceUsageCard
+              key={`${s.provider}:${s.metricKey}`}
+              service={s}
+              now={now}
+              issue={issueState(s.metricKey, issues, issuesLoading)}
+            />
           ))}
         </div>
       </Stack>

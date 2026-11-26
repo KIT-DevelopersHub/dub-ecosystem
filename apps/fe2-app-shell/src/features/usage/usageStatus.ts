@@ -4,7 +4,7 @@
 // halt/bill copy, worst-status banner, provider grouping, billing-guard roll-up,
 // byte/amount formatting and reset-countdown formatting.
 import type { BadgeTone, IconName } from "@dub/ui";
-import type { OverflowBehavior, ServiceProvider, ServiceUsage, UsageStatus } from "./types.ts";
+import type { EscalationLevel, OverflowBehavior, ServiceProvider, ServiceUsage, UsageProjection, UsageStatus } from "./types.ts";
 
 /** Warn/critical percentage thresholds (design: warn ≥70%, critical ≥90%). */
 export const WARN_PCT = 70;
@@ -172,7 +172,8 @@ export function groupServicesByProvider(services: ServiceUsage[]): ServiceGroupD
     provider,
     label: providerLabel(provider),
     services: [...list].sort(
-      (a, b) => statusSortRank(a.status) - statusSortRank(b.status) || clampPct(b.pct) - clampPct(a.pct),
+      (a, b) =>
+        levelSortRank(effectiveLevel(a)) - levelSortRank(effectiveLevel(b)) || clampPct(b.pct) - clampPct(a.pct),
     ),
     worstStatus: worstStatusOf(list.map((s) => s.status)),
   }));
@@ -261,4 +262,68 @@ export function formatResetsIn(resetsAt: string | null, now: Date = new Date()):
   const hours = Math.floor(minutes / 60);
   if (hours >= 1) return `あと約${hours}時間`;
   return `あと約${Math.max(1, minutes)}分`;
+}
+
+// ── escalation (#902) ─────────────────────────────────────────────────────────
+/** Escalation thresholds (usage-meter escalation.ts LEVEL_PCT). */
+export const LEVEL_PCT = { warn: 70, act: 85, critical: 95 } as const;
+
+export interface LevelMeta {
+  tone: BadgeTone;
+  label: string;
+  icon: IconName;
+  /** What to do at this level (one line). */
+  action: string;
+}
+
+export function levelMeta(level: EscalationLevel): LevelMeta {
+  switch (level) {
+    case "ok":
+      return { tone: "success", label: "余裕あり", icon: "check", action: "" };
+    case "warn":
+      return { tone: "warning", label: "注意", icon: "warning", action: "内訳を見て、増えた理由を確かめる" };
+    case "act":
+      return { tone: "warning", label: "対策", icon: "alert-triangle", action: "手順書の対策を入れる" };
+    case "critical":
+      return { tone: "danger", label: "危険", icon: "alert", action: "今日中に対策するか、課金を決める" };
+    case "unknown":
+    default:
+      return { tone: "neutral", label: "取得不可", icon: "info", action: "" };
+  }
+}
+
+/** Worst-first rank for the escalation level (critical→act→warn→ok→unknown). */
+export function levelSortRank(level: EscalationLevel): number {
+  return { critical: 0, act: 1, warn: 2, ok: 3, unknown: 4 }[level] ?? 4;
+}
+
+/** The card's level: the wire `level` when present, else derived from the legacy status. */
+export function effectiveLevel(s: Pick<ServiceUsage, "level" | "status">): EscalationLevel {
+  if (s.level) return s.level;
+  return s.status === "critical" ? "critical" : s.status;
+}
+
+export function isEscalatedLevel(level: EscalationLevel): boolean {
+  return level === "warn" || level === "act" || level === "critical";
+}
+
+function formatJaDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** One plain line for the run-out estimate, or null when there is none. */
+export function formatProjection(p: UsageProjection | null | undefined, now: Date = new Date()): string | null {
+  if (!p) return null;
+  if (p.basis === "window") {
+    if (p.exhaustsAt) {
+      const at = new Date(p.exhaustsAt);
+      const when = at.getTime() <= now.getTime() ? "すでに上限に達しています" : `${formatJaDateTime(p.exhaustsAt)} ごろ上限に届く見込み`;
+      return p.pctAtReset !== null ? `このペースだと ${when}（リセット時 ${p.pctAtReset}%）` : `このペースだと ${when}`;
+    }
+    return p.pctAtReset !== null ? `このペースならリセットまで持つ見込み（リセット時 ${p.pctAtReset}%）` : null;
+  }
+  if (p.exhaustsAt) return `増え方から ${formatJaDateTime(p.exhaustsAt)} ごろ満杯の見込み`;
+  return "増え方からは 1 年以内に満杯にならない見込み";
 }
