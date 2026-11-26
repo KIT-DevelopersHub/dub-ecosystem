@@ -138,3 +138,19 @@ CREATE TABLE IF NOT EXISTS event_ai_digest_sources (
 );
 `.trim(),
 };
+
+// Additive follow-up migration: per-event enabled launcher apps. No row = legacy
+// event = every app enabled (no backfill needed). Lockstep with
+// infra/d1/migrations/event/0007_event_enabled_apps.sql.
+export const EVENT_ENABLED_APPS_SCHEMA_MIGRATION: Migration = {
+  namespace: "event",
+  id: "0007_event_enabled_apps",
+  up: `
+CREATE TABLE IF NOT EXISTS event_event_apps (
+  event_id   TEXT PRIMARY KEY REFERENCES event_events(id),
+  apps       TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`.trim(),
+};

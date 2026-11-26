@@ -12,6 +12,7 @@ import type {
   EventSectionLayoutData,
   EventPageLayoutRow,
   EventPageLayoutData,
+  EventAppsRow,
   Keyset,
 } from "./types";
 import {
@@ -121,6 +122,22 @@ function toPageLayoutRow(r: EventPageLayoutDbRow): EventPageLayoutRow {
     updatedBy: r.updated_by,
     updatedAt: r.updated_at,
   };
+}
+
+interface EventAppsDbRow {
+  event_id: string;
+  apps: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+function parseApps(json: string): string[] {
+  try {
+    const v = JSON.parse(json) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function toEventRow(r: EventDbRow): EventRow {
@@ -371,6 +388,22 @@ export function createD1EventRepo(db: DbClient): EventRepo {
         dataJson, next.version, next.updatedBy, next.updatedAt, next.eventId, expectedVersion,
       );
       return res.meta.changes > 0;
+    },
+
+    async getEventApps(eventId: common.EventId): Promise<EventAppsRow | null> {
+      const r = await db.first<EventAppsDbRow>(`SELECT * FROM event_event_apps WHERE event_id = ?`, eventId);
+      return r
+        ? { eventId: r.event_id, apps: parseApps(r.apps), updatedBy: r.updated_by, updatedAt: r.updated_at }
+        : null;
+    },
+
+    async putEventApps(row: EventAppsRow): Promise<void> {
+      await db.run(
+        `INSERT INTO event_event_apps (event_id, apps, updated_by, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(event_id) DO UPDATE SET apps = excluded.apps, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+        row.eventId, JSON.stringify(row.apps), row.updatedBy, row.updatedAt,
+      );
     },
   } satisfies EventRepo;
 }

@@ -164,6 +164,8 @@ Request (`event.CreateEventRequest`):
 - `title` (required, non-empty). Missing/blank ⇒ `400 VALIDATION_FAILED` (`{ field: "title", reason: "required" }`).
 - `description`, `startsAt`, `endsAt` optional.
 - `phase` is **not** accepted here — every event is created at `"planning"`.
+- `enabledApps` optional (array of `appRegistry.AppId`). Omitted ⇒ `event.EVENT_DEFAULT_ENABLED_APPS`
+  (`events`, `gantt`, `admin`). Unknown id ⇒ `400 VALIDATION_FAILED` (`enabledApps[i]`). See §3.12.
 
 Response `201`: the full `DubEvent` (`version: 1`, `phase: "planning"`). Emits `event.created`.
 
@@ -192,6 +194,8 @@ Permission: `event:read` (resource-scoped to `event`/`:id`). Response `200`: `Ev
 ```
 
 Unknown / cross-org id ⇒ `404 NOT_FOUND` (existence-hiding).
+
+Additive: `enabledApps` (resolved, launcher order) is included — see §3.12.
 
 ### 3.4 `PATCH /api/v1/events/:id` — update event
 
@@ -310,6 +314,26 @@ updated `DubAction`. Emits `action.updated` when any field changed.
 Permission: `event:write` (note: **not** `event:admin`, unlike event archive). Soft-delete;
 idempotent (already-archived ⇒ `204`). Response `204 No Content`. Emits `action.archived`.
 
+### 3.12 `GET|PUT /api/v1/events/:id/apps` — apps enabled for the event
+
+Each event chooses which launcher apps it uses (イベント設定 > 使うアプリ). Types:
+`event.EventAppsResponse` / `event.SaveEventAppsRequest`; helpers `event.resolveEnabledApps`,
+`EVENT_DEFAULT_ENABLED_APPS`, `EVENT_ALWAYS_ENABLED_APPS`; validator
+`@dub/validation validateSaveEventAppsRequest`. Storage: `event_event_apps` (migration 0007).
+
+```json
+{ "eventId": "evt_01J9Z...", "enabledApps": ["events", "gantt", "admin"], "customized": true, "updatedAt": "2026-11-27T00:00:00Z" }
+```
+
+- **GET** — `event:read`. An event with no stored setting (every event created before this
+  feature) ⇒ `customized: false` and **every app** enabled (backward compatible, no backfill).
+- **PUT** — `event:write`, re-checked **with the event scope** (an organizer grant scoped to
+  another event ⇒ `403`). Body `{ "enabledApps": [...] }` is the FULL set (replace, last write
+  wins). Unknown id ⇒ `400 VALIDATION_FAILED`; `events` is always kept on; archived event ⇒
+  `409 EVENT_ARCHIVED_IMMUTABLE`.
+- This is a **UX setting, not authorization**: the shell greys (never removes) launcher tiles
+  of apps not enabled for the current event. App RBAC stays with ロール管理.
+
 ---
 
 ## 4. Phase state machine
@@ -357,6 +381,8 @@ All permission keys are from the frozen catalog (`auth.md` §9). Resource-scoped
 | `GET /events/:id/participants` | `event:read` | event/:id |
 | `GET /events/:id/actions` | `event:read` | event/:id |
 | `POST /events/:id/actions` | `event:write` | event/:id |
+| `GET /events/:id/apps` | `event:read` | event/:id |
+| `PUT /events/:id/apps` | `event:write` | event/:id |
 | `GET /actions/:id` | `event:read` | (action → event) |
 | `PATCH /actions/:id` | `event:write` | (action → event) |
 | `DELETE /actions/:id` | `event:write` | (action → event) |
@@ -441,6 +467,7 @@ Every write also records an audit entry to the audit queue (`auditLog.AuditRecor
 | update event (fields) | `event.event.updated` | `event` |
 | update event (phase) | `event.event.phase_changed` | `event` |
 | archive event | `event.event.archived` | `event` |
+| save enabled apps | `event.event.apps_updated` (`details: { before, after }`) | `event` |
 | create action | `event.action.created` | `action` |
 | update action | `event.action.updated` | `action` |
 | archive action | `event.action.archived` | `action` |

@@ -1,5 +1,6 @@
 // event — event-service namespace. "Event > Action" hierarchy is absolute.
 import type { EventId, ActionId, OrgId, ISODateTime, Versioned, Paginated, CursorQuery } from "./common";
+import { APP_IDS, isCanonicalAppId, type AppId } from "./app-registry";
 
 // EventPhase: closed union (D6). Change = contract-change process.
 export type EventPhase = "planning" | "preparing" | "open" | "live" | "wrapup" | "closed";
@@ -57,6 +58,8 @@ export interface EventSummary {
 }
 export interface EventDetail extends DubEvent {
   actions: ActionSummary[];
+  /** Apps enabled for this event (resolved: a legacy event with no setting = every app). Additive. */
+  enabledApps?: AppId[];
 }
 export interface ActionSummary {
   id: ActionId;
@@ -72,6 +75,8 @@ export interface CreateEventRequest {
   endsAt?: ISODateTime;
   venue?: string | null;
   capacity?: number | null;
+  /** Apps to enable for the new event. Omitted => EVENT_DEFAULT_ENABLED_APPS. */
+  enabledApps?: AppId[];
 }
 export interface UpdateEventRequest extends Versioned {
   title?: string;
@@ -230,4 +235,50 @@ export interface AskEventResponse {
   answer: string | null;
   /** Every answer carries its sources; empty when not answered. */
   sources: { label: string; link: string }[];
+}
+
+// ── Per-event enabled apps ───────────────────────────────────────────────────
+// Each event chooses which launcher apps it uses. SINGLE source of truth for the
+// wire shapes, the default set and the normalizer; event-service validates with
+// normalizeEnabledApps (via @dub/validation) and fe2/fe3 read the same helpers.
+//
+// Backward compatibility: an event with NO stored setting (every event created
+// before this feature) resolves to EVERY app enabled — today's behaviour. Only a
+// NEW event is created with EVENT_DEFAULT_ENABLED_APPS.
+
+/** Apps a newly created event starts with: イベント・ガントチャート・ロール管理. */
+export const EVENT_DEFAULT_ENABLED_APPS: readonly AppId[] = ["events", "gantt", "admin"];
+
+/** Apps that cannot be turned off: イベント holds this very setting. */
+export const EVENT_ALWAYS_ENABLED_APPS: readonly AppId[] = ["events"];
+
+/**
+ * Canonicalize a stored/requested app list: drop unknown ids and duplicates, add the
+ * always-on apps, and return it in launcher order. `null`/`undefined` (no setting)
+ * resolves to every app — the legacy "all enabled" state.
+ */
+export function resolveEnabledApps(apps: readonly string[] | null | undefined): AppId[] {
+  if (apps === null || apps === undefined) return [...APP_IDS];
+  const set = new Set<string>([...apps, ...EVENT_ALWAYS_ENABLED_APPS]);
+  return APP_IDS.filter((id) => set.has(id));
+}
+
+/** True iff every entry is a canonical app id (the strict check a write applies). */
+export function isEnabledAppList(v: unknown): v is AppId[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string" && isCanonicalAppId(x));
+}
+
+/** GET /events/{id}/apps and PUT /events/{id}/apps response. */
+export interface EventAppsResponse {
+  eventId: EventId;
+  /** Resolved enabled set, in launcher order (always includes EVENT_ALWAYS_ENABLED_APPS). */
+  enabledApps: AppId[];
+  /** false = never configured (legacy event: every app enabled). */
+  customized: boolean;
+  updatedAt: ISODateTime | null;
+}
+
+/** PUT /events/{id}/apps body: the FULL enabled set (replace, not patch). */
+export interface SaveEventAppsRequest {
+  enabledApps: AppId[];
 }

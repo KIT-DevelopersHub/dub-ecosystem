@@ -26,6 +26,8 @@ export function allSchemas(): string[] {
     // alongside — apply the physical migrations so the seeded D1 matches production.
     sqlFile("../../../infra/d1/migrations/event/0005_event_venue_capacity.sql"),
     sqlFile("../../../infra/d1/migrations/event/0006_event_ai_digest.sql"),
+    // Per-event enabled apps: createEvent writes the default set into event_event_apps.
+    sqlFile("../../../infra/d1/migrations/event/0007_event_enabled_apps.sql"),
     ...TASK_MIGRATIONS.map((m) => m.up),
     // #260: the gantt WBS/team columns (team_id/parent_id/wbs) live in a physical
     // migration that is intentionally NOT mirrored into TASK_MIGRATIONS (pinned to

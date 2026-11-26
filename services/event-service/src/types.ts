@@ -319,6 +319,20 @@ export interface EventRepo {
   // (caller returns an empty doc). Same optimistic upsert contract as the two above.
   getEventPageLayout(eventId: common.EventId): Promise<EventPageLayoutRow | null>;
   upsertEventPageLayout(next: EventPageLayoutRow, expectedVersion: number): Promise<boolean>;
+
+  // Per-event enabled apps. null => never configured (caller resolves to every app).
+  getEventApps(eventId: common.EventId): Promise<EventAppsRow | null>;
+  // Full replace (last write wins; the set is small and edited by one toggle list).
+  putEventApps(row: EventAppsRow): Promise<void>;
+}
+
+// ---- per-event enabled apps (0007) ----
+/** One stored setting. No row = legacy event = every app enabled. */
+export interface EventAppsRow {
+  eventId: common.EventId;
+  apps: string[];
+  updatedBy: common.UserId;
+  updatedAt: common.ISODateTime;
 }
 
 export interface AppDeps {

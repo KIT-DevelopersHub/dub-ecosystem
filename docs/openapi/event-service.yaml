@@ -204,6 +204,75 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /events/{id}/apps:
+    get:
+      operationId: getEventApps
+      summary: Apps enabled for this event (イベント設定 > 使うアプリ)
+      tags:
+        - events
+      description: >-
+        Requires app:events:view + event:read. Shape = @dub/types event.EventAppsResponse.
+        An event that was never configured (customized=false; every event created before this
+        feature) resolves to EVERY app enabled. New events start with EVENT_DEFAULT_ENABLED_APPS
+        (events, gantt, admin). The shell greys launcher tiles of apps not in enabledApps.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Enabled apps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventAppsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: saveEventApps
+      summary: Replace the set of apps enabled for this event
+      tags:
+        - events
+      description: >-
+        Requires app:events:edit + event:write, and event:write asked WITH this event's scope
+        (an organizer grant limited to another event is refused). Full replace (last write
+        wins). Unknown ids are VALIDATION_FAILED; "events" is always kept on. Archived events
+        are immutable (409).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveEventAppsRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventAppsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /events/{id}/digest:
     get:
       operationId: getEventDigest
@@ -659,6 +728,42 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/ActionSummary'
+            enabledApps:
+              type: array
+              items:
+                $ref: '#/components/schemas/AppId'
+              description: Apps enabled for this event (resolved; legacy event = every app).
+    AppId:
+      type: string
+      description: Canonical launcher app id (@dub/types appRegistry.APP_IDS).
+      enum: [events, tasks, gantt, calendar, notifications, chat, mail, usage, members, participation, driveshare, lp, admin, commander, hr, sponsor, goals, accounting]
+    EventAppsResponse:
+      type: object
+      required: [eventId, enabledApps, customized, updatedAt]
+      properties:
+        eventId:
+          type: string
+        enabledApps:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppId'
+          description: Launcher order; always includes "events".
+        customized:
+          type: boolean
+          description: false = never configured (legacy event, every app enabled).
+        updatedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    SaveEventAppsRequest:
+      type: object
+      required: [enabledApps]
+      properties:
+        enabledApps:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppId'
     CreateEventRequest:
       type: object
       required:
@@ -689,6 +794,11 @@ components:
           minimum: 0
           maximum: 100000
           description: 定員 (people, #879)
+        enabledApps:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppId'
+          description: Apps to enable. Omitted => events, gantt, admin.
     UpdateEventRequest:
       type: object
       description: version is the optimistic lock. phase is validated against EVENT_PHASE_TRANSITIONS.
