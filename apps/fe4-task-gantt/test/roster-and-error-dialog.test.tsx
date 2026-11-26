@@ -34,11 +34,13 @@ describe("assignee roster in the create modal (bug 1b)", () => {
     await screen.findByTestId("fe4-gantt-row-t2");
     fireEvent.click(screen.getByTestId("fe4-create-open"));
     const modal = await screen.findByTestId("fe4-create-modal");
-    const assignee = within(modal).getByTestId("fe4-create-assignee");
-    await waitFor(() => expect(within(assignee).getByRole("option", { name: "久米" })).toBeInTheDocument());
-    expect(within(assignee).getByRole("option", { name: "荒木" })).toBeInTheDocument();
+    // 担当 is the searchable picker (#882): open it, its menu is portalled to <body>.
+    fireEvent.click(within(modal).getByTestId("fe4-create-assignee-trigger"));
+    const list = await screen.findByRole("listbox");
+    await waitFor(() => expect(within(list).getByRole("option", { name: "久米" })).toBeInTheDocument());
+    expect(within(list).getByRole("option", { name: "荒木" })).toBeInTheDocument();
     // and still keeps the 未割当 option
-    expect(within(assignee).getByRole("option", { name: "未割当" })).toBeInTheDocument();
+    expect(within(list).getByRole("option", { name: "未割当" })).toBeInTheDocument();
   });
 });
 
