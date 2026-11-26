@@ -44,7 +44,10 @@
   display: flex;
   align-items: center;
   gap: var(--dub-space-1);
-  flex-wrap: wrap;
+}
+.range > :not(.rangeSep) {
+  width: calc(var(--dub-space-16) * 2.5);
+  min-width: 0;
 }
 
 .rangeSep {
@@ -81,8 +84,9 @@
   outline-offset: 1px;
 }
 
-.toggleCount {
-  margin-left: var(--dub-space-1);
+.toggle {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {
@@ -94,6 +98,10 @@
   }
   .field {
     width: 100%;
+  }
+  .range > :not(.rangeSep) {
+    flex: 1;
+    width: auto;
   }
 }
 

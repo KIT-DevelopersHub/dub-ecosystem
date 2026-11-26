@@ -165,22 +165,30 @@ export function knownAddresses(threads: readonly MailThreadModel[], me: KnownAdd
   return [...by.values()].sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email, "ja"));
 }
 
-/** Addresses the viewer receives at: their own plus the same-domain addresses received mail
- *  was sent to (a shared mailbox such as info@, a team list). The 受信アドレス picker only
- *  shows when there is more than one. */
+/** Addresses the viewer receives at, for the 受信アドレス picker (shown only when there are
+ *  several): the To addresses of the viewer's own received mail on the organization's domain —
+ *  the viewer's domain when known, else the domain most received mail is addressed to — e.g.
+ *  their own address plus a shared mailbox such as info@ or a team list. */
 export function receivingAddresses(threads: readonly MailThreadModel[], meEmail: string, extra: readonly string[] = []): string[] {
   const me = meEmail.trim().toLowerCase();
-  const domain = me.split("@")[1];
-  const out = new Set<string>(me ? [me] : []);
-  if (domain)
-    for (const t of threads)
-      for (const m of t.messages) {
-        if (m.outbound) continue;
-        for (const p of [...m.to, ...(m.cc ?? [])]) {
-          const e = p.email?.trim().toLowerCase();
-          if (e && e.endsWith(`@${domain}`)) out.add(e);
-        }
+  const tos: string[] = [];
+  for (const t of threads)
+    for (const m of t.messages) {
+      if (m.outbound || m.mine === false) continue;
+      for (const p of m.to) {
+        const e = p.email?.trim().toLowerCase();
+        if (e && EMAIL_RE.test(e)) tos.push(e);
       }
+    }
+  const domainOf = (e: string): string => e.split("@")[1] ?? "";
+  let domain = me ? domainOf(me) : "";
+  if (!domain) {
+    const freq = new Map<string, number>();
+    for (const e of tos) freq.set(domainOf(e), (freq.get(domainOf(e)) ?? 0) + 1);
+    domain = [...freq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+  }
+  const out = new Set<string>(me ? [me] : []);
+  for (const e of tos) if (domain && domainOf(e) === domain) out.add(e);
   for (const e of extra) if (e) out.add(e);
   return [...out].sort();
 }

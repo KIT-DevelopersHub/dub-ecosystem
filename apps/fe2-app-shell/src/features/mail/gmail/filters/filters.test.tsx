@@ -175,5 +175,7 @@ describe("mailFilters model", () => {
     ];
     expect(knownAddresses(threads, { email: "me@developershub.jp" }).map((a) => a.email)).toEqual(["c@y.com", "info@developershub.jp", "me@developershub.jp", "z@x.com"]);
     expect(receivingAddresses(threads, "me@developershub.jp")).toEqual(["info@developershub.jp", "me@developershub.jp"]);
+    // Viewer address unknown: the domain the received mail is addressed to; Cc is not a receiving address.
+    expect(receivingAddresses(threads, "")).toEqual(["info@developershub.jp"]);
   });
 });

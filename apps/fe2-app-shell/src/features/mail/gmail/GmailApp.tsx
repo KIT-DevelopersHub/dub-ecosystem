@@ -19,6 +19,7 @@ import { MailStoreProvider, composing, folderUnread, queryActive, selectOrdered,
 import { MailFilterRegion } from "./filters/MailFilterRegion.tsx";
 import { useFilterUrlSync } from "./filters/useFilterUrlSync.ts";
 import { activeFilterCount } from "./filters/mailFilters.ts";
+import filterStyles from "./filters/MailFilterBar.module.css";
 import { useMailSync } from "./useMailSync.tsx";
 import { useReadState } from "./useReadState.tsx";
 import { deliver } from "./sendMail.ts";
@@ -100,6 +101,7 @@ function SearchBar({ narrow, onOpenNav, filtersOpen, onToggleFilters }: { narrow
         data-focus-search
         style={{
           flex: 1,
+          minWidth: 0,
           maxWidth: 720,
           display: "flex",
           alignItems: "center",
@@ -131,6 +133,7 @@ function SearchBar({ narrow, onOpenNav, filtersOpen, onToggleFilters }: { narrow
         size="sm"
         onClick={onToggleFilters}
         testId="fe2-mail-filter-toggle"
+        className={filterStyles.toggle}
         iconRight={activeFilterCount(state.filters) > 0 ? <Badge tone={filtersOpen ? "neutral" : "brand"}>{activeFilterCount(state.filters)}</Badge> : undefined}
       >
         絞り込み
