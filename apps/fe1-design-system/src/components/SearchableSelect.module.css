@@ -1,0 +1,141 @@
+/* 検索つきドロップダウン。トリガーは Select (Inputs.module.css .input) と同じ見た目、
+   パネルは Menu と同じ (トークンのみ)。 */
+.root {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  width: 100%;
+  min-width: 0;
+  font-family: var(--dub-font-family-sans);
+  font-size: var(--dub-font-size-md);
+  color: var(--dub-color-text-primary);
+  background: var(--dub-color-surface-base);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  padding: var(--dub-space-2) var(--dub-space-3);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.trigger[data-placeholder="true"] .value {
+  color: var(--dub-color-text-muted);
+}
+.trigger:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+  border-color: var(--dub-color-border-focus);
+}
+.trigger:disabled {
+  background: var(--dub-color-surface-sunken);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.trigger[aria-invalid="true"] {
+  border-color: var(--dub-color-danger-500);
+}
+.value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel {
+  /* portalled to <body>; top/left/width come from the trigger rect (inline, dynamic) */
+  position: fixed;
+  z-index: calc(var(--dub-zIndex-modal) + 1);
+  box-sizing: border-box;
+  min-width: min(280px, calc(100vw - 2 * var(--dub-space-4)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-2);
+  background: var(--dub-color-surface-raised);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  box-shadow: var(--dub-shadow-md);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+}
+.search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-base);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+}
+.search:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 1px;
+}
+.list,
+.group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.heading {
+  padding: var(--dub-space-2) var(--dub-space-3) var(--dub-space-1);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+}
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+  min-height: 36px;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-radius: var(--dub-radius-sm);
+  cursor: pointer;
+}
+.option[data-active="true"] {
+  background: var(--dub-color-surface-sunken);
+}
+.option[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.description {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  overflow-wrap: anywhere;
+}
+.empty {
+  margin: 0;
+  padding: var(--dub-space-3);
+  color: var(--dub-color-text-muted);
+  text-align: center;
+}
+/* iOS は 16px 未満の入力でズームする・タップ領域 44px (FRONTEND_GUIDE §9) */
+@media (pointer: coarse) {
+  .trigger,
+  .search {
+    font-size: max(16px, var(--dub-font-size-md));
+  }
+  .trigger,
+  .option {
+    min-height: 44px;
+  }
+}
