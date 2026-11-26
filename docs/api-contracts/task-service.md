@@ -96,12 +96,12 @@ single-task endpoint.
 | `GET /api/v1/tasks` | `task:read` (+`task:delete` if `includeArchived`) | `200` `Paginated<Task>` | List tasks in an event (or the caller's own). |
 | `POST /api/v1/tasks` | `task:write` | `201` `Task` | Create a task. |
 | `GET /api/v1/tasks/{id}` | `task:read` | `200` `Task` | Read one task. |
-| `PATCH /api/v1/tasks/{id}` | `task:write` + 担当/作成者 or `task:edit_all` | `200` `Task` | Partial update (optimistic-locked). |
-| `DELETE /api/v1/tasks/{id}` | `task:delete` + 担当/作成者 or `task:edit_all` | `200` `Task` | Soft-delete (archive). |
-| `PUT /api/v1/tasks/{id}/dependencies` | `task:write` + 担当/作成者 or `task:edit_all` | `200` `{ taskId, dependsOnIds }` | Full-replace this task's dependency edges. |
+| `PATCH /api/v1/tasks/{id}` | `task:write` + 担当 (担当なしなら作成者) or `task:edit_all` | `200` `Task` | Partial update (optimistic-locked). |
+| `DELETE /api/v1/tasks/{id}` | `task:delete` + 担当 (担当なしなら作成者) or `task:edit_all` | `200` `Task` | Soft-delete (archive). |
+| `PUT /api/v1/tasks/{id}/dependencies` | `task:write` + 担当 (担当なしなら作成者) or `task:edit_all` | `200` `{ taskId, dependsOnIds }` | Full-replace this task's dependency edges. |
 | `GET /api/v1/tasks/dependencies` | `task:read` | `200` `{ items: TaskDependency[] }` | All dependency edges for an event. |
 
-Per-task edit (#881): the writes on one existing task (PATCH, DELETE, dependencies, attachments — also via `/tasks/calendar-events/:id` and gantt `PATCH /gantt/rows/:taskId`) additionally require the caller to be the task's assignee (the person `assigneeId`, or a member of its team — `assigneeTeamId` (#882) or `teamId`), or its creator, or to hold `task:edit_all` (default: admin / maintainer only); otherwise `403 FORBIDDEN` (`details.reason = "not_task_assignee"`). Rule: `@dub/types` `task.canEditTask`. Service principals are not limited. Team membership = `myTeamIds` of member-service `GET /members/me/mention-teams` (名簿 team links; binding `SVC_MEMBER`), read once per request only when the task has a team and the cheaper checks failed.
+Per-task edit (#881): the writes on one existing task (PATCH, DELETE, dependencies, attachments — also via `/tasks/calendar-events/:id` and gantt `PATCH /gantt/rows/:taskId`) additionally require: a person 担当 (`assigneeId`) ⇒ that person only (not the creator, not teammates); a team 担当 (`assigneeTeamId`, #882) ⇒ any member of that team; no 担当 ⇒ the creator. The owning team (`teamId`) grants nothing. A holder of `task:edit_all` (default: admin / maintainer only) edits every task. Otherwise `403 FORBIDDEN` (`details.reason = "not_task_assignee"`). Rule: `@dub/types` `task.canEditTask`. Service principals are not limited. Team membership = `myTeamIds` of member-service `GET /members/me/mention-teams` (名簿 team links; binding `SVC_MEMBER`), read once per request only for a team-assigned task and after the cheaper checks failed.
 
 Permission is resolved via identity-roster `/authz/check` (see `auth.md` §10); a denied
 key surfaces as `403 FORBIDDEN`. All mutations that carry a `version` follow the frozen

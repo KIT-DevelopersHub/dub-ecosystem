@@ -1,4 +1,5 @@
-// #881: without task:edit_all a caller edits only tasks assigned to them or created by them.
+// #881: without task:edit_all — 個人担当 ⇒ that person only, チーム担当 ⇒ that team's members,
+// 担当なし ⇒ the creator. task:edit_all (admin / maintainer) edits everything.
 import { describe, it, expect } from "vitest";
 import type { task } from "@dub/types";
 import { buildApp } from "../src/app";
@@ -23,6 +24,17 @@ async function seed(app: TaskApp, over: Partial<task.CreateTaskRequest> = {}): P
 
 const as = (userId: string, method: string, body?: unknown) => userInit(method, body, { userId });
 
+/**
+ * Hand `t` to a team (#882 assigneeTeamId). Written on the stored row so this suite runs with
+ * or without #882's create/PATCH support for the column.
+ */
+function assignToTeam(h: TestHarness, t: task.Task, teamId: string): void {
+  const row = h.repo.rows.get(t.id) as (task.Task & { assigneeTeamId?: string | null }) | undefined;
+  if (!row) throw new Error("no row");
+  row.assigneeId = null;
+  row.assigneeTeamId = teamId;
+}
+
 describe("task edit permission (#881)", () => {
   it("a bystander without task:edit_all gets 403 on PATCH and nothing changes", async () => {
     const { h, app } = setup();
@@ -44,12 +56,38 @@ describe("task edit permission (#881)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("the creator may edit without task:edit_all", async () => {
+  it("個人担当: the creator (not the assignee) gets 403 — only the assignee edits", async () => {
     const { h, app } = setup();
     const t = await seed(app);
     h.authz.denied.add("task:edit_all");
     const res = await app.request(`/tasks/${t.id}`, as("usr_alice", "PATCH", { version: 1, title: "renamed" }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+  });
+
+  it("個人担当: a teammate of the assignee (same owning team) gets 403", async () => {
+    const { h, app } = setup();
+    const t = await seed(app, { teamId: "team_ops" });
+    h.authz.denied.add("task:edit_all");
+    h.member.teams.set("usr_dave", ["team_ops"]);
+    const res = await app.request(`/tasks/${t.id}`, as("usr_dave", "PATCH", { version: 1, title: "x" }));
+    expect(res.status).toBe(403);
+    expect(h.member.lookups).toBe(0);
+    expect((await h.repo.getById(t.id))?.title).toBe("T");
+  });
+
+  it("担当なし: the creator may edit; another member of the owning team may not", async () => {
+    const { h, app } = setup();
+    const res0 = await app.request(
+      "/tasks",
+      userInit("POST", { eventId: "evt_1", title: "T", teamId: "team_ops" }, { userId: "usr_alice" }),
+    );
+    const t = (await res0.json()) as task.Task;
+    h.authz.denied.add("task:edit_all");
+    h.member.teams.set("usr_dave", ["team_ops"]);
+    const other = await app.request(`/tasks/${t.id}`, as("usr_dave", "PATCH", { version: 1, title: "x" }));
+    expect(other.status).toBe(403);
+    const mine = await app.request(`/tasks/${t.id}`, as("usr_alice", "PATCH", { version: 1, title: "renamed" }));
+    expect(mine.status).toBe(200);
   });
 
   it("a holder of task:edit_all edits any task", async () => {
@@ -117,13 +155,14 @@ describe("task edit permission (#881)", () => {
     h.authz.denied.add("task:edit_all");
     const res = await app.request(`/tasks/calendar-events/${t.id}`, as("usr_carol", "PATCH", { version: 1, title: "x" }));
     expect(res.status).toBe(403);
-    const mine = await app.request(`/tasks/calendar-events/${t.id}`, as("usr_alice", "PATCH", { version: 1, title: "x" }));
+    const mine = await app.request(`/tasks/calendar-events/${t.id}`, as("usr_bob", "PATCH", { version: 1, title: "x" }));
     expect(mine.status).toBe(200);
   });
 
-  it("a member of the task's team edits it; a non-member does not (#881: 名簿 team links)", async () => {
+  it("チーム担当: a member of the 担当チーム edits; a non-member (even the creator) does not", async () => {
     const { h, app } = setup();
-    const t = await seed(app, { teamId: "team_ops" });
+    const t = await seed(app, { teamId: "team_pr" });
+    assignToTeam(h, t, "team_ops");
     h.authz.denied.add("task:edit_all");
     h.member.teams.set("usr_dave", ["team_ops"]);
     h.member.teams.set("usr_erin", ["team_pr"]);
@@ -131,6 +170,8 @@ describe("task edit permission (#881)", () => {
     expect(member.status).toBe(200);
     const outsider = await app.request(`/tasks/${t.id}`, as("usr_erin", "PATCH", { version: 2, title: "x" }));
     expect(outsider.status).toBe(403);
+    const creator = await app.request(`/tasks/${t.id}`, as("usr_alice", "PATCH", { version: 2, title: "x" }));
+    expect(creator.status).toBe(403);
     expect((await h.repo.getById(t.id))?.title).toBe("by team");
   });
 
@@ -155,12 +196,16 @@ describe("task edit permission (#881)", () => {
     expect(del.status).toBe(403);
   });
 
-  it("admin / maintainer (task:edit_all holders) edit any task, team or not", async () => {
+  it("admin / maintainer (task:edit_all holders) edit any task — person- or team-assigned", async () => {
     const { h, app } = setup();
-    const t = await seed(app, { teamId: "team_ops" });
+    const personal = await seed(app, { teamId: "team_ops" });
+    const teamTask = await seed(app);
+    assignToTeam(h, teamTask, "team_ops");
     h.member.teams.set("usr_admin", []);
-    const res = await app.request(`/tasks/${t.id}`, as("usr_admin", "PATCH", { version: 1, title: "x" }));
+    const res = await app.request(`/tasks/${personal.id}`, as("usr_admin", "PATCH", { version: 1, title: "x" }));
     expect(res.status).toBe(200);
+    const res2 = await app.request(`/tasks/${teamTask.id}`, as("usr_maint", "PATCH", { version: 1, title: "x" }));
+    expect(res2.status).toBe(200);
     expect(h.member.lookups).toBe(0);
   });
 

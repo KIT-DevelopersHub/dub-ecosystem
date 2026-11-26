@@ -24,13 +24,14 @@ export function taskCapabilities(perms: readonly PermissionKey[] | null): TaskCa
 }
 
 /** The hint a read-only task shows (detail panel + bar tooltip). */
-export const READ_ONLY_TASK_HINT = "担当者（担当チームのメンバー）か作成者だけが編集できます（すべて編集するにはロール管理の「すべてのタスクを編集」が必要です）";
+export const READ_ONLY_TASK_HINT =
+  "担当者だけが編集できます（担当がチームならそのチームのメンバー、担当がいなければ作成者）。すべて編集するにはロール管理の「すべてのタスクを編集」が必要です";
 
 /**
  * Per-task edit check for the UI (#881), mirroring task-service via `task.canEditTask`.
  * Unknown ids are read-only (fail-closed) except optimistic `task_tmp_*` rows, which the
  * caller just created. `currentUserId === null` (not loaded) ⇒ only `task:edit_all` edits.
- * `myTeamIds`: teams I belong to (members of a task's team edit it).
+ * `myTeamIds`: teams I belong to (members of a task's 担当チーム edit it).
  */
 export function makeCanEditTask(
   tasks: readonly task.Task[],

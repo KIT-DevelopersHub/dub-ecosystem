@@ -35,8 +35,8 @@ export const PERMISSION_CATALOG = [
   { key: "task:read", name: "Read tasks", description: "View tasks", domain: "task", dangerous: false },
   { key: "task:write", name: "Write tasks", description: "Create/update tasks and edit dependencies", domain: "task", dangerous: false },
   { key: "task:delete", name: "Delete tasks", description: "Soft-delete tasks", domain: "task", dangerous: false },
-  // #881: without it a task:write holder edits only tasks assigned to them or created by them.
-  { key: "task:edit_all", name: "Edit all tasks", description: "Edit every task (gantt bars, fields, dependencies, attachments), not only the ones assigned to or created by the caller", domain: "task", dangerous: false },
+  // #881: without it a task:write holder edits only tasks assigned to them / their team, or unassigned ones they created.
+  { key: "task:edit_all", name: "Edit all tasks", description: "Edit every task (gantt bars, fields, dependencies, attachments), not only the ones assigned to the caller (or their team) or, when unassigned, created by them", domain: "task", dangerous: false },
   { key: "file:read", name: "Read files", description: "View/search metadata and download from R2", domain: "file", dangerous: false },
   { key: "file:write", name: "Write files", description: "Register/update/link/upload", domain: "file", dangerous: false },
   { key: "file:admin", name: "Administer files", description: "Force visibility/owner changes and restore", domain: "file", dangerous: true },

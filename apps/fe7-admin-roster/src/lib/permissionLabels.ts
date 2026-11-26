@@ -70,7 +70,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "task:read": { label: "タスクの閲覧", description: "タスクの一覧・詳細を閲覧できるようになります。" },
   "task:write": { label: "タスクの作成・編集", description: "タスクの作成・編集や、タスク間の依存関係の設定ができるようになります。" },
   "task:delete": { label: "タスクの削除", description: "タスクを削除（論理削除・あとから復元可能）できるようになります。" },
-  "task:edit_all": { label: "すべてのタスクを編集", description: "オンにすると、担当でないタスクも編集できます（ガントのバー移動・内容・依存関係・添付）。オフのときは、自分が担当か自分が作成したタスクだけ編集できます。" },
+  "task:edit_all": { label: "すべてのタスクを編集", description: "オンにすると、担当でないタスクも編集できます（ガントのバー移動・内容・依存関係・添付）。オフのときは、自分が担当のタスク・自分のチームが担当のタスク・担当がいない自分が作成したタスクだけ編集できます。" },
   "file:read": { label: "ファイルの閲覧・DL", description: "ファイル情報の閲覧・検索と、ファイルのダウンロードができるようになります。" },
   "file:write": { label: "ファイルの登録・更新", description: "ファイルのアップロード・更新や、他リソースへの紐付けができるようになります。" },
   "file:admin": { label: "ファイルの管理", description: "他人のファイルも含め、公開範囲や所有者の変更・削除ファイルの復元ができるようになります。" },
