@@ -157,7 +157,13 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
             <div className={styles.detailRow}>
               <dt className={styles.detailLabel}>依頼 → 担当</dt>
               <dd className={styles.detailValue}>
-                <FromToCell fromId={t.createdBy ?? null} toId={t.assigneeId} users={users} testId="fe4-mytask-detail-fromto" />
+                <FromToCell
+                  fromId={t.createdBy ?? null}
+                  toId={t.assigneeId}
+                  toTeamName={t.assigneeTeamId ? teamNames.get(t.assigneeTeamId) ?? null : null}
+                  users={users}
+                  testId="fe4-mytask-detail-fromto"
+                />
               </dd>
             </div>
             <div className={styles.detailRow}>

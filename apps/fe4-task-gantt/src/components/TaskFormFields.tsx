@@ -4,6 +4,7 @@ import { PRIORITY_LABEL, STATUS_LABEL, DATE_LABEL } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
+import { AssigneePicker } from "./AssigneePicker";
 import styles from "../styles/app.module.css";
 
 /**
@@ -47,8 +48,11 @@ export interface TaskFormFieldsProps {
   onPriorityChange: (v: task.TaskPriority) => void;
 
   users: readonly identity.UserSummary[];
+  /** 担当 = 人 XOR チーム (#882). The picker offers both; choosing one clears the other. */
   assigneeId: common.UserId | null;
   onAssigneeChange: (v: common.UserId | null) => void;
+  assigneeTeamId: common.TeamId | null;
+  onAssigneeTeamIdChange: (v: common.TeamId | null) => void;
 
   teams: readonly team.Team[];
   teamId: common.TeamId | null;
@@ -89,6 +93,8 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
     users,
     assigneeId,
     onAssigneeChange,
+    assigneeTeamId,
+    onAssigneeTeamIdChange,
     teams,
     teamId,
     onTeamIdChange,
@@ -173,11 +179,15 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
           <label className={styles.formLabel} htmlFor={`${idPrefix}-assignee`}>
             担当
           </label>
-          <Select
+          <AssigneePicker
             id={`${idPrefix}-assignee`}
-            value={assigneeId ?? ""}
-            onChange={(v) => onAssigneeChange(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+            users={users}
+            teams={teams}
+            value={{ assigneeId, assigneeTeamId }}
+            onChange={(next) => {
+              onAssigneeChange(next.assigneeId);
+              onAssigneeTeamIdChange(next.assigneeTeamId);
+            }}
             testId={`${idPrefix}-assignee`}
           />
         </div>

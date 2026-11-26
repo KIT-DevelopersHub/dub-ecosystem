@@ -17,6 +17,7 @@ export function listTasks(client: ApiClient, q: task.ListTasksQuery): Promise<ta
     query: {
       ...(q.eventId !== undefined ? { eventId: q.eventId } : {}),
       ...(q.assigneeId !== undefined ? { assigneeId: q.assigneeId } : {}),
+      ...(q.assigneeTeamId !== undefined ? { assigneeTeamId: q.assigneeTeamId } : {}),
       ...(q.createdById !== undefined ? { createdById: q.createdById } : {}),
       ...(q.teamId !== undefined ? { teamId: q.teamId } : {}),
       ...(q.status !== undefined ? { status: q.status.join(",") } : {}),
@@ -189,6 +190,16 @@ export function putGanttView(
 
 // ---- teams (canonical team.Team). Single fetch source: swap this to the
 //      member-service team list API later without touching consumers. ----
+/** GET /members/me/mention-teams — `myTeamIds` = the teams the caller belongs to (any
+ *  signed-in user). Powers "tasks assigned to my team" in My Tasks (#882). */
+export interface MyTeamsResponse {
+  myTeamIds: string[];
+}
+export async function listMyTeamIds(client: ApiClient): Promise<common.TeamId[]> {
+  const res = await client.request<Partial<MyTeamsResponse>>({ method: "GET", path: `${P}/members/me/mention-teams` });
+  return (res.myTeamIds ?? []) as common.TeamId[];
+}
+
 export function listTeams(client: ApiClient): Promise<member.ListTeamsResponse> {
   // Canonical team list is owned by member-service and exposed at the gateway
   // "members" segment (GET /api/v1/members/teams). The api-gateway has NO bare

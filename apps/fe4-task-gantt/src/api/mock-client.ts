@@ -14,6 +14,7 @@ import type {
   ResourceClient,
 } from "../contracts/spa-shell";
 import { ApiError } from "../contracts/spa-shell";
+import type { MyTeamsResponse } from "./endpoints";
 
 let seq = 0;
 function mintId(prefix: string): string {
@@ -46,6 +47,8 @@ export interface MockSeed {
   hierarchy?: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }>;
   /** "current user" the mock stamps as createdBy on POST /tasks (from→to "from"). */
   currentUserId?: common.UserId;
+  /** teams the current user belongs to (GET /members/me/mention-teams). */
+  myTeamIds?: common.TeamId[];
 }
 
 export class MockApiClient implements ApiClient {
@@ -60,6 +63,7 @@ export class MockApiClient implements ApiClient {
   private criticalTaskIds: common.TaskId[] = [];
   private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
+  private myTeamIds: common.TeamId[];
   private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
 
   /** force the next matching call to throw (test 11 / error branches). */
@@ -83,6 +87,7 @@ export class MockApiClient implements ApiClient {
     this.criticalTaskIds = seed.criticalTaskIds ?? [];
     this.hierarchy = seed.hierarchy ?? {};
     this.currentUserId = seed.currentUserId ?? "usr_me";
+    this.myTeamIds = seed.myTeamIds ?? [];
   }
 
   /** Set of task ids that appear as some row's parent (⇒ they render a toggle). */
@@ -155,6 +160,9 @@ export class MockApiClient implements ApiClient {
       // Mirror member-service's canonical { teams } envelope so the mock and prod
       // agree (previously { items }, which hid a prod-only empty team switcher).
       return ({ teams: this.teams } as member.ListTeamsResponse) as T;
+    // the caller's own teams (担当チーム → My Tasks). Demo: none unless seeded.
+    if (path === "/api/v1/members/me/mention-teams" && req.method === "GET")
+      return ({ teams: [], myTeamIds: this.myTeamIds } as MyTeamsResponse) as T;
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(req.query ?? {}) as T;
     // --- events ---
@@ -209,7 +217,12 @@ export class MockApiClient implements ApiClient {
     const q = req.query ?? {};
     let items = [...this.taskById.values()];
     if (q.eventId) items = items.filter((t) => t.eventId === q.eventId);
-    if (q.assigneeId) items = items.filter((t) => t.assigneeId === q.assigneeId);
+    // #882: assigneeTeamId (comma list) ORs with assigneeId — mirrors task-service.
+    const teamIds = q.assigneeTeamId ? String(q.assigneeTeamId).split(",").filter(Boolean) : [];
+    if (q.assigneeId || teamIds.length > 0)
+      items = items.filter(
+        (t) => (!!q.assigneeId && t.assigneeId === q.assigneeId) || (!!t.assigneeTeamId && teamIds.includes(t.assigneeTeamId)),
+      );
     if (q.createdById) items = items.filter((t) => t.createdBy === q.createdById);
     if (q.teamId) items = items.filter((t) => t.teamId === q.teamId);
     if (q.status) {
@@ -277,6 +290,7 @@ export class MockApiClient implements ApiClient {
       status: "todo",
       priority: body.priority ?? "medium",
       assigneeId: body.assigneeId ?? null,
+      assigneeTeamId: body.assigneeId ? null : body.assigneeTeamId ?? null,
       teamId: body.teamId ?? null,
       createdBy: this.currentUserId, // server stamps created_by from the principal
       startAt: body.startAt ?? null,
@@ -309,6 +323,10 @@ export class MockApiClient implements ApiClient {
       ...(body.status !== undefined ? { status: body.status } : {}),
       ...(body.priority !== undefined ? { priority: body.priority } : {}),
       ...(body.assigneeId !== undefined ? { assigneeId: body.assigneeId } : {}),
+      ...(body.assigneeTeamId !== undefined ? { assigneeTeamId: body.assigneeTeamId } : {}),
+      // 人 XOR チーム (server rule): setting one side clears the other.
+      ...(body.assigneeId ? { assigneeTeamId: null } : {}),
+      ...(body.assigneeTeamId ? { assigneeId: null } : {}),
       ...(body.teamId !== undefined ? { teamId: body.teamId } : {}),
       ...(body.startAt !== undefined ? { startAt: body.startAt } : {}),
       ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),

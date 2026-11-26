@@ -2937,9 +2937,15 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       // Honour the scopes the real task-service filters on, so the calendar's 個人/チーム
       // split (担当・依頼 vs チームのタスクを表示) reads true in the demo.
       const q = url.searchParams;
+      // 担当チーム (#882): assigneeTeamId (comma list) ORs with assigneeId, like task-service.
+      const teamIds = (q.get("assigneeTeamId") ?? "").split(",").filter(Boolean);
+      const assigneeOk = (t: task.Task): boolean =>
+        (!q.get("assigneeId") && teamIds.length === 0) ||
+        (!!q.get("assigneeId") && t.assigneeId === q.get("assigneeId")) ||
+        (!!t.assigneeTeamId && teamIds.includes(t.assigneeTeamId));
       const rows = TASKS.filter(
         (t) =>
-          (!q.get("assigneeId") || t.assigneeId === q.get("assigneeId")) &&
+          assigneeOk(t) &&
           // Older seed rows carry no createdBy; treat them as issued by the demo user.
           (!q.get("createdById") || (t.createdBy ?? ME_ID) === q.get("createdById")) &&
           (!q.get("teamId") || t.teamId === q.get("teamId")),
@@ -3008,6 +3014,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const created: task.Task = {
         version: 1, id: `tsk_demo_${Date.now()}`, eventId: b.eventId ?? null, title: b.title, description: b.description ?? null,
         status: "todo", priority: b.priority ?? "medium", assigneeId: b.assigneeId ?? null, createdBy: ME_ID,
+        assigneeTeamId: b.assigneeId ? null : b.assigneeTeamId ?? null,
         teamId: b.teamId ?? null, startAt: b.startAt ?? null, dueAt: b.dueAt ?? null, origin: "internal",
         archivedAt: null, createdAt: now, updatedAt: now,
       };
@@ -3140,6 +3147,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         if (b.status !== undefined) t.status = b.status;
         if (b.priority !== undefined) t.priority = b.priority;
         if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
+        if (b.assigneeTeamId !== undefined) t.assigneeTeamId = b.assigneeTeamId;
+        // 人 XOR チーム (server rule): setting one side clears the other.
+        if (b.assigneeId) t.assigneeTeamId = null;
+        if (b.assigneeTeamId) t.assigneeId = null;
         if (b.teamId !== undefined) t.teamId = b.teamId;
         const datesChanged = b.startAt !== undefined || b.dueAt !== undefined;
         if (datesChanged) {

@@ -18,6 +18,8 @@ interface MyTaskCreateDraft {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  /** 担当チーム (#882). Exclusive with assigneeId. Optional for drafts saved before it existed. */
+  assigneeTeamId?: common.TeamId | null;
   teamId: common.TeamId | null;
   start: string | null;
   due: string | null;
@@ -35,6 +37,8 @@ export interface MyTaskDraft {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  /** 担当チーム (#882). Exclusive with assigneeId. Optional for drafts saved before it existed. */
+  assigneeTeamId?: common.TeamId | null;
   teamId: common.TeamId | null;
   /** Planned start (開始日). null = no explicit start. Mirrors the gantt create form. */
   startAt: common.ISODateTime | null;
@@ -81,6 +85,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
   const [title, setTitle] = useState(initialDraft?.title ?? "");
   const [status, setStatus] = useState<task.TaskStatus>(initialDraft?.status ?? "todo");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(initialDraft?.assigneeId ?? null);
+  const [assigneeTeamId, setAssigneeTeamId] = useState<common.TeamId | null>(initialDraft?.assigneeTeamId ?? null);
   const [priority, setPriority] = useState<task.TaskPriority>(initialDraft?.priority ?? "medium");
   const [teamId, setTeamId] = useState<common.TeamId | null>(initialDraft?.teamId ?? null);
   const [start, setStart] = useState<string | null>(initialDraft?.start ?? null);
@@ -96,6 +101,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
     status !== "todo" ||
     priority !== "medium" ||
     assigneeId != null ||
+    assigneeTeamId != null ||
     teamId != null ||
     start != null ||
     due != null ||
@@ -103,7 +109,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
     deps.length > 0;
   const draft = useDraftAutosave<MyTaskCreateDraft>({
     storageKey: DRAFT_KEY,
-    value: { title, description, status, priority, assigneeId, teamId, start, due, parentId, deps },
+    value: { title, description, status, priority, assigneeId, assigneeTeamId, teamId, start, due, parentId, deps },
     dirty,
   });
 
@@ -112,6 +118,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
     setTitle("");
     setStatus("todo");
     setAssigneeId(null);
+    setAssigneeTeamId(null);
     setPriority("medium");
     setTeamId(null);
     setStart(null);
@@ -141,6 +148,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
         status,
         priority,
         assigneeId,
+        assigneeTeamId,
         teamId,
         startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
@@ -196,6 +204,8 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
         users={people}
         assigneeId={assigneeId}
         onAssigneeChange={setAssigneeId}
+        assigneeTeamId={assigneeTeamId}
+        onAssigneeTeamIdChange={setAssigneeTeamId}
         teams={teams}
         teamId={teamId}
         onTeamIdChange={setTeamId}
