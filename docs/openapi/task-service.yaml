@@ -119,6 +119,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: assigneeTeamId
+          in: query
+          description: Comma-separated team ids (#882). ORed with assigneeId when both are given.
+          schema:
+            type: string
         - name: includeArchived
           in: query
           schema:
@@ -541,6 +546,11 @@ components:
           type:
             - string
             - 'null'
+        assigneeTeamId:
+          description: Team assignee (#882). Exclusive with assigneeId.
+          type:
+            - string
+            - 'null'
         dueAt:
           type:
             - string
@@ -590,6 +600,11 @@ components:
           $ref: '#/components/schemas/TaskPriority'
         assigneeId:
           type: string
+        assigneeTeamId:
+          description: Team assignee (#882). Exclusive with assigneeId.
+          type:
+            - string
+            - 'null'
         dueAt:
           type: string
           format: date-time
@@ -615,6 +630,11 @@ components:
         priority:
           $ref: '#/components/schemas/TaskPriority'
         assigneeId:
+          type:
+            - string
+            - 'null'
+        assigneeTeamId:
+          description: Team assignee (#882). Exclusive with assigneeId.
           type:
             - string
             - 'null'

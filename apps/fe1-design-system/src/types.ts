@@ -224,6 +224,40 @@ export interface SelectProps<V extends string = string> extends TestableProps {
   "aria-describedby"?: string;
 }
 
+/** One option of SearchableSelect. `group` puts it under a heading (e.g. メンバー / チーム). */
+export interface SearchableSelectOption<V extends string = string> {
+  value: V;
+  label: string;
+  /** Second line (e.g. an email). Also searched. */
+  description?: string;
+  group?: string;
+  disabled?: boolean;
+  testId?: string;
+}
+/** Searchable dropdown (search box at the top of the menu). Same value contract as Select. */
+export interface SearchableSelectProps<V extends string = string> extends TestableProps {
+  id: string;
+  value: V | null;
+  onChange: (value: V) => void;
+  options: SearchableSelectOption<V>[];
+  /** Trigger text when nothing is selected. */
+  placeholder?: string;
+  searchPlaceholder?: string;
+  /** Shown when the query matches nothing. */
+  emptyText?: string;
+  invalid?: boolean;
+  disabled?: boolean;
+  /** Options are still loading — the menu shows a skeleton. */
+  loading?: boolean;
+  /** Values floated to the top (under `pinnedLabel`) while the query is empty — e.g. recent picks. */
+  pinnedValues?: readonly V[];
+  pinnedLabel?: string;
+  /** Render at most this many matches. Default 100. */
+  maxResults?: number;
+  "aria-label"?: string;
+  "aria-describedby"?: string;
+}
+
 export interface CheckboxProps extends TestableProps {
   id: string;
   checked: boolean;

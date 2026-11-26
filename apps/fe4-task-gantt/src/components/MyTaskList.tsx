@@ -154,7 +154,13 @@ export function MyTaskList({
                   </td>
                 )}
                 <td className={styles.colFromTo}>
-                  <FromToCell fromId={t.createdBy ?? null} toId={t.assigneeId} users={users} testId={`fe4-fromto-${t.id}`} />
+                  <FromToCell
+                    fromId={t.createdBy ?? null}
+                    toId={t.assigneeId}
+                    toTeamName={t.assigneeTeamId ? teamNames.get(t.assigneeTeamId) ?? null : null}
+                    users={users}
+                    testId={`fe4-fromto-${t.id}`}
+                  />
                 </td>
                 <td className={styles.cellTitle}>{t.title}</td>
                 <td>{team ? <Badge tone="info">{team}</Badge> : <span className={styles.muted}>―</span>}</td>
