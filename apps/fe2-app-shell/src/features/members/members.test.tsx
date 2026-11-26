@@ -288,18 +288,22 @@ describe("MembersPage", () => {
     };
     render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
     await screen.findByTestId("members-orgchart");
+    // 3 non-declined members are ALL rendered as org chips; the declined one is not.
     expect(screen.getByTestId("members-orgchip-p_team")).toBeInTheDocument();
     expect(screen.getByTestId("members-orgchip-p_none")).toBeInTheDocument();
     expect(screen.getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
     expect(screen.queryByTestId("members-orgchip-p_gone")).not.toBeInTheDocument();
-    // リーダーに辿り着かない人は末尾の「リーダー未設定」列。
-    const rest = screen.getByTestId("members-orgcol-unassigned");
-    expect(within(rest).getByText("リーダー未設定")).toBeInTheDocument();
-    expect(within(rest).getByTestId("members-orgchip-p_none")).toBeInTheDocument();
-    expect(within(rest).getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
+    // team-less + orphan-ref members land in the muted 未所属 note (NOT a pseudo-team
+    // column) at the foot of the chart.
+    const org = screen.getByTestId("members-orgchart");
+    const note = within(org).getByTestId("members-orgchart-unassigned");
+    expect(note).toBeInTheDocument();
+    expect(within(note).getByText("未所属（チーム未割り当て）")).toBeInTheDocument();
+    expect(within(note).getByTestId("members-orgchip-p_none")).toBeInTheDocument();
+    expect(within(note).getByTestId("members-orgchip-p_orphan")).toBeInTheDocument();
   });
 
-  it("組織図 hides 法人-only members; a member also in another team stays", async () => {
+  it("組織図 hides the 法人 team; a member also in another team stays in that team's column", async () => {
     const person = { ...P0, orgId: "o", roleTitle: null, status: "added" as const, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
     const overview: MembersOverview = {
       teams: [
@@ -307,74 +311,138 @@ describe("MembersPage", () => {
         { id: "corp", key: "houjin", name: "法人チーム", color: "#7c3aed", description: null },
       ],
       members: [
-        { ...person, id: "L", name: "リーダー", roleTitle: "開発リーダー", teamIds: ["t1"], sortOrder: 0 },
-        { ...person, id: "p_corp", name: "法人のみ", teamIds: ["corp"], leaderId: "L", sortOrder: 1 },
-        { ...person, id: "p_both", name: "兼任", teamIds: ["t1", "corp"], leaderId: "L", sortOrder: 2 },
+        { ...person, id: "p_corp", name: "法人のみ", teamIds: ["corp"], sortOrder: 1 },
+        { ...person, id: "p_both", name: "兼任", teamIds: ["t1", "corp"], sortOrder: 2 },
       ],
     };
     render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
     await screen.findByTestId("members-orgchart");
+    expect(screen.queryByTestId("members-orgcol-corp")).not.toBeInTheDocument();
     expect(screen.queryByTestId("members-orgchip-p_corp")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("members-orgcol-L")).getByTestId("members-orgchip-p_both")).toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orgcol-t1")).getByTestId("members-orgchip-p_both")).toBeInTheDocument();
   });
 
-  it("組織図 puts 打診中 / 休み中 below active members in a leader column", async () => {
-    const person = { ...P0, orgId: "o", roleTitle: null, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t", teamIds: ["t1"], leaderId: "L" };
+  it("組織図 puts 打診中 / 休み中 below active members", async () => {
+    const person = { ...P0, orgId: "o", roleTitle: null, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t", teamIds: ["t1"] };
     const overview: MembersOverview = {
       teams: [{ id: "t1", key: "dev", name: "開発", color: "#0d9488", description: null }],
       members: [
-        { ...person, id: "L", name: "リーダー", roleTitle: "開発リーダー", status: "added", leaderId: null, sortOrder: 0 },
         { ...person, id: "leave", name: "休み", status: "on_leave", sortOrder: 1 },
         { ...person, id: "pending", name: "打診", status: "invited", sortOrder: 2 },
         { ...person, id: "active", name: "活動", status: "added", sortOrder: 3 },
       ],
     };
     render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
-    const col = await screen.findByTestId("members-orgcol-L");
+    const col = await screen.findByTestId("members-orgcol-t1");
     const ids = [...col.querySelectorAll("[data-testid^=members-orgchip-]")].map((e) => e.getAttribute("data-testid"));
-    expect(ids).toEqual(["members-orgchip-L", "members-orgchip-active", "members-orgchip-pending", "members-orgchip-leave"]);
+    expect(ids).toEqual(["members-orgchip-active", "members-orgchip-pending", "members-orgchip-leave"]);
   });
 
-  // FBの主眼: オーガナイザーは上段に横並び、リーダーは下段に横並びの列、各リーダーの列に配下を縦に。
-  // 入れ子の leaderId(メンバーの下のメンバー)は、たどった先の最初のリーダーの列に入る。
-  it("組織図 lays out organizers side by side, then one column per leader with its members", async () => {
-    const base = { ...P0, orgId: "o", status: "added" as const, department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
+  // 班: チームの中に、リーダーごとの班を横に並べる。メンバーは leaderId を上へたどって
+  // 最初に当たったリーダーの班に入る(孫も同じ班)。オーガナイザーは班の外(カード上部)。
+  const squadBase = { ...P0, orgId: "o", department: null, grade: null, identityUserId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t", status: "added" as const };
+
+  it("組織図 lays out multiple 班 side by side inside a team", async () => {
     const overview: MembersOverview = {
-      teams: [
-        { id: "dev", key: "dev", name: "開発チーム", color: "#0d9488", description: null },
-        { id: "pr", key: "pr", name: "広報チーム", color: "#db2777", description: null },
-      ],
+      teams: [{ id: "pr", key: "pr", name: "集客広報", color: "#db2777", description: null }],
       members: [
-        { ...base, id: "O1", name: "代表太郎", roleTitle: "代表", teamIds: [], leaderId: null, sortOrder: 1 },
-        { ...base, id: "O2", name: "統括花子", roleTitle: "オーガナイザー", teamIds: [], leaderId: null, sortOrder: 2 },
-        { ...base, id: "L1", name: "リーダー甲", roleTitle: "開発リーダー", teamIds: ["dev"], leaderId: "O1", sortOrder: 3 },
-        { ...base, id: "L2", name: "リーダー乙", roleTitle: "広報リーダー", teamIds: ["pr"], leaderId: "O2", sortOrder: 4 },
-        { ...base, id: "R1", name: "配下A", roleTitle: "メンバー", teamIds: ["dev"], leaderId: "L1", sortOrder: 5 },
-        { ...base, id: "R1b", name: "孫A", roleTitle: null, teamIds: ["dev"], leaderId: "R1", sortOrder: 6 },
-        { ...base, id: "R2", name: "配下B", roleTitle: null, teamIds: ["pr"], leaderId: "L2", sortOrder: 7 },
-        { ...base, id: "F", name: "未設定子", roleTitle: null, teamIds: ["dev"], leaderId: null, sortOrder: 8 },
+        { ...squadBase, id: "O", name: "白木 彩", roleTitle: "オーガナイザー", position: "organizer", teamIds: ["pr"], leaderId: null, sortOrder: 1 },
+        { ...squadBase, id: "L1", name: "石井 里奈", roleTitle: "広報リーダー", position: "leader", teamIds: ["pr"], leaderId: "O", sortOrder: 2 },
+        { ...squadBase, id: "L2", name: "中田 桜", roleTitle: "デザインリーダー", position: "leader", teamIds: ["pr"], leaderId: "O", sortOrder: 3 },
+        { ...squadBase, id: "R1", name: "配下A", roleTitle: "メンバー", position: "member", teamIds: ["pr"], leaderId: "L1", sortOrder: 4 },
+        { ...squadBase, id: "R1c", name: "配下Aの下", roleTitle: "メンバー", position: "member", teamIds: ["pr"], leaderId: "R1", sortOrder: 5 },
+        { ...squadBase, id: "R2", name: "配下B", roleTitle: "メンバー", position: "member", teamIds: ["pr"], leaderId: "L2", sortOrder: 6 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+    expect(screen.getByTestId("fe2-orgchart-subgroups")).toBeInTheDocument();
+
+    const row = screen.getByTestId("members-orgsquads-pr");
+    const squads = [...row.querySelectorAll("[data-testid^='members-orgsquad-'][aria-label]")];
+    expect(squads.map((e) => e.getAttribute("data-testid"))).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
+    expect(squads.map((e) => e.getAttribute("aria-label"))).toEqual(["広報班", "デザイン班"]);
+
+    const s1 = screen.getByTestId("members-orgsquad-L1");
+    const s2 = screen.getByTestId("members-orgsquad-L2");
+    for (const id of ["L1", "R1", "R1c"]) expect(within(s1).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    expect(within(s1).queryByTestId("members-orgchip-R2")).not.toBeInTheDocument();
+    for (const id of ["L2", "R2"]) expect(within(s2).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    expect(within(s2).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
+    // オーガナイザーは班の外(カード上部)。
+    expect(within(row).queryByTestId("members-orgchip-O")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("members-orgcol-pr")).getByTestId("members-orgchip-O")).toBeInTheDocument();
+  });
+
+  it("組織図 lines up co-leaders of one 班 side by side", async () => {
+    const overview: MembersOverview = {
+      teams: [{ id: "pr", key: "pr", name: "集客広報", color: "#db2777", description: null }],
+      members: [
+        { ...squadBase, id: "L1", name: "石井 里奈", roleTitle: "SNSリーダー", position: "leader", teamIds: ["pr"], leaderId: null, sortOrder: 1 },
+        { ...squadBase, id: "L1b", name: "副 リーダー", roleTitle: "SNSリーダー", position: "leader", teamIds: ["pr"], leaderId: "L1", sortOrder: 2 },
+        { ...squadBase, id: "L2", name: "中田 桜", roleTitle: "SNSリーダー", position: "leader", teamIds: ["pr"], leaderId: null, sortOrder: 3 },
+        { ...squadBase, id: "R1", name: "配下A", roleTitle: "メンバー", position: "member", teamIds: ["pr"], leaderId: "L1b", sortOrder: 4 },
       ],
     };
     render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
     await screen.findByTestId("members-orgchart");
 
-    const orgRow = screen.getByTestId("members-orgchart-organizers");
-    const orgIds = [...orgRow.querySelectorAll("[data-testid^='members-orgchip-']")].map((e) => e.getAttribute("data-testid"));
-    expect(orgIds).toEqual(["members-orgchip-O1", "members-orgchip-O2"]);
+    const leaders = screen.getByTestId("members-orgsquad-leaders-L1");
+    const ids = [...leaders.querySelectorAll("[data-testid^='members-orgchip-']")].map((e) => e.getAttribute("data-testid"));
+    expect(ids).toEqual(["members-orgchip-L1", "members-orgchip-L1b"]);
+    // 共同リーダーの配下も同じ班。
+    expect(within(screen.getByTestId("members-orgsquad-L1")).getByTestId("members-orgchip-R1")).toBeInTheDocument();
+    expect(screen.queryByTestId("members-orgsquad-L1b")).not.toBeInTheDocument();
+    // 班名が重なる時は姓で区別する。
+    expect(screen.getByTestId("members-orgsquad-L1").getAttribute("aria-label")).toBe("石井班");
+    expect(screen.getByTestId("members-orgsquad-L2").getAttribute("aria-label")).toBe("中田班");
+  });
 
-    const cols = [...screen.getByTestId("members-orgchart-leaders").querySelectorAll("[data-testid^='members-orgcol-']")];
-    expect(cols.map((c) => c.getAttribute("data-testid"))).toEqual(["members-orgcol-L1", "members-orgcol-L2", "members-orgcol-unassigned"]);
+  it("組織図 keeps a team without leaders as the plain leaderId tree (no 班)", async () => {
+    const overview: MembersOverview = {
+      teams: [{ id: "net", key: "network", name: "ネットワーク", color: "#0891b2", description: null }],
+      members: [
+        { ...squadBase, id: "A", name: "上長", roleTitle: "メンバー", position: "member", teamIds: ["net"], leaderId: null, sortOrder: 1 },
+        { ...squadBase, id: "B", name: "部下", roleTitle: "メンバー", position: "member", teamIds: ["net"], leaderId: "A", sortOrder: 2 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+    const col = screen.getByTestId("members-orgcol-net");
+    expect(screen.queryByTestId("members-orgsquads-net")).not.toBeInTheDocument();
+    expect(col.querySelector("[aria-label]")).toBeNull();
+    const aItem = within(col).getByTestId("members-orgchip-A").closest("li");
+    expect(within(aItem as HTMLElement).getByTestId("members-orgchip-B")).toBeInTheDocument();
+  });
 
-    const col1 = screen.getByTestId("members-orgcol-L1");
-    expect(within(col1).getByText("開発チーム")).toBeInTheDocument();
-    for (const id of ["L1", "R1", "R1b"]) expect(within(col1).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
-    expect(within(col1).queryByTestId("members-orgchip-R2")).not.toBeInTheDocument();
-    const col2 = screen.getByTestId("members-orgcol-L2");
-    expect(within(col2).getByTestId("members-orgchip-R2")).toBeInTheDocument();
-    expect(within(col2).queryByTestId("members-orgchip-R1")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("members-orgcol-unassigned")).getByTestId("members-orgchip-F")).toBeInTheDocument();
-    // 横スクロールの枠に入っている(ページ本体は横に広がらない)
-    expect(screen.getByTestId("fe2-orgchart-leader-columns")).toContainElement(col1);
+  // 統括チームは他チームと並ぶ1列になり、上部「代表」には統括チームで役割に代表/副代表を含む人だけを
+  // 代表→副代表の順で出す(統括チームの列にも重複して載る)。統括外の「代表」は上に出さない。
+  it("組織図 shows 代表 on top and 統括チーム as a regular column", async () => {
+    const base = { ...P0, orgId: "o", department: null, grade: null, identityUserId: null, leaderId: null, contact: null, note: null, version: 1, createdAt: "t", updatedAt: "t" };
+    const overview: MembersOverview = {
+      teams: [
+        { id: "hq", key: "soukatsu", name: "統括チーム", color: "#1e3a5f", description: null },
+        { id: "dev", key: "dev", name: "開発チーム", color: "#0d9488", description: null },
+      ],
+      members: [
+        { ...base, id: "K", name: "高岡 己太朗", roleTitle: "副代表", status: "added", teamIds: ["hq"], sortOrder: 1 },
+        { ...base, id: "Y", name: "金井友楽", roleTitle: "代表", status: "added", teamIds: ["hq"], sortOrder: 2 },
+        { ...base, id: "H", name: "統括三郎", roleTitle: "統括リーダー", status: "added", teamIds: ["hq"], sortOrder: 3 },
+        { ...base, id: "D", name: "開発花子", roleTitle: "開発チーム代表", status: "added", teamIds: ["dev"], sortOrder: 4 },
+      ],
+    };
+    render(wrap(<MembersOrgChartPage />, makeApi({ getOverview: () => Promise.resolve(overview) })));
+    await screen.findByTestId("members-orgchart");
+
+    const reps = screen.getByTestId("members-orgchart-reps");
+    expect(reps.textContent).toMatch(/^代表/);
+    expect(within(reps).queryByText("開発花子")).not.toBeInTheDocument();
+    const repIds = [...reps.querySelectorAll("[data-testid^='members-orgrep-']")].map((e) => e.getAttribute("data-testid"));
+    expect(repIds).toEqual(["members-orgrep-Y", "members-orgrep-K"]);
+    const hqCol = screen.getByTestId("members-orgcol-hq");
+    for (const id of ["K", "Y", "H"]) expect(within(hqCol).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    const cols = [...screen.getByTestId("members-orgchart").querySelectorAll("[data-testid^='members-orgcol-']")];
+    expect(cols.map((c) => c.getAttribute("data-testid"))).toEqual(["members-orgcol-dev", "members-orgcol-hq"]);
   });
 });
 
