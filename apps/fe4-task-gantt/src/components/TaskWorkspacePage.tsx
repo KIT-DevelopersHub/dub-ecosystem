@@ -18,7 +18,8 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
-import { assigneeLabel } from "../domain/assignee";
+import { ASSIGNEE_REQUIRED_MESSAGE, assigneeLabel, defaultAssignee } from "../domain/assignee";
+import { useTaskRoute } from "../routes/task-route-context";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { childProgressByParent } from "../domain/child-progress";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
@@ -255,6 +256,12 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
     for (const u of userList) if (!byId.has(u.id)) byId.set(u.id, u);
     return [...byId.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, "ja"));
   }, [roster, userList]);
+  // 担当は必須: 新規タスクの担当の既定値 = チームで絞り込み中ならそのチーム、なければ作成者。
+  const { currentUserId } = useTaskRoute();
+  const createDefaultAssignee = useMemo(
+    () => defaultAssignee(currentUserId, assignableUsers, { teamId: filter.teamId, teams }),
+    [currentUserId, assignableUsers, filter.teamId, teams],
+  );
   // 担当者フィルタの選択肢: assignableUsers を {id,name} に射影（already roster∪assigned,
   // 名前でソート済み）。これで担当者を選ぶとその人のタスク/バーだけに絞り込まれる。
   const assigneeFilterOptions = useMemo(
@@ -447,7 +454,11 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
       .filter((d): d is { field?: string; reason?: string; message?: string } => !!d && typeof d === "object")
       .map((d) => ({
         ...(d.field ? { label: FIELD_LABEL[d.field] ?? d.field } : {}),
-        message: d.message ?? d.reason ?? "入力を確認してください",
+        // 担当は必須 (server 400 assigneeId/required): 担当なしの古いタスクを編集したとき等。
+        message:
+          d.field === "assigneeId" && d.reason === "required"
+            ? `${ASSIGNEE_REQUIRED_MESSAGE}（担当が未設定のタスクは、詳細で担当を選ぶまで編集できません）`
+            : d.message ?? d.reason ?? "入力を確認してください",
       }));
   }, [store.lastErrorDetail]);
   const errorIsRetryable = store.lastError?.action === "retry_button";
@@ -1341,6 +1352,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         parentOptions={allTaskOptions}
         scopeTasks={scopeTasks}
         onCreate={onCreate}
+        defaultAssignee={createDefaultAssignee}
       />
 
       {selectedTask && (

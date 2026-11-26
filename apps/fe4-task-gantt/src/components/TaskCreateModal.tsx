@@ -6,6 +6,7 @@ import { isoFromDateInput } from "../domain/task-form";
 import { teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { rememberPredecessors } from "./PredecessorPicker";
 import { TaskFormFields } from "./TaskFormFields";
+import { encodeAssignee, hasAssignee, UNASSIGNED, type Assignee } from "../domain/assignee";
 import styles from "../styles/app.module.css";
 
 // P1-2 follow-up: unlike the edit-existing-task panel (TaskDetailPanel), which
@@ -70,13 +71,16 @@ export interface TaskCreateModalProps {
   initialParentId?: common.TaskId | null;
   /** predecessor ids preset when opened with a dependency already in mind. */
   initialDependsOn?: readonly common.TaskId[];
+  /** 担当の既定値 (担当は必須): ガントがチームで絞り込まれていればそのチーム、なければ作成者
+   *  (domain/assignee defaultAssignee)。担当が空のときだけ入る。 */
+  defaultAssignee?: Assignee;
 }
 
 // A newly-created task starts in "todo"; only todo-reachable states are offered.
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn, defaultAssignee = UNASSIGNED }: TaskCreateModalProps) {
   // Seed once from any draft left by an accidental reload; otherwise the usual blank form.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialDraft = useMemo(() => peekDraft<TaskCreateDraft>(DRAFT_KEY), []);
@@ -94,14 +98,15 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   const [saving, setSaving] = useState(false);
 
   // Dirty = there is something here worth keeping/warning about (blank-create baseline).
+  const assigneeIsDefault = encodeAssignee({ assigneeId, assigneeTeamId }) === encodeAssignee(defaultAssignee);
   const dirty =
     title.trim() !== "" ||
     description.trim() !== "" ||
     status !== "todo" ||
     priority !== "medium" ||
-    assigneeId != null ||
-    assigneeTeamId != null ||
-    teamId != null ||
+    // the defaulted 担当 (and the team it derives) is not an edit worth a draft/leave-guard.
+    (hasAssignee({ assigneeId, assigneeTeamId }) && !assigneeIsDefault) ||
+    (teamId != null && !assigneeIsDefault) ||
     start != null ||
     due != null ||
     parentId != null ||
@@ -134,6 +139,17 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialDue, initialParentId, initialDependsOn]);
 
+  // 担当は必須: 担当が空のまま開いたら既定値 (チーム絞り込み中ならそのチーム・なければ本人) を入れる。
+  // 復元した下書きの担当は上書きしない。チーム担当なら所属チームもそれに合わせる (親タスク指定時を除く)。
+  const defaultKey = encodeAssignee(defaultAssignee);
+  useEffect(() => {
+    if (!open || hasAssignee({ assigneeId, assigneeTeamId }) || !hasAssignee(defaultAssignee)) return;
+    setAssigneeId(defaultAssignee.assigneeId);
+    setAssigneeTeamId(defaultAssignee.assigneeTeamId);
+    if (defaultAssignee.assigneeTeamId && !parentId && !initialParentId) setTeamId(defaultAssignee.assigneeTeamId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultKey, assigneeId, assigneeTeamId]);
+
   const reset = () => {
     draft.clear(); // deliberate cancel/success — don't resurrect this as a "restored" draft later
     setTitle("");
@@ -155,8 +171,11 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     onClose();
   };
 
+  // 担当は必須 (人 or チーム): タイトルと担当がそろうまで作成できない。
+  const canSubmit = title.trim().length > 0 && hasAssignee({ assigneeId, assigneeTeamId });
+
   const submit = async () => {
-    if (!title.trim() || saving) return;
+    if (!canSubmit || saving) return;
     setSaving(true);
     try {
       const ok = await onCreate({
@@ -196,7 +215,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
           <Button variant="ghost" onClick={close} testId="fe4-create-cancel">
             キャンセル
           </Button>
-          <Button onClick={submit} loading={saving} disabled={!title.trim()} testId="fe4-create-submit">
+          <Button onClick={submit} loading={saving} disabled={!canSubmit} testId="fe4-create-submit">
             作成する
           </Button>
         </div>

@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Modal, Button } from "@dub/ui";
 import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { isoFromDateInput } from "../domain/task-form";
 import { type ScopeTask } from "../domain/task-hierarchy";
 import { TaskFormFields } from "./TaskFormFields";
+import { encodeAssignee, hasAssignee, UNASSIGNED, type Assignee } from "../domain/assignee";
 import styles from "../styles/app.module.css";
 
 // P1-2 follow-up — same draft-autosave/leave-guard as TaskCreateModal (the gantt
@@ -66,6 +67,8 @@ export interface MyTaskCreateModalProps {
    *  is cross-event, so it has no current event → null (=未紐付け・判断44で許容). Not a
    *  visible field: keeps this form 寸分違わず同一 with the gantt タスク作成. */
   defaultEventId?: common.EventId | null;
+  /** 担当の既定値 (担当は必須) — マイタスクでは発行する本人。担当が空のときだけ入る。 */
+  defaultAssignee?: Assignee;
 }
 
 // A newly-issued task starts in "todo"; only todo-reachable states are offered (同 ガント作成).
@@ -79,7 +82,7 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
  * イベント紐付けはコンテキストで解決し (defaultEventId)、UI には出さない。The requester
  * (from) is the current user, stamped server-side as created_by.
  */
-export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions, scopeTasks, onCreate, requesterName, defaultEventId = null }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions, scopeTasks, onCreate, requesterName, defaultEventId = null, defaultAssignee = UNASSIGNED }: MyTaskCreateModalProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialDraft = useMemo(() => peekDraft<MyTaskCreateDraft>(DRAFT_KEY), []);
   const [title, setTitle] = useState(initialDraft?.title ?? "");
@@ -95,14 +98,15 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
   const [description, setDescription] = useState(initialDraft?.description ?? "");
   const [saving, setSaving] = useState(false);
 
+  const assigneeIsDefault = encodeAssignee({ assigneeId, assigneeTeamId }) === encodeAssignee(defaultAssignee);
   const dirty =
     title.trim() !== "" ||
     description.trim() !== "" ||
     status !== "todo" ||
     priority !== "medium" ||
-    assigneeId != null ||
-    assigneeTeamId != null ||
-    teamId != null ||
+    // the defaulted 担当 (and the team it derives) is not an edit worth a draft/leave-guard.
+    (hasAssignee({ assigneeId, assigneeTeamId }) && !assigneeIsDefault) ||
+    (teamId != null && !assigneeIsDefault) ||
     start != null ||
     due != null ||
     parentId != null ||
@@ -112,6 +116,17 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
     value: { title, description, status, priority, assigneeId, assigneeTeamId, teamId, start, due, parentId, deps },
     dirty,
   });
+
+  // 担当は必須: 担当が空のまま開いたら既定値 (チーム絞り込み中ならそのチーム・なければ本人) を入れる。
+  // 復元した下書きの担当は上書きしない。チーム担当なら所属チームもそれに合わせる (親タスク指定時を除く)。
+  const defaultKey = encodeAssignee(defaultAssignee);
+  useEffect(() => {
+    if (!open || hasAssignee({ assigneeId, assigneeTeamId }) || !hasAssignee(defaultAssignee)) return;
+    setAssigneeId(defaultAssignee.assigneeId);
+    setAssigneeTeamId(defaultAssignee.assigneeTeamId);
+    if (defaultAssignee.assigneeTeamId && !parentId) setTeamId(defaultAssignee.assigneeTeamId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultKey, assigneeId, assigneeTeamId]);
 
   const reset = () => {
     draft.clear(); // deliberate cancel/success — don't resurrect this as a "restored" draft later
@@ -134,8 +149,8 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
     onClose();
   };
 
-  // Only the title gates submission (event link comes from context, not the form).
-  const canSubmit = title.trim().length > 0 && !saving;
+  // タイトルと担当 (必須: 人 or チーム) がそろうまで発行できない (event link comes from context).
+  const canSubmit = title.trim().length > 0 && hasAssignee({ assigneeId, assigneeTeamId }) && !saving;
 
   const submit = async () => {
     if (!canSubmit) return;

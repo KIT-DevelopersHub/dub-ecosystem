@@ -6,7 +6,7 @@ import * as api from "../src/api/endpoints";
 
 const seedTask = (id: string, over: Partial<task.Task> = {}): task.Task => ({
   id, eventId: "evt_1", title: id, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: null, origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: null, origin: "internal",
   archivedAt: null, createdAt: `2026-08-0${id.slice(-1)}T00:00:00Z`, updatedAt: "2026-08-01T00:00:00Z", version: 1, ...over,
 });
 
@@ -55,7 +55,7 @@ describe("MockApiClient contract enforcement (design tests 2/3/9/11/12)", () => 
 
   it("create then get; delete soft-archives", async () => {
     const c = new MockApiClient();
-    const created = await api.createTask(c, { eventId: "evt_1", title: "new" });
+    const created = await api.createTask(c, { eventId: "evt_1", title: "new", assigneeId: "usr_fixture" });
     expect(created.status).toBe("todo");
     expect((await api.getTask(c, created.id)).title).toBe("new");
     await api.deleteTask(c, created.id);

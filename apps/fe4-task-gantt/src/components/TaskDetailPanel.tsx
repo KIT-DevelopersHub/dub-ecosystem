@@ -9,7 +9,7 @@ import { PredecessorPicker } from "./PredecessorPicker";
 import { AssigneePicker } from "./AssigneePicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
 import { TaskTeamBadge } from "./TaskTeamBadge";
-import { deriveTaskTeam } from "../domain/assignee";
+import { ASSIGNEE_REQUIRED_MESSAGE, deriveTaskTeam, hasAssignee } from "../domain/assignee";
 import { useUserTeams } from "../api/useUserTeams";
 import { TaskAttachmentsEditor } from "./TaskAttachmentsEditor";
 import styles from "../styles/app.module.css";
@@ -186,6 +186,7 @@ export function TaskDetailPanel({
   // メモ/詳細: an empty box clears the description (null), any text stores it.
   const curDescription = t.description ?? "";
   const descriptionChanged = description !== curDescription;
+  const assigneeMissing = !hasAssignee({ assigneeId, assigneeTeamId });
   const dirty =
     title !== t.title ||
     descriptionChanged ||
@@ -254,6 +255,8 @@ export function TaskDetailPanel({
   useEffect(() => {
     if (!canWrite) return;
     if (!dirty) return; // matches the server — nothing to persist
+    // 担当は必須: 担当なしの古いタスクは、担当を選ぶまで保存しない (選んだら他の変更と一緒に送る)。
+    if (assigneeMissing) return;
     if (signature === savedSigRef.current) return; // this exact edit was already saved
     const handle = setTimeout(() => {
       savedSigRef.current = signature;
@@ -264,7 +267,7 @@ export function TaskDetailPanel({
     }, autosaveDebounceMs);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, dirty, canWrite, autosaveDebounceMs]);
+  }, [signature, dirty, canWrite, autosaveDebounceMs, assigneeMissing]);
 
   // Let 「保存しました」fade back to the idle hint so it stays a micro-indicator.
   useEffect(() => {
@@ -333,7 +336,7 @@ export function TaskDetailPanel({
 
         <div className={styles.formField}>
           <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
-            担当
+            担当<span className={styles.req}>*</span>
           </label>
           <AssigneePicker
             id="fe4-detail-assignee"
@@ -341,6 +344,8 @@ export function TaskDetailPanel({
             teams={teams}
             value={{ assigneeId, assigneeTeamId }}
             disabled={!canWrite}
+            invalid={assigneeMissing}
+            aria-describedby={assigneeMissing ? "fe4-detail-assignee-error" : undefined}
             onChange={(next) => {
               setAssigneeId(next.assigneeId);
               setAssigneeTeamId(next.assigneeTeamId);
@@ -355,6 +360,11 @@ export function TaskDetailPanel({
             }}
             testId="fe4-detail-assignee"
           />
+          {assigneeMissing && (
+            <span id="fe4-detail-assignee-error" className={styles.fieldError} role="alert" data-testid="fe4-detail-assignee-error">
+              {canWrite ? `${ASSIGNEE_REQUIRED_MESSAGE}（選ぶまで変更は保存されません）` : "担当が未設定です"}
+            </span>
+          )}
         </div>
 
         {/* 開始日 / 終了日: a task with both gets an exact gantt bar (arrow-linkable). */}
@@ -511,7 +521,12 @@ export function TaskDetailPanel({
                 </>
               )}
               {saveState === "error" && <span>保存に失敗しました</span>}
-              {saveState === "idle" && <span className={styles.saveStatusHint}>変更は自動保存されます</span>}
+              {saveState === "idle" &&
+                (assigneeMissing ? (
+                  <span className={styles.saveStatusHint} data-testid="fe4-detail-save-needs-assignee">担当を選ぶと保存されます</span>
+                ) : (
+                  <span className={styles.saveStatusHint}>変更は自動保存されます</span>
+                ))}
             </div>
           )}
           {canDelete && !confirming && (

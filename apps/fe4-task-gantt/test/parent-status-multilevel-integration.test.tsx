@@ -24,7 +24,7 @@ const mk = (id: string, title: string, status: task.TaskStatus): task.Task => ({
   description: null,
   status,
   priority: "medium",
-  assigneeId: null,
+  assigneeId: "usr_fixture",
   teamId: null,
   dueAt: "2026-08-20T00:00:00Z",
   origin: "internal",

@@ -5,7 +5,7 @@ import * as api from "../src/api/endpoints";
 
 const seedTask = (id: string, over: Partial<task.Task> = {}): task.Task => ({
   id, eventId: "evt_1", title: id, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: null, origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: null, origin: "internal",
   archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1, ...over,
 });
 

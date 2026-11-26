@@ -22,6 +22,8 @@ function mintId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${seq.toString(36).padStart(4, "0")}`;
 }
 
+const ASSIGNEE_REQUIRED = { field: "assigneeId", reason: "required" } as const;
+
 function err(status: number, code: string, message: string, details?: unknown): ApiError {
   const body: ErrorResponse = {
     error: { code, message, retryable: status >= 500, ...(details !== undefined ? { details } : {}) },
@@ -297,6 +299,8 @@ export class MockApiClient implements ApiClient {
   }
 
   private createTask(body: task.CreateTaskRequest): task.Task {
+    // 担当は必須 (server rule): neither a person nor a team → 400.
+    if (!body.assigneeId && !body.assigneeTeamId) throw err(400, "VALIDATION_FAILED", "assignee required", [ASSIGNEE_REQUIRED]);
     const now = new Date().toISOString();
     const t: task.Task = {
       id: mintId("task"),
@@ -349,6 +353,11 @@ export class MockApiClient implements ApiClient {
       version: cur.version + 1,
       updatedAt: new Date().toISOString(),
     };
+    // 担当は必須 (server rule): a write that leaves neither is rejected (version-only no-op aside).
+    const onlyVersion = Object.keys(body).every((k) => k === "version");
+    if (!onlyVersion && !next.assigneeId && !next.assigneeTeamId)
+      throw err(400, "VALIDATION_FAILED", "assignee required", [ASSIGNEE_REQUIRED]);
+    if (onlyVersion) return cur;
     this.taskById.set(id, next);
     // Keep the gantt read-model in sync with a start/due edit. The bar reads its
     // window from `rowDates` (a stand-in for gantt-service's derived DTO); the real

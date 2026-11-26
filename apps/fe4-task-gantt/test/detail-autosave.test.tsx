@@ -10,7 +10,7 @@ import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 
 const mkTask = (id: string): task.Task => ({
   id, eventId: "evt_1", title: "元タイトル", description: null, status: "todo",
-  priority: "medium", assigneeId: null, teamId: null, startAt: null, dueAt: "2026-09-15T00:00:00.000Z",
+  priority: "medium", assigneeId: "usr_fixture", teamId: null, startAt: null, dueAt: "2026-09-15T00:00:00.000Z",
   origin: "internal", archivedAt: null, createdAt: "2026-08-01T00:00:00.000Z",
   updatedAt: "2026-08-01T00:00:00.000Z", version: 1,
 });

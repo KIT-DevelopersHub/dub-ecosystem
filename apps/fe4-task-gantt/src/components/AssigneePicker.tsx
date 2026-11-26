@@ -14,17 +14,20 @@ export interface AssigneePickerProps {
   value: Assignee;
   onChange: (next: Assignee) => void;
   disabled?: boolean;
+  /** 担当が空のとき (担当は必須) — red outline + aria-invalid. */
+  invalid?: boolean;
+  "aria-describedby"?: string;
   testId?: string;
 }
 
 export const RECENT_ASSIGNEE_KEY_PREFIX = "fe4.recent-assignees";
 
-export function AssigneePicker({ id, users, teams, value, onChange, disabled, testId }: AssigneePickerProps) {
+export function AssigneePicker({ id, users, teams, value, onChange, disabled, invalid, testId, ...rest }: AssigneePickerProps) {
   const { currentUserId } = useTaskRoute();
   const recent = useRecentSelections(`${RECENT_ASSIGNEE_KEY_PREFIX}.${currentUserId ?? "anon"}`, 5);
   const options = useMemo<SearchableSelectOption[]>(
+    // 担当は必須: 「未割当」は選択肢に出さない (空は担当なしの古いタスクだけ・placeholder 表示)。
     () => [
-      { value: "", label: "未割当" },
       ...users.map((u) => ({ value: `user:${u.id}`, label: u.displayName, group: "メンバー" })),
       ...teams.map((t) => ({ value: `team:${t.id}`, label: t.name, group: "チーム" })),
     ],
@@ -37,10 +40,14 @@ export function AssigneePicker({ id, users, teams, value, onChange, disabled, te
       options={options}
       pinnedValues={recent.recent}
       pinnedLabel="最近選んだ担当"
+      placeholder="担当を選んでください"
       searchPlaceholder="名前・チームで検索"
       emptyText="該当するメンバー・チームがいません"
       disabled={disabled}
+      invalid={invalid}
+      aria-describedby={rest["aria-describedby"]}
       onChange={(v) => {
+        if (!v) return;
         recent.remember(v);
         onChange(decodeAssignee(v));
       }}

@@ -2856,6 +2856,18 @@ function validationFailed(message: string): Response {
   const body: ErrorResponse = { error: { code: "VALIDATION_FAILED", message, retryable: false } };
   return json(body, 400);
 }
+/** 担当は必須 — mirrors task-service's 400 `{ field: "assigneeId", reason: "required" }`. */
+function assigneeRequired(): Response {
+  const body: ErrorResponse = {
+    error: {
+      code: "VALIDATION_FAILED",
+      message: "assigneeId or assigneeTeamId is required",
+      retryable: false,
+      details: [{ field: "assigneeId", reason: "required" }],
+    },
+  };
+  return json(body, 400);
+}
 function notFound(route: string): Response {
   const body: ErrorResponse = { error: { code: "NOT_FOUND", message: `demo: no handler for ${route}`, retryable: false } };
   return json(body, 404);
@@ -3052,6 +3064,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     if (pathname === "/api/v1/tasks" || pathname === "/api/v1/tasks/calendar-events") {
       const b = (body ?? {}) as Partial<task.CreateTaskRequest>;
       if (typeof b.title !== "string" || !b.title.trim()) return notFound(`POST ${pathname}`);
+      if (!b.assigneeId && !b.assigneeTeamId) return assigneeRequired(); // 担当は必須 (server rule)
       const now = new Date().toISOString();
       const created: task.Task = {
         version: 1, id: `tsk_demo_${Date.now()}`, eventId: b.eventId ?? null, title: b.title, description: b.description ?? null,
@@ -3184,6 +3197,11 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         const t = TASKS.find((x) => x.id === id);
         if (!t) return notFound(`PATCH ${pathname}`);
         const b = (body ?? {}) as Partial<task.UpdateTaskRequest>;
+        // 担当は必須 (server rule): reject a write that would leave neither a person nor a team.
+        const nextPerson = b.assigneeTeamId ? null : b.assigneeId !== undefined ? b.assigneeId : t.assigneeId;
+        const nextTeam = b.assigneeId ? null : b.assigneeTeamId !== undefined ? b.assigneeTeamId : t.assigneeTeamId ?? null;
+        const onlyVersion = Object.keys(b).every((k) => k === "version");
+        if (!onlyVersion && !nextPerson && !nextTeam) return assigneeRequired();
         if (b.title !== undefined) t.title = b.title;
         if (b.description !== undefined) t.description = b.description;
         if (b.status !== undefined) t.status = b.status;
