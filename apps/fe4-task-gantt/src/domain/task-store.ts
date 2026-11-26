@@ -12,7 +12,7 @@ export interface OptimisticPatch {
   // detail panel edits (title/status/priority/assignee/team/開始日/期日) so a
   // field-edit undo/redo reflects instantly in the cache before the refetch lands.
   changes: Partial<
-    Pick<task.Task, "status" | "dueAt" | "startAt" | "assigneeId" | "teamId" | "title" | "description" | "priority">
+    Pick<task.Task, "status" | "dueAt" | "startAt" | "assigneeId" | "assigneeTeamId" | "teamId" | "title" | "description" | "priority">
   >;
 }
 

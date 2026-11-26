@@ -28,6 +28,7 @@ export function validateCreateTaskRequest(body: unknown): task.CreateTaskRequest
   c.optionalString("description", body.description);
   c.optionalEnum("priority", body.priority, ENUM_SETS.taskPriority);
   c.optionalString("assigneeId", body.assigneeId);
+  checkNullableString(c, "assigneeTeamId", body.assigneeTeamId);
   if (body.dueAt !== undefined && !isString(body.dueAt)) {
     c.add("dueAt", "invalid_type", "dueAt must be an ISO8601 string");
   }
@@ -53,6 +54,7 @@ export function validateUpdateTaskRequest(body: unknown): task.UpdateTaskRequest
   c.optionalEnum("status", body.status, ENUM_SETS.taskStatus);
   c.optionalEnum("priority", body.priority, ENUM_SETS.taskPriority);
   checkNullableString(c, "assigneeId", body.assigneeId);
+  checkNullableString(c, "assigneeTeamId", body.assigneeTeamId);
   checkNullableString(c, "dueAt", body.dueAt);
 
   c.throwIfInvalid();

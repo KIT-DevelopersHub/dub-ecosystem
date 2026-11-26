@@ -1,9 +1,13 @@
+import { useEffect, useRef } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { TextField, Textarea, Select } from "@dub/ui";
 import { PRIORITY_LABEL, STATUS_LABEL, DATE_LABEL } from "../domain/task-form";
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
+import { AssigneePicker } from "./AssigneePicker";
+import { deriveTaskTeam, type Assignee } from "../domain/assignee";
+import { useUserTeams } from "../api/useUserTeams";
 import styles from "../styles/app.module.css";
 
 /**
@@ -13,7 +17,7 @@ import styles from "../styles/app.module.css";
  *
  *   タイトル                （全幅）
  *   ステータス   重要度      （2カラム・同一行）
- *   担当         チーム      （2カラム・同一行）
+ *   担当                    （全幅）
  *   開始日       終了日      （2カラム・同一行）
  *   親タスク                （全幅）
  *   先行タスク              （全幅）
@@ -23,9 +27,11 @@ import styles from "../styles/app.module.css";
  * children side-by-side at normal width; wraps only at very narrow widths). Full-width
  * fields are `.formFieldFull`. Presentational: all state lives in the parent modal.
  *
- * The 親タスク→チーム interlock (親子は同一チーム) is owned here so both forms behave
- * identically: choosing a 親タスク fixes+locks the team to the parent's team and prunes
- * cross-team predecessors; the server also enforces it (二重の担保).
+ * チーム (teamId) is NOT an input (ユーザー確定: 担当と同じ名前が二重に出るため撤去). It is still
+ * sent and owned here: it follows the 担当 (deriveTaskTeam — チーム担当ならそのチーム・人なら
+ * その人の所属チーム), and choosing a 親タスク fixes it to the parent's team (親子は同一チーム・
+ * the server also enforces it) — while a parent is set, the 担当 does not move it. Cross-team
+ * predecessors are pruned whenever it changes.
  *
  * This component takes NO per-form escape hatches (no extra slots, no relabeling): the
  * field set/order is the single canonical spec and both create modals render it with the
@@ -47,10 +53,15 @@ export interface TaskFormFieldsProps {
   onPriorityChange: (v: task.TaskPriority) => void;
 
   users: readonly identity.UserSummary[];
+  /** 担当 = 人 XOR チーム (#882). The picker offers both; choosing one clears the other. */
   assigneeId: common.UserId | null;
   onAssigneeChange: (v: common.UserId | null) => void;
+  assigneeTeamId: common.TeamId | null;
+  onAssigneeTeamIdChange: (v: common.TeamId | null) => void;
 
+  /** team list (担当のチーム候補・所属チームの優先順). */
   teams: readonly team.Team[];
+  /** the task's team — not shown; derived from 担当 / 親タスク (see above). */
   teamId: common.TeamId | null;
   onTeamIdChange: (v: common.TeamId | null) => void;
 
@@ -89,6 +100,8 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
     users,
     assigneeId,
     onAssigneeChange,
+    assigneeTeamId,
+    onAssigneeTeamIdChange,
     teams,
     teamId,
     onTeamIdChange,
@@ -109,12 +122,28 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
 
   const depOptions = dependencyScopeOptions(scopeTasks, teamId);
   const teamLockedToParent = parentId != null;
+  const userTeams = useUserTeams();
 
   const handleTeamChange = (next: common.TeamId | null) => {
     onTeamIdChange(next);
     // dependencies are same-team only — drop predecessors that fall out of scope.
     onDepsChange(pruneToScope(scopeTasks, next, deps));
   };
+
+  const followAssignee = (next: Assignee) => {
+    if (teamLockedToParent) return; // 親子は同一チーム wins
+    const derived = deriveTaskTeam(next, teamId, userTeams, teams.map((t) => t.id));
+    if (derived !== teamId) handleTeamChange(derived);
+  };
+
+  // The 所属 lookup arrives async: re-derive once it lands (e.g. a restored draft's 担当).
+  const derivedFor = useRef<typeof userTeams | null>(null);
+  useEffect(() => {
+    if (userTeams.size === 0 || derivedFor.current === userTeams) return;
+    derivedFor.current = userTeams;
+    if (assigneeId) followAssignee({ assigneeId, assigneeTeamId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userTeams]);
 
   const handleParentChange = (next: common.TaskId | null) => {
     onParentIdChange(next);
@@ -167,40 +196,23 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
         </div>
       </div>
 
-      {/* 担当 / チーム (2カラム・同一行) */}
-      <div className={styles.formRow}>
-        <div className={styles.formField}>
-          <label className={styles.formLabel} htmlFor={`${idPrefix}-assignee`}>
-            担当
-          </label>
-          <Select
-            id={`${idPrefix}-assignee`}
-            value={assigneeId ?? ""}
-            onChange={(v) => onAssigneeChange(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
-            testId={`${idPrefix}-assignee`}
-          />
-        </div>
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor={`${idPrefix}-team`}>
-              チーム
-            </label>
-            <Select
-              id={`${idPrefix}-team`}
-              value={teamId ?? ""}
-              disabled={teamLockedToParent}
-              onChange={(v) => handleTeamChange(v ? (v as common.TeamId) : null)}
-              options={[{ value: "", label: "未割当" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]}
-              testId={`${idPrefix}-team`}
-            />
-            {teamLockedToParent && (
-              <p className={styles.fieldHint} data-testid={`${idPrefix}-team-locked`}>
-                親タスクと同じチームになります（変更できません）
-              </p>
-            )}
-          </div>
-        )}
+      {/* 担当 (全幅)。チームは担当に従う（入力欄は出さない） */}
+      <div className={styles.formFieldFull}>
+        <label className={styles.formLabel} htmlFor={`${idPrefix}-assignee`}>
+          担当
+        </label>
+        <AssigneePicker
+          id={`${idPrefix}-assignee`}
+          users={users}
+          teams={teams}
+          value={{ assigneeId, assigneeTeamId }}
+          onChange={(next) => {
+            onAssigneeChange(next.assigneeId);
+            onAssigneeTeamIdChange(next.assigneeTeamId);
+            followAssignee(next);
+          }}
+          testId={`${idPrefix}-assignee`}
+        />
       </div>
 
       {/* 開始日 / 終了日 (2カラム・同一行) */}

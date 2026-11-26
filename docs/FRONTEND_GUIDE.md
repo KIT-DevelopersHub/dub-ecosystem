@@ -143,6 +143,14 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
   `renderOverlay?`／`onReorder(event)` を渡し、**並び順の確定ロジック（フラットな `arrayMove`か、
   ツリーの兄弟内移動か）は呼び出し側が `onReorder` で持つ**（例: `apps/fe4-task-gantt` のガントは
   兄弟スコープに写像して既存の順序 API に渡す）。ドラッグの見た目/操作は変えず、確定だけ差し替える。
+- **長い「1つ選ぶ」リスト（人・チームなど）はコアの検索つきドロップダウンで組む**: フォームの
+  担当者・メンバー選択のように候補が多い単一選択は `@dub/ui` の **`SearchableSelect`**
+  （メニュー最上部に検索欄・矢印/Home/End/Enter・`group` で見出し分け・`loading` でスケルトン・
+  該当なしの空表示・Modal 内でも切れない portal 表示・Esc で Modal ごと閉じない）を使う。
+  `value`/`onChange`/`options` の契約は `Select` と同じ。「最近選んだ人」を上に出すときは
+  **`useRecentSelections(storageKey)`**（localStorage・try/catch 済み・利用者ごとに key を分ける）の
+  `recent` を `pinnedValues` に渡し、確定時に `remember(value)` を呼ぶ。少数の固定択一
+  （ステータス・重要度など）は従来どおり `Select` / `SegmentedControl`。手本: FE4 `TaskFormFields` の担当。
 - **モーダル（ダイアログ）はコアで組む**: 画面に重ねて出す確認・フォーム・詳細などの
   モーダルは `@dub/ui` の **`Modal`**（汎用）・**`ConfirmDialog`**（破壊的操作の確認ゲート）・
   **`ErrorDialog`**（失敗理由の明示）・**`Drawer`**（横から出るパネル）を使う。**独自の
