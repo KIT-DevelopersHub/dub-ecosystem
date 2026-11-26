@@ -12,6 +12,9 @@ type UpstreamPartialError = gateway.UpstreamPartialError;
 export interface UseBffHomeResult {
   data: BffHomeResponse | undefined;
   isPending: boolean;
+  /** The whole /bff/home call failed (429/5xx/network) and there is no cached data:
+   *  callers render LoadErrorState, never their 0 件 / empty widgets (#855). */
+  error: unknown;
   errorFor(source: string): UpstreamPartialError | undefined;
   refetch(): void;
 }
@@ -28,6 +31,7 @@ export function useBffHome(api: ApiClient): UseBffHomeResult {
   return {
     data: query.data,
     isPending: query.isPending,
+    error: query.data === undefined && query.isError ? query.error : null,
     errorFor,
     refetch: () => {
       void query.refetch();
