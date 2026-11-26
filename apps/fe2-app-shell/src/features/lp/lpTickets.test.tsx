@@ -33,6 +33,8 @@ import {
   normalizeTicketFields,
   paymentMethodLabel,
   paymentMethodsLabel,
+  refundActionFor,
+  refundWindowClosed,
   todayJst,
   validateCouponDraft,
   validateTicketFields,
@@ -105,6 +107,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     listTicketOrders: () => Promise.resolve({ items: [], nextCursor: null }),
     exportTicketOrders: async () => new Blob(["x"]),
     approveTicketOrder: unused,
+    refundTicketOrder: unused,
     listTicketCoupons: () => Promise.resolve({ items: [] }),
     createTicketCoupon: unused,
     setTicketCouponActive: unused,
@@ -270,6 +273,35 @@ describe("demo transport serves the tickets wire contract", () => {
     await expect(api.approveTicketOrder("ord_010")).rejects.toThrow();
     const d1 = (await api.getTickets()).types.find((t) => t.id === "tt_general_d1")!;
     expect(d1.stats).toMatchObject({ sold: 8, pending: 2 });
+  });
+
+  it("refunds a paid order once (then 409); free orders are cancelled; the seat leaves sold", async () => {
+    const api = demoLpApi();
+    expect(await api.refundTicketOrder("ord_006")).toMatchObject({ result: "refunded", order: { status: "refunded" } });
+    await expect(api.refundTicketOrder("ord_006")).rejects.toThrow();
+    expect(await api.refundTicketOrder("ord_011")).toMatchObject({ result: "cancelled", order: { amountJpy: 0 } });
+    const d1 = (await api.getTickets()).types.find((t) => t.id === "tt_general_d1")!;
+    expect(d1.stats).toMatchObject({ sold: 7 });
+  });
+});
+
+describe("refundWindowClosed", () => {
+  it("is open through the last event day (JST) and closed from 00:00 JST the next day", () => {
+    expect(refundWindowClosed("2026-11-26T00:00:00.000Z")).toBe(false);
+    expect(refundWindowClosed("2027-09-14T14:59:59.999Z")).toBe(false);
+    expect(refundWindowClosed("2027-09-14T15:00:00.000Z")).toBe(true);
+  });
+});
+
+describe("refundActionFor", () => {
+  it("paid / needs_review only; dispute never; 0 yen = cancel", () => {
+    expect(refundActionFor({ status: "paid", reviewReason: null, amountJpy: 3000 })).toBe("refund");
+    expect(refundActionFor({ status: "paid", reviewReason: null, amountJpy: 0 })).toBe("cancel");
+    expect(refundActionFor({ status: "needs_review", reviewReason: "oversold", amountJpy: 3000 })).toBe("refund");
+    expect(refundActionFor({ status: "needs_review", reviewReason: "dispute", amountJpy: 3000 })).toBeNull();
+    for (const status of ["pending", "expired", "refunded"] as const) {
+      expect(refundActionFor({ status, reviewReason: null, amountJpy: 3000 })).toBeNull();
+    }
   });
 });
 
@@ -545,7 +577,7 @@ describe("LpTicketsScreen", () => {
       const dialog = await screen.findByTestId("fe2-lp-ticket-order-approve-dialog");
       expect(dialog).toHaveTextContent("Stripe ダッシュボードで入金額を確認してから確定してください");
       expect(dialog).toHaveTextContent("販売数・売上に入ります");
-      expect(dialog).toHaveTextContent("自動で「返金済み」になり");
+      expect(dialog).toHaveTextContent("「返金済み」になり、席が空きます");
       fireEvent.click(within(dialog).getByTestId("fe2-lp-ticket-order-approve-confirm"));
 
       await waitFor(() => expect(approve).toHaveBeenCalledWith("ord_r"));
@@ -573,6 +605,141 @@ describe("LpTicketsScreen", () => {
       await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-ord_r")).toHaveTextContent("要確認"));
       expect(screen.getByTestId("fe2-lp-ticket-order-approve-ord_r")).toBeInTheDocument();
       expect(await screen.findByText("注文を確定できませんでした")).toBeInTheDocument();
+    });
+  });
+
+  describe("refund / cancel", () => {
+    function paidOrder(over: Partial<LpTicketOrder> = {}): LpTicketOrder {
+      return {
+        id: "ord_p",
+        items: [{ ticketTypeId: "g1", ticketTypeName: "一般", dayLabel: "", unitPriceJpy: 3000, quantity: 2 }],
+        quantity: 2,
+        amountJpy: 6000,
+        status: "paid",
+        buyerName: "鈴木 一郎",
+        buyerEmail: "i@example.com",
+        answers: [],
+        createdAt: "2026-10-12T11:20:00.000Z",
+        paidAt: "2026-10-12T11:21:00.000Z",
+        reviewReason: null,
+        couponId: null,
+        paymentMethod: "card",
+        preview: false,
+        test: false,
+        ...over,
+      };
+    }
+    const list = (o: LpTicketOrder) => () => Promise.resolve({ items: [o], nextCursor: null });
+    const openDetails = async (id = "ord_p") => fireEvent.click(await screen.findByTestId(`fe2-lp-ticket-order-details-${id}`));
+
+    it("shows 返金する in the details only with lp:publish, and never for pending / refunded / disputes", async () => {
+      renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }));
+      await openDetails();
+      expect(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p")).toHaveTextContent("返金する");
+      cleanup();
+
+      renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }), EDITOR);
+      await openDetails();
+      expect(screen.queryByTestId("fe2-lp-ticket-order-refund-ord_p")).not.toBeInTheDocument();
+      cleanup();
+
+      for (const over of [{ status: "pending" as const }, { status: "refunded" as const }, { status: "needs_review" as const, reviewReason: "dispute" }]) {
+        renderScreen(fakeApi({ listTicketOrders: list(paidOrder(over)) }));
+        await openDetails();
+        expect(screen.queryByTestId("fe2-lp-ticket-order-refund-ord_p")).not.toBeInTheDocument();
+        cleanup();
+      }
+    });
+
+    it("after the last event day (JST) the button is gone and the reason is shown instead", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date("2027-09-14T14:59:59.999Z")); // 9/14 23:59:59 JST: still open
+        renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }));
+        await openDetails();
+        expect(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p")).toBeInTheDocument();
+        cleanup();
+
+        vi.setSystemTime(new Date("2027-09-14T15:00:00.000Z")); // 9/15 00:00 JST: closed
+        renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }));
+        await openDetails();
+        expect(screen.queryByTestId("fe2-lp-ticket-order-refund-ord_p")).not.toBeInTheDocument();
+        expect(screen.getByTestId("fe2-lp-ticket-order-refund-closed-ord_p")).toHaveTextContent("開催最終日（2027/9/14）までで終了しました");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("the dialog says a notice mail goes to the buyer", async () => {
+      renderScreen(fakeApi({ listTicketOrders: list(paidOrder()) }));
+      await openDetails();
+      fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p"));
+      const dialog = await screen.findByTestId("fe2-lp-ticket-order-refund-dialog");
+      expect(dialog).toHaveTextContent("返金が完了すると、購入者（i@example.com）にお知らせのメールが自動で送られます");
+      expect(dialog).not.toHaveTextContent("自動では送られません");
+    });
+
+    it("a 0-yen order says 取り消す, and the dialog says no money moves", async () => {
+      renderScreen(fakeApi({ listTicketOrders: list(paidOrder({ amountJpy: 0, couponId: "cpn_a" })) }));
+      await openDetails();
+      fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p"));
+      const dialog = await screen.findByTestId("fe2-lp-ticket-order-refund-dialog");
+      expect(dialog).toHaveTextContent("お金の動きはありません");
+      expect(within(dialog).getByTestId("fe2-lp-ticket-order-refund-confirm")).toHaveTextContent("取り消す");
+    });
+
+    it("confirms, calls refundTicketOrder and shows the row as 返金済み", async () => {
+      let current = paidOrder();
+      const refund = vi.fn((id: string) => {
+        current = { ...current, status: "refunded" };
+        return Promise.resolve({ result: "refunded" as const, order: { ...current, id } });
+      });
+      renderScreen(fakeApi({ listTicketOrders: () => Promise.resolve({ items: [current], nextCursor: null }), refundTicketOrder: refund }));
+      await openDetails();
+      fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p"));
+      const dialog = await screen.findByTestId("fe2-lp-ticket-order-refund-dialog");
+      expect(dialog).toHaveTextContent("Stripe で全額を返金します");
+      expect(dialog).toHaveTextContent("当日の受付でも「無効」");
+      fireEvent.click(within(dialog).getByTestId("fe2-lp-ticket-order-refund-confirm"));
+      await waitFor(() => expect(refund).toHaveBeenCalledWith("ord_p"));
+      await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-ord_p")).toHaveTextContent("返金済み"));
+      expect(await screen.findByText("鈴木 一郎 さんに返金しました")).toBeInTheDocument();
+      expect(screen.queryByTestId("fe2-lp-ticket-order-refund-ord_p")).not.toBeInTheDocument();
+    });
+
+    it("flips optimistically and rolls back to 支払い済み when the server refuses", async () => {
+      let reject: (e: Error) => void = () => undefined;
+      renderScreen(
+        fakeApi({
+          listTicketOrders: list(paidOrder()),
+          refundTicketOrder: () =>
+            new Promise((_res, rej) => {
+              reject = rej;
+            }),
+        }),
+      );
+      await openDetails();
+      fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p"));
+      fireEvent.click(within(await screen.findByTestId("fe2-lp-ticket-order-refund-dialog")).getByTestId("fe2-lp-ticket-order-refund-confirm"));
+      await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-ord_p")).toHaveTextContent("返金済み"));
+      reject(new Error("boom"));
+      await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-ord_p")).toHaveTextContent("支払い済み"));
+      expect(await screen.findByText("返金・取消できませんでした")).toBeInTheDocument();
+    });
+
+    it("refund_pending: the row goes back to the server's 支払い済み and says Stripe will finish it", async () => {
+      const o = paidOrder();
+      renderScreen(
+        fakeApi({
+          listTicketOrders: list(o),
+          refundTicketOrder: () => Promise.resolve({ result: "refund_pending" as const, order: o }),
+        }),
+      );
+      await openDetails();
+      fireEvent.click(screen.getByTestId("fe2-lp-ticket-order-refund-ord_p"));
+      fireEvent.click(within(await screen.findByTestId("fe2-lp-ticket-order-refund-dialog")).getByTestId("fe2-lp-ticket-order-refund-confirm"));
+      expect(await screen.findByText(/返金を受け付けました/)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId("fe2-lp-ticket-order-ord_p")).toHaveTextContent("支払い済み"));
     });
   });
 

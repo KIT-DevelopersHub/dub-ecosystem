@@ -159,6 +159,9 @@ export type LpTicketTypeInput = lpTickets.LpTicketTypeInput;
 export type LpTicketCoupon = lpTickets.LpTicketCoupon;
 export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
 export type LpTicketCouponInput = lpTickets.LpTicketCouponInput;
+export type LpTicketRefundResult = lpTickets.LpTicketRefundResult;
+export type LpTicketRefundResponse = lpTickets.LpTicketRefundResponse;
+export type LpTicketRefundErrorReason = lpTickets.LpTicketRefundErrorReason;
 export type LpTicketCheckinResult = lpTickets.LpTicketCheckinResult;
 export type LpTicketCheckinDayCheck = lpTickets.LpTicketCheckinDayCheck;
 export type LpTicketCheckinInput = lpTickets.LpTicketCheckinInput;
@@ -234,6 +237,11 @@ export interface LpApi {
   exportTicketOrders(): Promise<Blob>;
   /** 要確認(needs_review)の注文を支払い済みに確定 (app:lp:edit + lp:publish)。要確認でなければ 409。 */
   approveTicketOrder(id: string): Promise<LpTicketOrder>;
+  /**
+   * 返金（有料 = Stripe）/ 取消（0 円）(app:lp:edit + lp:publish)。支払い済み・要確認だけ。チケットは無効になる。
+   * Stripe の返金が未完了なら result = refund_pending（完了は webhook で反映）。返金できなければ 409。
+   */
+  refundTicketOrder(id: string): Promise<LpTicketRefundResponse>;
   /** 無料券のクーポン一覧・新しい順 (app:lp:edit + lp:publish。コードが見えるため)。 */
   listTicketCoupons(): Promise<LpTicketCouponsPage>;
   /** クーポンを発行 (app:lp:edit + lp:publish)。コードはサーバー生成。 */
@@ -339,6 +347,8 @@ export function createLpApi(api: ApiClient): LpApi {
     },
     approveTicketOrder: (id) =>
       api.request<LpTicketOrder>({ method: "POST", path: `${BASE}/tickets/orders/${encodeURIComponent(id)}/approve` }),
+    refundTicketOrder: (id) =>
+      api.request<LpTicketRefundResponse>({ method: "POST", path: `${BASE}/tickets/orders/${encodeURIComponent(id)}/refund`, body: {} }),
     listTicketCoupons: () => api.request<LpTicketCouponsPage>({ method: "GET", path: `${BASE}/tickets/coupons` }),
     createTicketCoupon: (input) =>
       api.request<LpTicketCoupon, LpTicketCouponInput>({ method: "POST", path: `${BASE}/tickets/coupons`, body: input }),

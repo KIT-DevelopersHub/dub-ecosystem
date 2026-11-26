@@ -144,6 +144,53 @@ export interface LpTicketCouponInput {
   expiresAt?: string;
 }
 
+/**
+ * POST /api/v1/lp/tickets/orders/:id/refund の結果（app:lp:edit + lp:publish）。
+ * - refunded: 有料。Stripe の返金が完了し、注文は返金済み・チケットは無効（void）になった。
+ * - refund_pending: 有料。Stripe が返金を受け付けたが未完了（PayPay など）。完了は charge.refunded の webhook で反映される。
+ * - cancelled: 無料（0 円）注文の取消。その場で返金済み・チケットは無効になる。
+ * void のチケットは当日受付でも「無効」として扱う。
+ */
+export type LpTicketRefundResult = "refunded" | "refund_pending" | "cancelled";
+
+export interface LpTicketRefundResponse {
+  result: LpTicketRefundResult;
+  order: LpTicketOrder;
+}
+
+/**
+ * 返金/取消できない時の details.reason。
+ * 409: not_refundable（支払い済み/要確認でない）・refund_window_closed（返金期限 = 開催最終日の JST 23:59:59 を過ぎた）・
+ *      dispute_open（チャージバック審理中）・
+ *      payment_intent_missing（Stripe の決済が紐付いていない）・stripe_mode_mismatch（テスト注文と本番キー等の食い違い）・
+ *      refund_rejected（Stripe が返金を断った）
+ * 503: payment_not_configured（Stripe 未設定）
+ */
+export type LpTicketRefundErrorReason =
+  | "not_refundable"
+  | "refund_window_closed"
+  | "dispute_open"
+  | "payment_intent_missing"
+  | "stripe_mode_mismatch"
+  | "refund_rejected"
+  | "payment_not_configured";
+
+/** 開催日（JST の 'YYYY-MM-DD'・日付順）。LP の構造化データ（StructuredData.tsx）と同じ日付。 */
+export const LP_TICKET_EVENT_DAYS: readonly string[] = ["2027-09-13", "2027-09-14"];
+
+/**
+ * 返金・取消の期限 = 開催最終日の当日まで（JST）。この時刻（最終日の翌日 0:00 JST）以降は返金できない。
+ * API（409 refund_window_closed）と fe2（ボタンを出さない）の両方がここを見る。
+ */
+export const LP_TICKET_REFUND_CLOSES_AT: string = new Date(
+  Date.parse(`${LP_TICKET_EVENT_DAYS[LP_TICKET_EVENT_DAYS.length - 1]}T00:00:00+09:00`) + 24 * 60 * 60 * 1000,
+).toISOString();
+
+/** now（ISO）に返金・取消できるか。開催最終日の JST 23:59:59.999 までは true。 */
+export function isLpTicketRefundOpen(nowIso: string, closesAt: string = LP_TICKET_REFUND_CLOSES_AT): boolean {
+  return Date.parse(nowIso) < Date.parse(closesAt);
+}
+
 // ---- 当日受付（チェックイン）: 権限 lp:checkin ----
 
 /**

@@ -100,3 +100,56 @@ export function renderOpsMail(order: TicketOrderRow): RenderedMail {
   ].join("\n");
   return { subject: `[LP チケット] 購入 ${orderNumber(order.id)}`, text };
 }
+
+/**
+ * 返金・取消の完了通知（購入者あて）。チケット URL は入れない（もう無効なので）。
+ * 0 円の注文は「取消」、有料は「返金」の文面にする。
+ */
+export function renderRefundMail(order: TicketOrderRow): RenderedMail {
+  const number = orderNumber(order.id);
+  const free = order.amountJpy === 0;
+  const test = isTestOrder(order);
+  const items = order.items.map((i) => `${ticketName(i)} × ${i.quantity} 枚`);
+  const lead = free
+    ? `${EVENT_NAME} のお申し込みを取り消しました。`
+    : `${EVENT_NAME} のお申し込みを取り消し、お支払いいただいた代金を返金しました。`;
+  const notes = [
+    "このご注文のチケットはすべて無効になりました。当日の受付ではご利用いただけません。",
+    ...(free
+      ? []
+      : [
+          "返金はお支払いに使われたカード・決済サービスへ行います。",
+          "ご利用明細や口座へ反映される時期は、カード会社・決済サービスによって異なります（数日〜翌月以降になることがあります）。",
+        ]),
+    "お心当たりのない場合は、このメールへの返信でお知らせください。",
+  ];
+  const testNote = "これはテスト購入です。実際の請求・返金はありません。";
+  const text = [
+    `${order.buyerName} 様`,
+    "",
+    lead,
+    ...(test ? ["", testNote] : []),
+    "",
+    `注文番号: ${number}`,
+    "ご注文内容:",
+    ...items.map((i) => `  ${i}`),
+    free ? "お支払い: なし（無料）" : `返金額: ${yen(order.amountJpy)}`,
+    "",
+    ...notes,
+    "",
+    `${EVENT_NAME} 事務局`,
+  ].join("\n");
+  const html =
+    '<div style="font-family:sans-serif;color:#1a2238;line-height:1.7;max-width:560px;margin:0 auto">' +
+    `<p>${esc(order.buyerName)} 様</p>` +
+    `<p>${esc(lead)}</p>` +
+    (test ? `<p><strong>${testNote}</strong></p>` : "") +
+    `<p>注文番号: <strong>${esc(number)}</strong><br>` +
+    items.map((i) => `${esc(i)}<br>`).join("") +
+    (free ? "お支払い: なし（無料）" : `返金額: <strong>${esc(yen(order.amountJpy))}</strong>`) +
+    "</p>" +
+    `<p>${notes.map(esc).join("<br>")}</p>` +
+    `<p>${EVENT_NAME} 事務局</p></div>`;
+  const title = free ? "お申し込みの取消のお知らせ" : "返金（お申し込みの取消）のお知らせ";
+  return { subject: `【${EVENT_NAME}】${title}（注文番号 ${number}）`, text, html };
+}
