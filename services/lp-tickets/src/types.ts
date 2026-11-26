@@ -24,6 +24,14 @@ export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
 export type LpTicketRefundResult = lpTickets.LpTicketRefundResult;
 export type LpTicketRefundResponse = lpTickets.LpTicketRefundResponse;
 export type LpTicketRefundErrorReason = lpTickets.LpTicketRefundErrorReason;
+export type LpTicketCheckinResult = lpTickets.LpTicketCheckinResult;
+export type LpTicketCheckinDayCheck = lpTickets.LpTicketCheckinDayCheck;
+export type LpTicketCheckinInput = lpTickets.LpTicketCheckinInput;
+export type LpTicketCheckinTicket = lpTickets.LpTicketCheckinTicket;
+export type LpTicketCheckinResponse = lpTickets.LpTicketCheckinResponse;
+export type LpTicketCheckin = lpTickets.LpTicketCheckin;
+export type LpTicketCheckinsPage = lpTickets.LpTicketCheckinsPage;
+export type LpTicketCheckinUndoResponse = lpTickets.LpTicketCheckinUndoResponse;
 
 // ---- tickets persistence ----
 export interface TicketSettingsRow {
@@ -68,6 +76,29 @@ export interface TicketRow {
   status: "valid" | "void";
   createdAt: string;
   voidedAt: string | null;
+}
+/** 受付 1 件（lp_ticket_checkins の 1 行）。1 枚 x 開催日 1 行。 */
+export interface CheckinRow {
+  ticketId: string;
+  /** 'YYYY-MM-DD'（JST） */
+  eventDay: string;
+  checkedInAt: string;
+  checkedInBy: string;
+}
+/** 受付で照合する券 + 注文の状態と名前。 */
+export interface CheckinTicketRow {
+  ticket: TicketRow;
+  holderName: string | null;
+  /** 注文が見つからない時 null。 */
+  orderStatus: LpTicketOrderStatus | null;
+  buyerName: string;
+}
+export interface CheckinListRow extends CheckinRow {
+  orderId: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  holderName: string | null;
+  buyerName: string;
 }
 /** buyer_refund = 返金・取消のお知らせ（db/0004 で追加）。 */
 export type OutboxKind = "buyer_confirmation" | "buyer_refund" | "ops_copy";
@@ -203,6 +234,24 @@ export interface LpTicketRepo {
   outboxDue(before: string): Promise<Map<OutboxKind, number>>;
   listOrderOutbox(orderId: string): Promise<OutboxRow[]>;
   getJobStates(): Promise<Map<string, string>>;
+
+  // ---- 当日受付（lp_ticket_checkins） ----
+  getCheckinTicket(ticketId: string): Promise<CheckinTicketRow | null>;
+  /** 注文番号（注文 ID の末尾 8 文字・大文字）で引いた券の ID。発行順。 */
+  ticketIdsByOrderRef(orderRef: string): Promise<string[]>;
+  /**
+   * 1 文の INSERT ... SELECT ... ON CONFLICT DO NOTHING。券が valid の間だけ入る。
+   * false = この券・この日はもう受付済み、または券が valid でない（呼び出し側が getCheckin で見分ける）。
+   */
+  insertCheckin(row: CheckinRow): Promise<boolean>;
+  getCheckin(ticketId: string, eventDay: string): Promise<CheckinRow | null>;
+  deleteCheckin(ticketId: string, eventDay: string): Promise<boolean>;
+  /** その日の受付。新しい順・keyset `checkedInAt~ticketId`。 */
+  listCheckins(eventDay: string, cursor: string | null, limit: number): Promise<CheckinListRow[]>;
+  /** 受付のある日ごとの件数（日付順）。 */
+  checkinCounts(): Promise<{ eventDay: string; count: number }[]>;
+  /** バックアップ用。keyset `eventDay~ticketId`（古い順）。 */
+  listCheckinsForBackup(cursor: string | null, limit: number): Promise<CheckinRow[]>;
   setJobState(key: string, value: string, updatedAt: string): Promise<void>;
 }
 

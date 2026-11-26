@@ -1,5 +1,7 @@
 // In-memory LpTicketRepo for tests — same semantics as the D1 repo.
 import type {
+  CheckinListRow,
+  CheckinRow,
   LpTicketField,
   LpTicketOrderStatus,
   LpTicketRepo,
@@ -26,6 +28,9 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
   tickets: TicketRow[] = [];
   outbox: OutboxRow[] = [];
   jobs = new Map<string, string>();
+  checkins: CheckinRow[] = [];
+  /** lp_tickets.holder_name（0003）。TicketRow には載せていない列。 */
+  holderNames = new Map<string, string>();
 
   async getTicketSettings(site: string) {
     const r = this.ticketSettings.get(site);
@@ -367,5 +372,73 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
   }
   async setJobState(key: string, value: string) {
     this.jobs.set(key, value);
+  }
+
+  // ---- 当日受付 ----
+  async getCheckinTicket(ticketId: string) {
+    const t = this.tickets.find((x) => x.id === ticketId);
+    if (!t) return null;
+    const o = this.orders.find((x) => x.id === t.orderId);
+    return {
+      ticket: clone(t),
+      holderName: this.holderNames.get(t.id) ?? null,
+      orderStatus: o?.status ?? null,
+      buyerName: o?.buyerName ?? "",
+    };
+  }
+  async ticketIdsByOrderRef(orderRef: string) {
+    const ref = orderRef.toUpperCase();
+    return this.tickets.filter((t) => t.orderId.slice(-8).toUpperCase() === ref).map((t) => t.id);
+  }
+  async insertCheckin(row: CheckinRow) {
+    const t = this.tickets.find((x) => x.id === row.ticketId);
+    if (!t || t.status !== "valid") return false;
+    if (this.checkins.some((c) => c.ticketId === row.ticketId && c.eventDay === row.eventDay)) return false;
+    this.checkins.push(clone(row));
+    return true;
+  }
+  async getCheckin(ticketId: string, eventDay: string) {
+    const c = this.checkins.find((x) => x.ticketId === ticketId && x.eventDay === eventDay);
+    return c ? clone(c) : null;
+  }
+  async deleteCheckin(ticketId: string, eventDay: string) {
+    const before = this.checkins.length;
+    this.checkins = this.checkins.filter((x) => !(x.ticketId === ticketId && x.eventDay === eventDay));
+    return this.checkins.length < before;
+  }
+  async listCheckins(eventDay: string, cursor: string | null, limit: number) {
+    const key = (c: CheckinRow) => `${c.checkedInAt}~${c.ticketId}`;
+    return this.checkins
+      .filter((c) => c.eventDay === eventDay && (cursor ? key(c) < cursor : true))
+      .sort((a, b) => (key(a) < key(b) ? 1 : -1))
+      .slice(0, limit)
+      .flatMap((c): CheckinListRow[] => {
+        const t = this.tickets.find((x) => x.id === c.ticketId);
+        if (!t) return [];
+        const o = this.orders.find((x) => x.id === t.orderId);
+        return [
+          {
+            ...clone(c),
+            orderId: t.orderId,
+            ticketTypeName: t.ticketTypeName,
+            dayLabel: t.dayLabel,
+            holderName: this.holderNames.get(t.id) ?? null,
+            buyerName: o?.buyerName ?? "",
+          },
+        ];
+      });
+  }
+  async checkinCounts() {
+    const m = new Map<string, number>();
+    for (const c of this.checkins) m.set(c.eventDay, (m.get(c.eventDay) ?? 0) + 1);
+    return [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([eventDay, count]) => ({ eventDay, count }));
+  }
+  async listCheckinsForBackup(cursor: string | null, limit: number) {
+    const key = (c: CheckinRow) => `${c.eventDay}~${c.ticketId}`;
+    return this.checkins
+      .filter((c) => (cursor ? key(c) > cursor : true))
+      .sort((a, b) => (key(a) < key(b) ? -1 : 1))
+      .slice(0, limit)
+      .map(clone);
   }
 }
