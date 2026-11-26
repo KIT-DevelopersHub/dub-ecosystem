@@ -126,6 +126,34 @@ const EVENTS: event.EventSummary[] = [
   { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-09-01T00:00:00Z" },
 ];
 
+// AI のまとめ (#879) demo = the production default: flag OFF, no LLM. The server then
+// sends a preview built from the event's own rows (facts + actions) and deterministic
+// 食い違い; evt_1 carries one (the legacy free-text 定員 says 250).
+function demoDigestState(eventId: string): event.GetEventDigestResponse {
+  const ev = EVENT_DETAIL[eventId];
+  const link = `/events?eventId=${eventId}`;
+  const lines: event.EventDigestLine[] = ev
+    ? [
+        {
+          text: [`イベント「${ev.title}」`, ev.startsAt ? `開催日 ${ev.startsAt.slice(0, 10)}` : "", ev.venue ? `会場 ${ev.venue}` : "", typeof ev.capacity === "number" ? `定員 ${ev.capacity}人` : ""]
+            .filter((p) => p !== "")
+            .join("・"),
+          source: "event",
+          link,
+        },
+        ...ev.actions.map((a) => ({ text: `アクション「${a.title}」`, source: "actions" as const, link: `/events/${eventId}` })),
+      ]
+    : [];
+  const discrepancies: event.EventDigestDiscrepancy[] =
+    eventId === "evt_1" ? [{ field: "capacity", eventValue: "300", sourceValue: "250", source: "event", link }] : [];
+  return {
+    enabled: false,
+    provider: { id: "offline", status: "disabled" },
+    digest: null,
+    preview: { lines, discrepancies, collectedAt: isoNow() },
+  };
+}
+
 const EVENT_DETAIL: Record<string, event.EventDetail> = {
   evt_1: {
     version: 3,
@@ -136,6 +164,8 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
     phase: "preparing",
     startsAt: "2026-08-05T01:00:00Z",
     endsAt: "2026-08-05T09:00:00Z",
+    venue: "金沢工業大学 扇が丘キャンパス",
+    capacity: 300,
     archivedAt: null,
     createdAt: "2026-05-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -2858,6 +2888,16 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // AI のまとめ (#879) — flag OFF like production: GET = preview, run = 409, ask = disabled.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/digest$/);
+    if (id && method === "GET") return json(demoDigestState(id));
+    const runId = seg(/^\/api\/v1\/events\/([^/]+)\/digest\/run$/);
+    if (runId && method === "POST") return json({ error: { code: "EVENT_AI_DIGEST_DISABLED", message: "AI digest is disabled" } }, 409);
+    const askId = seg(/^\/api\/v1\/events\/([^/]+)\/ask$/);
+    if (askId && method === "POST") return json({ status: "disabled", answer: null, sources: [] } satisfies event.AskEventResponse);
+  }
+
   // Shared section layout save — version-locked (see DemoSectionLayout above).
   {
     const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
@@ -2897,6 +2937,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         phase: b.phase ?? cur.phase,
         startsAt: b.startsAt !== undefined ? b.startsAt : cur.startsAt,
         endsAt: b.endsAt !== undefined ? b.endsAt : cur.endsAt,
+        venue: b.venue !== undefined ? b.venue : (cur.venue ?? null),
+        capacity: b.capacity !== undefined ? b.capacity : (cur.capacity ?? null),
         version: cur.version + 1,
         updatedAt: isoNow(),
       };

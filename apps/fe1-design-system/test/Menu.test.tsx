@@ -110,4 +110,31 @@ describe("Menu (dropdown 設定/kebab primitive)", () => {
     await userEvent.click(screen.getByTestId("x"));
     expect(onSelect).not.toHaveBeenCalled();
   });
+  it("shows an attention dot on the trigger and item, announced via aria-label", async () => {
+    render(
+      <Menu
+        label="設定"
+        icon="settings"
+        iconOnly
+        badge
+        badgeLabel="未入力の項目があります"
+        testId="menu"
+        items={[
+          { id: "a", label: "アカウント設定", badge: true, onSelect: () => {}, testId: "a" },
+          { id: "b", label: "カラー設定", onSelect: () => {}, testId: "b" },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("menu-badge")).toBeInTheDocument();
+    expect(screen.getByTestId("menu-trigger")).toHaveAttribute("aria-label", "設定（未入力の項目があります）");
+    await userEvent.click(screen.getByTestId("menu-trigger"));
+    expect(screen.getByTestId("a-badge")).toBeInTheDocument();
+    expect(screen.queryByTestId("b-badge")).toBeNull();
+  });
+
+  it("renders no dot by default", () => {
+    render(<Menu label="設定" icon="settings" iconOnly testId="menu" items={[]} />);
+    expect(screen.queryByTestId("menu-badge")).toBeNull();
+    expect(screen.getByTestId("menu-trigger")).toHaveAttribute("aria-label", "設定");
+  });
 });
