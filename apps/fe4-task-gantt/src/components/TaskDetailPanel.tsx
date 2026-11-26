@@ -8,6 +8,9 @@ import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
 import { AssigneePicker } from "./AssigneePicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
+import { TaskTeamBadge } from "./TaskTeamBadge";
+import { deriveTaskTeam } from "../domain/assignee";
+import { useUserTeams } from "../api/useUserTeams";
 import { TaskAttachmentsEditor } from "./TaskAttachmentsEditor";
 import styles from "../styles/app.module.css";
 
@@ -150,6 +153,7 @@ export function TaskDetailPanel({
   // 親の付け替えで親のチームへ追従する（下の親セレクトの onChange）。親なし＝トップレベルなら自由。
   // サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保。
   const teamLockedToParent = parentId != null;
+  const userTeams = useUserTeams();
   // 親タスク（子を持つ）のステータスは子孫タスクの内訳から自動集計される表示専用値
   // （親バーの色分け＝#374／再帰集計＝domain/child-progress）。手動で変えられると集計と
   // 食い違って挙動がおかしくなるため、子が1件以上ある間はステータス編集を無効化する。
@@ -278,6 +282,7 @@ export function TaskDetailPanel({
       <div className={styles.detailPanelBody} aria-label="タスク詳細">
         <div className={styles.panelHeadInfo}>
           <TaskStatusBadge status={statusLockedToChildren ? displayStatus : t.status} />
+          <TaskTeamBadge name={teams.find((tm) => tm.id === teamId)?.name} testId="fe4-detail-team-badge" />
         </div>
 
         <div className={styles.formField}>
@@ -339,6 +344,14 @@ export function TaskDetailPanel({
             onChange={(next) => {
               setAssigneeId(next.assigneeId);
               setAssigneeTeamId(next.assigneeTeamId);
+              // チームは担当に従う（親タスクがある間は親のチーム固定）。
+              if (teamLockedToParent) return;
+              const derived = deriveTaskTeam(next, teamId, userTeams, teams.map((tm) => tm.id));
+              if (derived !== teamId) {
+                setTeamId(derived);
+                // dependencies are same-team only (ADR-0007).
+                setDeps((d) => pruneToScope(scopeTasks, derived, d).filter((id) => id !== t.id));
+              }
             }}
             testId="fe4-detail-assignee"
           />
@@ -359,33 +372,6 @@ export function TaskDetailPanel({
             <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
           </div>
         </div>
-
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-team">
-              チーム
-            </label>
-            <Select
-              id="fe4-detail-team"
-              value={teamId ?? ""}
-              disabled={!canWrite || teamLockedToParent}
-              onChange={(v) => {
-                const next = v ? (v as common.TeamId) : null;
-                setTeamId(next);
-                // dependencies are same-team only (ADR-0007) — drop predecessors that are
-                // now on another team.
-                setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
-              }}
-              options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
-              testId="fe4-detail-team"
-            />
-            {teamLockedToParent && (
-              <p className={styles.fieldHint} data-testid="fe4-detail-team-locked">
-                親タスクと同じチームです（子タスクのチームは変更できません）
-              </p>
-            )}
-          </div>
-        )}
 
         {/* 子タスク数: shown when this task is itself a work-package (親). */}
         {childCount > 0 && (

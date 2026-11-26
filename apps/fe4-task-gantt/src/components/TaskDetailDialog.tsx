@@ -8,6 +8,7 @@ import { isOverdue } from "../domain/my-tasks";
 import { PRIORITY_LABEL } from "../domain/task-form";
 import { FromToCell } from "./FromToCell";
 import { TaskStatusBadge } from "./TaskStatusBadge";
+import { TaskTeamBadge } from "./TaskTeamBadge";
 import styles from "../styles/app.module.css";
 
 function humanSize(bytes: number | null): string {
@@ -169,7 +170,10 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
             <div className={styles.detailRow}>
               <dt className={styles.detailLabel}>状態</dt>
               <dd className={styles.detailValue}>
-                <TaskStatusBadge status={t.status} />
+                <span className={styles.panelHeadInfo}>
+                  <TaskStatusBadge status={t.status} />
+                  <TaskTeamBadge name={team} testId="fe4-mytask-detail-team-badge" />
+                </span>
               </dd>
             </div>
             <div className={styles.detailRow}>
@@ -183,12 +187,6 @@ export function TaskDetailDialog({ task, users, teamNames, onClose, onOpenWorksp
               <dd className={`${styles.detailValue} ${overdue ? styles.dueOverdue : ""}`} data-testid="fe4-mytask-detail-due">
                 {formatDue(t.dueAt)}
                 {overdue && <span className={styles.overdueTag}> 期限切れ</span>}
-              </dd>
-            </div>
-            <div className={styles.detailRow}>
-              <dt className={styles.detailLabel}>チーム</dt>
-              <dd className={styles.detailValue}>
-                {team ? <Badge tone="info">{team}</Badge> : <span className={styles.muted}>―</span>}
               </dd>
             </div>
           </dl>

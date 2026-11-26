@@ -46,3 +46,29 @@ export function isAssignedToMe(
 }
 
 export type AssigneeUser = Pick<identity.UserSummary, "id" | "displayName">;
+
+/** 人 → 所属チーム (identity userId → team ids). Empty when unknown / not permitted. */
+export type UserTeamsLookup = ReadonlyMap<common.UserId, readonly common.TeamId[]>;
+
+/**
+ * The task's team (teamId) implied by its 担当 — the チーム field is no longer shown, so it
+ * follows the 担当:
+ *  - チーム担当 → that team.
+ *  - 人の担当 → one of the person's teams: keep the current team if the person is in it,
+ *    otherwise the first of the person's teams in `teamOrder` (the team list order).
+ *    A person with no known team (or teams not in `teamOrder`) leaves it unchanged.
+ *  - 未割当 → unchanged.
+ * Callers skip this while 親タスク is set (親子は同一チーム wins).
+ */
+export function deriveTaskTeam(
+  next: Assignee,
+  currentTeamId: common.TeamId | null,
+  userTeams: UserTeamsLookup,
+  teamOrder: readonly common.TeamId[],
+): common.TeamId | null {
+  if (next.assigneeTeamId) return next.assigneeTeamId;
+  if (!next.assigneeId) return currentTeamId;
+  const theirs = userTeams.get(next.assigneeId) ?? [];
+  if (currentTeamId && theirs.includes(currentTeamId)) return currentTeamId;
+  return teamOrder.find((id) => theirs.includes(id)) ?? currentTeamId;
+}

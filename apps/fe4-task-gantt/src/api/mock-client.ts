@@ -49,6 +49,9 @@ export interface MockSeed {
   currentUserId?: common.UserId;
   /** teams the current user belongs to (GET /members/me/mention-teams). */
   myTeamIds?: common.TeamId[];
+  /** 人 → 所属チーム (GET /members/overview). Unset ⇒ that route 404s like a role without
+   *  名簿の閲覧, so the client falls back to the caller's own teams. */
+  memberTeams?: Record<common.UserId, common.TeamId[]>;
 }
 
 export class MockApiClient implements ApiClient {
@@ -64,6 +67,7 @@ export class MockApiClient implements ApiClient {
   private hierarchy: Record<common.TaskId, { parentTaskId: common.TaskId | null; depth: number; wbs?: string }> = {};
   private currentUserId: common.UserId;
   private myTeamIds: common.TeamId[];
+  private memberTeams: Record<common.UserId, common.TeamId[]> | null;
   private attachmentsByTask = new Map<common.TaskId, task.TaskAttachment[]>();
 
   /** force the next matching call to throw (test 11 / error branches). */
@@ -88,6 +92,7 @@ export class MockApiClient implements ApiClient {
     this.hierarchy = seed.hierarchy ?? {};
     this.currentUserId = seed.currentUserId ?? "usr_me";
     this.myTeamIds = seed.myTeamIds ?? [];
+    this.memberTeams = seed.memberTeams ?? null;
   }
 
   /** Set of task ids that appear as some row's parent (⇒ they render a toggle). */
@@ -163,6 +168,17 @@ export class MockApiClient implements ApiClient {
     // the caller's own teams (担当チーム → My Tasks). Demo: none unless seeded.
     if (path === "/api/v1/members/me/mention-teams" && req.method === "GET")
       return ({ teams: [], myTeamIds: this.myTeamIds } as MyTeamsResponse) as T;
+    // 人 → 所属チーム (only the fields the task form reads).
+    if (path === "/api/v1/members/overview" && req.method === "GET" && this.memberTeams)
+      return ({
+        teams: [],
+        members: Object.entries(this.memberTeams).map(([uid, teamIds], i) => ({
+          id: `m_${i}`,
+          identityUserId: uid,
+          status: "added",
+          teamIds,
+        })),
+      } as unknown as member.MembersOverview) as T;
     // --- identity ---
     if (path === "/api/v1/identity/users" && req.method === "GET") return this.listUsers(req.query ?? {}) as T;
     // --- events ---

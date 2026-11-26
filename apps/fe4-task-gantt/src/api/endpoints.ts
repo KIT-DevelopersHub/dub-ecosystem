@@ -200,6 +200,37 @@ export async function listMyTeamIds(client: ApiClient): Promise<common.TeamId[]>
   return (res.myTeamIds ?? []) as common.TeamId[];
 }
 
+/**
+ * 人 → 所属チーム for deriving a task's team from its 担当. Read from the existing
+ * GET /members/overview (identityUserId + teamIds; needs 運営名簿の閲覧). Without that
+ * permission it falls back to the caller's own teams (GET /members/me/mention-teams), so
+ * self-assignment still derives. 辞退 (declined) rows are skipped. No new endpoint.
+ */
+export async function listUserTeams(
+  client: ApiClient,
+  currentUserId: common.UserId | null,
+): Promise<Map<common.UserId, common.TeamId[]>> {
+  const out = new Map<common.UserId, common.TeamId[]>();
+  try {
+    const res = await client.request<Partial<member.MembersOverview>>({ method: "GET", path: `${P}/members/overview` });
+    for (const m of res.members ?? []) {
+      if (!m.identityUserId || m.status === "declined" || m.teamIds.length === 0) continue;
+      const prev = out.get(m.identityUserId) ?? [];
+      out.set(m.identityUserId, [...new Set([...prev, ...(m.teamIds as common.TeamId[])])]);
+    }
+    return out;
+  } catch {
+    if (!currentUserId) return out;
+    try {
+      const mine = await listMyTeamIds(client);
+      if (mine.length > 0) out.set(currentUserId, mine);
+    } catch {
+      /* no team info — the team just stays as it is */
+    }
+    return out;
+  }
+}
+
 export function listTeams(client: ApiClient): Promise<member.ListTeamsResponse> {
   // Canonical team list is owned by member-service and exposed at the gateway
   // "members" segment (GET /api/v1/members/teams). The api-gateway has NO bare
