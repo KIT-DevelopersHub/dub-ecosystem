@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "event-apps",
+  "worker": "dub-demo-event-apps",
+  "url": "https://dub-demo-event-apps.developershub-site.workers.dev",
+  "deployedSha": "884b41d0",
+  "branch": "feat/event-enabled-apps",
+  "actor": "ko-tarou",
+  "markers": ["fe3-event-apps"],
+  "live": true,
+  "verifiedAt": "2026-11-26T15:18:35Z",
+  "updatedAt": "2026-11-26T15:18:35Z",
+  "note": "per-event enabled apps"
+}
