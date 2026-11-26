@@ -1,0 +1,39 @@
+# mail-automation — FREE-plan production config (#836). Deployed by infra/deploy/deploy-prod.sh.
+#
+# Free plan has no Queues: no consumer (inbound mail.message.received arrives from
+# freeq-drain at POST /internal/events-async over its SVC_MAIL_AUTOMATION binding) and no
+# producers (decided/routed + audit go to the shared freeq_outbox, src/outbox.ts).
+# wrangler.toml is the paid-tier template and is NOT deployed.
+#
+# PRECONDITION (manual, this script never migrates): infra/d1/migrations/mailauto/0002_*.sql
+# applied to dub-core — prod still has the P0b aggregation stub, whose columns the service
+# does not use (the deploy's D1 schema gate fails until it is applied).
+name = "dub-mail-automation"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dub-core"
+database_id = "d663f9c6-499f-4c67-910d-e08733d5278d"
+
+[[services]]
+binding = "SVC_MAIL_GATEWAY"
+service = "dub-mail-gateway"      # GET /messages/:id, POST /send
+
+[[services]]
+binding = "SVC_IDENTITY"
+service = "dub-identity-roster"   # POST /authz/check (mail:read / mail:admin)
+
+[[services]]
+binding = "SVC_EVENT"
+service = "dub-event-service"     # GET /events/:id (template variables)
+
+[vars]
+SELF_DOMAINS = "developershub.jp"
+SELF_ADDRESSES = ""
