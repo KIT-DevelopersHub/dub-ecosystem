@@ -179,6 +179,9 @@ Service Binding 経由で `/authz/check` を叩くため、identity-roster に�
 | POST /members/teams | ○ | `requireAppAccess("members","edit")` | `appLevel("members","edit")` | チーム作成 |
 | PATCH /members/teams/:id | ○ | `requireAppAccess("members","edit")` | `appLevel("members","edit")` | チーム更新 |
 | DELETE /members/teams/:id | ○ | `requireAppAccess("members","edit")` | `appLevel("members","edit")` | チーム削除 |
+| GET /members/events/:eventId/staff | ○ | (新規) | `appLevel("members","view")` | イベントの運営メンバー・班の id 一覧 |
+| PUT\|DELETE /members/events/:eventId/people/:personId | ○ | (新規) | `appLevel("members","edit")` | イベントの運営メンバーに入れる/外す |
+| PUT\|DELETE /members/events/:eventId/teams/:teamId | ○ | (新規) | `appLevel("members","edit")` | イベントの班に使う/外す |
 | POST /members/people | ○ | `requireAppAccess("members","edit")` | `appLevel("members","edit")` | 名簿行の作成 |
 | GET /members/people/by-identity/:identityUserId | ○ | `requireAny([...])` | `appLevel("members","view")` | 名簿行の逆引き |
 | POST /members/people/:id/identity-link | ○ | `requireAppAccess("members","edit")` | `appLevel("members","edit")` | identity 紐付け |

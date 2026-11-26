@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApiClient, ApiError } from "./api-client.tsx";
 import { createDemoFetch, isDemoEnabled } from "./demo-seed.tsx";
+import { event as evNs } from "@dub/types";
 
 function api() {
   return createApiClient({ baseUrl: "https://demo.local", fetchImpl: createDemoFetch() });
@@ -933,9 +934,12 @@ describe("使うアプリ (per-event enabled apps) demo seed", () => {
   type Apps = { enabledApps: string[]; customized: boolean };
   const get = (id: string) => api().request<Apps>({ method: "GET", path: `/api/v1/events/${id}/apps` });
 
+  const toggles = (apps: string[]) => apps.filter((a) => evNs.isEventToggleableApp(a));
+
   it("seeds one event with 運営メンバー on, one with the new-event default, one legacy (all on)", async () => {
-    expect((await get("evt_1")).enabledApps).toEqual(["events", "gantt", "members", "admin"]);
-    expect((await get("evt_2")).enabledApps).toEqual(["events", "gantt", "admin"]);
+    expect(toggles((await get("evt_1")).enabledApps)).toEqual(["events", "gantt", "members", "admin"]);
+    expect(toggles((await get("evt_2")).enabledApps)).toEqual(["events", "gantt", "admin"]);
+    expect((await get("evt_2")).enabledApps).toContain("mail"); // org-wide: always on
     const legacy = await get("evt_3");
     expect(legacy.customized).toBe(false);
     expect(legacy.enabledApps).toContain("mail");
@@ -943,10 +947,10 @@ describe("使うアプリ (per-event enabled apps) demo seed", () => {
 
   it("PUT replaces the set and the event detail carries it; unknown ids are rejected", async () => {
     const a = api();
-    const saved = await a.request<Apps>({ method: "PUT", path: "/api/v1/events/evt_2/apps", body: { enabledApps: ["gantt", "chat"] } });
-    expect(saved.enabledApps).toEqual(["events", "gantt", "chat"]);
+    const saved = await a.request<Apps>({ method: "PUT", path: "/api/v1/events/evt_2/apps", body: { enabledApps: ["gantt", "members"] } });
+    expect(toggles(saved.enabledApps)).toEqual(["events", "gantt", "members"]);
     const detail = await a.request<{ enabledApps: string[] }>({ method: "GET", path: "/api/v1/events/evt_2" });
-    expect(detail.enabledApps).toEqual(["events", "gantt", "chat"]);
+    expect(toggles(detail.enabledApps)).toEqual(["events", "gantt", "members"]);
     await expect(a.request({ method: "PUT", path: "/api/v1/events/evt_2/apps", body: { enabledApps: ["nope"] } })).rejects.toBeTruthy();
   });
 });

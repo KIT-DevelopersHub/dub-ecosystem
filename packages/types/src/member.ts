@@ -125,8 +125,44 @@ export interface ListTeamsResponse {
   teams: Team[];
 }
 
+// ---- 運営メンバー per event ----
+// One org-wide roster (member_people / member_teams); an event SELECTS its staff and its
+// 班 from it (member_event_people / member_event_teams) — people and teams are never
+// duplicated. overview / org-overview stay org-wide; a client narrows them with
+// GET /members/events/{eventId}/staff + scopeOverviewToEvent. Roles stay org-wide. The
+// event id is opaque here (event-service owns events).
+
+/** Bound + shape of an event id accepted by member-service (uuid / event_… / evt_…). */
+export const EVENT_SCOPE_ID_MAX = 100;
+export function isEventScopeId(v: unknown): v is string {
+  return typeof v === "string" && v.length > 0 && v.length <= EVENT_SCOPE_ID_MAX && /^[A-Za-z0-9_-]+$/.test(v);
+}
+
+/** GET /members/events/{eventId}/staff and the response of every staff add/remove. */
+export interface EventStaff {
+  eventId: string;
+  /** member ids (member_people.id) selected as this event's 運営メンバー. */
+  personIds: string[];
+  /** team ids (member_teams.id) used as this event's 班. */
+  teamIds: string[];
+}
+
+/** Narrow an org-wide overview to one event's staff + 班 (teamIds per member filtered too). */
+export function scopeOverviewToEvent(overview: MembersOverview, staff: EventStaff): MembersOverview {
+  const people = new Set(staff.personIds);
+  const teams = new Set(staff.teamIds);
+  return {
+    teams: overview.teams.filter((t) => teams.has(t.id)),
+    members: overview.members
+      .filter((m) => people.has(m.id))
+      .map((m) => ({ ...m, teamIds: m.teamIds.filter((t) => teams.has(t)) })),
+  };
+}
+
 // ---- request contracts ----
 export interface CreateTeamRequest {
+  /** Also use the new team as a 班 of this event (イベントを選んで作った時). */
+  eventId?: string;
   name: string;
   /** Optional slug; derived from name when omitted. */
   key?: string;
@@ -153,6 +189,8 @@ export interface UpdateMemberOrgRequest {
 /** 追加。人物プロフィール項目は PersonProfile と共通 (任意・省略は null)。`name` は
  *  姓/名 から合成するので、姓/名 を送るなら省略可。 */
 export interface CreateMemberRequest extends Partial<PersonProfile> {
+  /** Also add the new person to this event's 運営メンバー (イベントを選んで追加した時). */
+  eventId?: string;
   name?: string;
   roleTitle?: string | null;
   position?: MemberPosition | null;
@@ -594,8 +632,8 @@ export interface ListParticipationCandidatesResponse {
  *  - `unlink` : 反映(紐付け)を取り消して未処理(pending)に戻す。名簿のメンバー自体は
  *               消さない・状態も戻さない（他の編集を巻き戻さないため。直すなら名簿側で）。 */
 export type ResolveParticipationRequest =
-  | { action: "link"; memberId: string; expectedVersion: number }
-  | { action: "create" }
+  | { action: "link"; memberId: string; expectedVersion: number; eventId?: string | null }
+  | { action: "create"; eventId?: string | null }
   | { action: "skip" }
   | { action: "unlink" };
 

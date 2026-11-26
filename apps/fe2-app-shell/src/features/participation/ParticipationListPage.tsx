@@ -14,6 +14,7 @@ import type { ColumnDef, BadgeTone } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { usePermissionGate } from "../../auth/PermissionGate.tsx";
+import { EventTargetSelect, useEventTarget } from "../../lib/eventTarget.tsx";
 import { useParticipationList, useParticipationTeams, useParticipationCandidates, useParticipationRosterMembers, useResolveParticipation } from "./hooks.ts";
 import { POSITION_LABEL, REVIEW_STATE_LABEL, type MemberStatus, type Participation, type ParticipationCandidate, type RosterMember } from "./contracts.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
@@ -220,8 +221,8 @@ export function ParticipationListPage(): JSX.Element {
             participation={addTarget}
             pending={resolveMut.isPending}
             onCancel={() => setAddTarget(null)}
-            onLink={(t) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version })}
-            onCreate={() => doResolve(addTarget.id, { action: "create" })}
+            onLink={(t, eventId) => doResolve(addTarget.id, { action: "link", memberId: t.memberId, expectedVersion: t.version, ...(eventId ? { eventId } : {}) })}
+            onCreate={(eventId) => doResolve(addTarget.id, { action: "create", ...(eventId ? { eventId } : {}) })}
             onSkip={() => doResolve(addTarget.id, { action: "skip" })}
           />
         ) : null}
@@ -287,11 +288,15 @@ function ResolveDialog({
   participation: Participation;
   pending: boolean;
   onCancel: () => void;
-  onLink: (target: LinkTarget) => void;
-  onCreate: () => void;
+  onLink: (target: LinkTarget, eventId: string | null) => void;
+  onCreate: (eventId: string | null) => void;
   onSkip: () => void;
 }): JSX.Element {
   const [manual, setManual] = useState(false);
+  // 反映する人を入れるイベント (既定 = ヘッダーで選んでいるイベント)。
+  const [eventTarget, setEventTarget] = useEventTarget();
+  const link = (t: LinkTarget) => onLink(t, eventTarget);
+  const create = () => onCreate(eventTarget);
   const candidatesQuery = useParticipationCandidates(participation.id);
   const candidates = candidatesQuery.data?.candidates ?? [];
   const loading = candidatesQuery.isLoading;
@@ -311,11 +316,12 @@ function ResolveDialog({
       }
     >
       <div className={styles.resolveBody}>
+        <EventTargetSelect id="participation-resolve-event" value={eventTarget} onChange={setEventTarget} testId="participation-resolve-event" />
         {manual ? (
           <ManualLinkPanel
             participation={participation}
             pending={pending}
-            onLink={onLink}
+            onLink={link}
             onBack={() => setManual(false)}
           />
         ) : loading ? (
@@ -329,7 +335,7 @@ function ResolveDialog({
             </p>
             <ul className={styles.candidateList} data-testid="participation-candidates">
               {candidates.map((c) => (
-                <CandidateRow key={c.memberId} c={c} pending={pending} onLink={onLink} />
+                <CandidateRow key={c.memberId} c={c} pending={pending} onLink={link} />
               ))}
             </ul>
             <div className={styles.resolveDivider}>または</div>
@@ -337,7 +343,7 @@ function ResolveDialog({
               <Button variant="secondary" loading={pending} onClick={() => setManual(true)} testId="participation-resolve-manual">
                 名簿から手動で選ぶ
               </Button>
-              <Button variant="secondary" loading={pending} onClick={onCreate} testId="participation-resolve-create-alt">
+              <Button variant="secondary" loading={pending} onClick={create} testId="participation-resolve-create-alt">
                 どれとも別人・新規として追加
               </Button>
             </div>
@@ -348,7 +354,7 @@ function ResolveDialog({
               「{participation.name}」は招待中に自動で見つかる該当者がいません。どう反映しますか？
             </p>
             <div className={styles.resolveActions}>
-              <Button variant="primary" loading={pending} onClick={onCreate} testId="participation-resolve-create">
+              <Button variant="primary" loading={pending} onClick={create} testId="participation-resolve-create">
                 新規で追加
               </Button>
               <Button variant="secondary" loading={pending} onClick={() => setManual(true)} testId="participation-resolve-manual">

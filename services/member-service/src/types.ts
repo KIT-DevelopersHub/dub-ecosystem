@@ -183,6 +183,13 @@ export interface MemberRepo {
   listOnboardingMeetings(orgId: common.OrgId): Promise<OnboardingMeetingRow[]>;
   upsertOnboardingMeeting(row: OnboardingMeetingRow): Promise<void>;
   deleteOnboardingMeeting(orgId: common.OrgId, teamId: string | null): Promise<void>;
+
+  // 運営メンバー per event (member_event_people / member_event_teams). Idempotent writes.
+  getEventStaff(eventId: string): Promise<{ personIds: string[]; teamIds: string[] }>;
+  addEventPerson(eventId: string, personId: string, addedBy: common.UserId, addedAt: common.ISODateTime): Promise<void>;
+  removeEventPerson(eventId: string, personId: string): Promise<void>;
+  addEventTeam(eventId: string, teamId: string, addedBy: common.UserId, addedAt: common.ISODateTime): Promise<void>;
+  removeEventTeam(eventId: string, teamId: string): Promise<void>;
 }
 
 export interface AppDeps {

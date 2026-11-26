@@ -3,6 +3,7 @@
 // thin adapter. member_teams is the source of truth for the shared Team entity.
 import { DubError, errors } from "@dub/errors";
 import { type common, member } from "@dub/types";
+import { parseEventScopeId } from "@dub/validation";
 import type { AppDeps, OnboardingItemRow, OnboardingMeetingRow, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
   composeName,
@@ -85,6 +86,13 @@ function backfillInt(value: unknown, field: string, min: number, max: number): n
   return value;
 }
 
+/** A required event id (path param): malformed or empty is a 400. */
+function requiredEventId(value: unknown): string {
+  const id = parseEventScopeId(value);
+  if (!id) throw errors.validationFailed([{ field: "eventId", reason: "required" }]);
+  return id;
+}
+
 /** Upper bound on teams expanded in one チーム単位メンション lookup (see listTeamIdentityUserIds). */
 const MAX_TEAM_MENTION_EXPANSION = 20;
 /** Upper bound on identity ids resolved in one Google-address lookup (the whole org fits). */
@@ -122,6 +130,43 @@ export class MemberService {
   async getOrgOverview(ctx: ReqCtx): Promise<member.MembersOverview> {
     const overview = await this.getOverview(ctx);
     return { ...overview, members: overview.members.map(member.toOrgChartMember) };
+  }
+
+  // ---- 運営メンバー per event: the event selects its staff / 班 from the org-wide roster ----
+  async getEventStaff(_ctx: ReqCtx, eventIdRaw: unknown): Promise<member.EventStaff> {
+    const eventId = requiredEventId(eventIdRaw);
+    return { eventId, ...(await this.deps.repo.getEventStaff(eventId)) };
+  }
+
+  /** Add (on) / remove (off) one roster person as this event's staff. Idempotent. */
+  async setEventPerson(ctx: ReqCtx, eventIdRaw: unknown, personId: string, on: boolean): Promise<member.EventStaff> {
+    const eventId = requiredEventId(eventIdRaw);
+    if (on) {
+      const p = await this.deps.repo.getPerson(personId);
+      if (!p || p.orgId !== this.deps.orgId || p.archivedAt !== null) throw errPersonNotFound(personId);
+      await this.deps.repo.addEventPerson(eventId, personId, ctx.userId, this.deps.now());
+    } else {
+      await this.deps.repo.removeEventPerson(eventId, personId);
+    }
+    return this.getEventStaff(ctx, eventId);
+  }
+
+  /** Use (on) / stop using (off) one org-wide team as a 班 of this event. Idempotent. */
+  async setEventTeam(ctx: ReqCtx, eventIdRaw: unknown, teamId: string, on: boolean): Promise<member.EventStaff> {
+    const eventId = requiredEventId(eventIdRaw);
+    if (on) {
+      const t = await this.deps.repo.getTeam(teamId);
+      if (!t || t.orgId !== this.deps.orgId) throw errTeamNotFound(teamId);
+      await this.deps.repo.addEventTeam(eventId, teamId, ctx.userId, this.deps.now());
+    } else {
+      await this.deps.repo.removeEventTeam(eventId, teamId);
+    }
+    return this.getEventStaff(ctx, eventId);
+  }
+
+  /** Put a person on an event's staff when a write names one (追加・参加届・採用). */
+  async enrollInEvent(ctx: ReqCtx, eventId: string | undefined, personId: string): Promise<void> {
+    if (eventId) await this.deps.repo.addEventPerson(eventId, personId, ctx.userId, this.deps.now());
   }
 
   // ---- teams (member_teams is the canonical source read by other apps) ----
@@ -214,6 +259,7 @@ export class MemberService {
     const orgId = this.deps.orgId;
     const now = this.deps.now();
     const teamName = name(body.name);
+    const eventId = parseEventScopeId(body.eventId);
     const id = this.deps.newTeamId();
     const key = await this.resolveKey(orgId, body.key ?? teamName, id);
     const row: TeamRow = {
@@ -228,6 +274,7 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.createTeam(row);
+    if (eventId) await this.deps.repo.addEventTeam(eventId, id, ctx.userId, now);
     await this.syncRoleCatalog(ctx);
     return toTeam(row);
   }
@@ -395,6 +442,7 @@ export class MemberService {
   async createMember(ctx: ReqCtx, body: member.CreateMemberRequest): Promise<member.Member> {
     if (!isMemberStatus(body.status)) throw errors.validationFailed([{ field: "status", reason: "invalid" }]);
     const teamIds = await this.validateTeamIds(body.teamIds);
+    const eventId = parseEventScopeId(body.eventId);
     const orgId = this.deps.orgId;
     const now = this.deps.now();
     const memberId = this.deps.newMemberId();
@@ -419,6 +467,7 @@ export class MemberService {
       updatedAt: now,
     };
     await this.deps.repo.createPerson(row, teamIds);
+    await this.enrollInEvent(ctx, eventId, memberId);
     return toMember(row, teamIds);
   }
 
@@ -751,6 +800,8 @@ export class MemberService {
     const p = await this.deps.repo.getParticipation(participationId);
     if (!p || p.orgId !== this.deps.orgId) throw errParticipationNotFound(participationId);
     const action = (body as { action?: unknown } | null)?.action;
+    // link/create: also put the person on the event chosen in the form (null/省略 = どこにも入れない).
+    const eventId = parseEventScopeId((body as { eventId?: unknown } | null)?.eventId);
     const now = this.deps.now();
 
     if (action === "skip") {
@@ -787,6 +838,7 @@ export class MemberService {
         );
       }
       const resolved = await this.promoteFromParticipation(ctx, target, p, expectedVersion);
+      await this.enrollInEvent(ctx, eventId, resolved.id);
       const row: ParticipationRow = {
         ...p,
         memberId: resolved.id,
@@ -800,6 +852,7 @@ export class MemberService {
 
     if (action === "create") {
       const resolved = await this.createMemberFromParticipation(ctx, p);
+      await this.enrollInEvent(ctx, eventId, resolved.id);
       const row: ParticipationRow = {
         ...p,
         memberId: resolved.id,

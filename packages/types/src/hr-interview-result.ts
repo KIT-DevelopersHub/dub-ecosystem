@@ -60,6 +60,8 @@ export interface PassPlacement {
   teamIds?: string[];
   /** 上長 (member_people.id・在籍中のメンバー)。省略・null = なし。 */
   leaderId?: string | null;
+  /** この人をそのイベントの運営メンバーにも入れる (画面で選んだイベント)。省略・null = 入れない。 */
+  eventId?: string | null;
 }
 
 export interface RegisterInterviewResultRequest extends PassPlacement {

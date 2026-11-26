@@ -246,21 +246,42 @@ export interface AskEventResponse {
 // before this feature) resolves to EVERY app enabled — today's behaviour. Only a
 // NEW event is created with EVENT_DEFAULT_ENABLED_APPS.
 
-/** Apps a newly created event starts with: イベント・ガントチャート・ロール管理. */
+/**
+ * Apps that belong to an event and can be turned on/off per event. Every other app is
+ * org-wide (メール・チャット・通知・カレンダー・Drive共有 …) and is ALWAYS enabled — a per-event
+ * switch would make no sense for it, so it is never greyed and never listed as a switch.
+ */
+export const EVENT_TOGGLEABLE_APPS: readonly AppId[] = [
+  "events",
+  "tasks",
+  "gantt",
+  "members",
+  "participation",
+  "lp",
+  "sponsor",
+  "admin",
+];
+
+/** True iff the app can be switched per event (see EVENT_TOGGLEABLE_APPS). */
+export function isEventToggleableApp(id: string): boolean {
+  return (EVENT_TOGGLEABLE_APPS as readonly string[]).includes(id);
+}
+
+/** Apps a newly created event starts with: イベント・ガントチャート・ロール管理 (+ every org-wide app). */
 export const EVENT_DEFAULT_ENABLED_APPS: readonly AppId[] = ["events", "gantt", "admin"];
 
 /** Apps that cannot be turned off: イベント holds this very setting. */
 export const EVENT_ALWAYS_ENABLED_APPS: readonly AppId[] = ["events"];
 
 /**
- * Canonicalize a stored/requested app list: drop unknown ids and duplicates, add the
- * always-on apps, and return it in launcher order. `null`/`undefined` (no setting)
- * resolves to every app — the legacy "all enabled" state.
+ * Canonicalize a stored/requested app list: drop unknown ids and duplicates, keep the
+ * always-on and every org-wide (non-toggleable) app, and return it in launcher order.
+ * `null`/`undefined` (no setting) resolves to every app — the legacy "all enabled" state.
  */
 export function resolveEnabledApps(apps: readonly string[] | null | undefined): AppId[] {
   if (apps === null || apps === undefined) return [...APP_IDS];
   const set = new Set<string>([...apps, ...EVENT_ALWAYS_ENABLED_APPS]);
-  return APP_IDS.filter((id) => set.has(id));
+  return APP_IDS.filter((id) => !isEventToggleableApp(id) || set.has(id));
 }
 
 /** True iff every entry is a canonical app id (the strict check a write applies). */
@@ -271,7 +292,7 @@ export function isEnabledAppList(v: unknown): v is AppId[] {
 /** GET /events/{id}/apps and PUT /events/{id}/apps response. */
 export interface EventAppsResponse {
   eventId: EventId;
-  /** Resolved enabled set, in launcher order (always includes EVENT_ALWAYS_ENABLED_APPS). */
+  /** Resolved enabled set, in launcher order (always includes the always-on and org-wide apps). */
   enabledApps: AppId[];
   /** false = never configured (legacy event: every app enabled). */
   customized: boolean;

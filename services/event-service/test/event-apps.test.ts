@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { createDbClient } from "@dub/db";
 import { makeD1 } from "./d1";
-import { appRegistry } from "@dub/types";
+import { appRegistry, event as evNs } from "@dub/types";
+
+/** The per-event switches only (org-wide apps are always on and always present). */
+const toggles = (apps: string[]) => apps.filter((a) => evNs.isEventToggleableApp(a));
 import { makeDeps, call, createApp, fakeAuthz, VIEWER, FULL } from "./harness";
 import type { EventRow } from "../src/types";
 
@@ -50,7 +53,8 @@ describe("per-event enabled apps", () => {
     const created = await call(app, "POST", "/events", { body: { title: "miniconference" } });
     expect(created.status).toBe(201);
     const got = await call(app, "GET", `/events/${created.json.id}/apps`);
-    expect(got.json.enabledApps).toEqual(["events", "gantt", "admin"]);
+    expect(toggles(got.json.enabledApps)).toEqual(["events", "gantt", "admin"]);
+    expect(got.json.enabledApps).toContain("mail");
     expect(got.json.customized).toBe(true);
   });
 
@@ -58,7 +62,7 @@ describe("per-event enabled apps", () => {
     const deps = makeDeps();
     const app = createApp(deps);
     const ok = await call(app, "POST", "/events", { body: { title: "x", enabledApps: ["members"] } });
-    expect((await call(app, "GET", `/events/${ok.json.id}/apps`)).json.enabledApps).toEqual(["events", "members"]);
+    expect((await call(app, "GET", `/events/${ok.json.id}/apps`)).json.enabledApps.filter(evNs.isEventToggleableApp)).toEqual(["events", "members"]);
 
     const bad = await call(app, "POST", "/events", { body: { title: "y", enabledApps: ["nope"] } });
     expect(bad.status).toBe(400);
@@ -72,12 +76,14 @@ describe("per-event enabled apps", () => {
 
     const saved = await call(app, "PUT", `/events/${id}/apps`, { body: { enabledApps: ["members", "gantt"] } });
     expect(saved.status).toBe(200);
-    expect(saved.json.enabledApps).toEqual(["events", "gantt", "members"]);
+    expect(toggles(saved.json.enabledApps)).toEqual(["events", "gantt", "members"]);
     expect(saved.json.customized).toBe(true);
-    expect((await call(app, "GET", `/events/${id}`)).json.enabledApps).toEqual(["events", "gantt", "members"]);
+    expect(toggles((await call(app, "GET", `/events/${id}`)).json.enabledApps)).toEqual(["events", "gantt", "members"]);
 
     const rec = deps.audit.records.find((r) => r.action === "event.event.apps_updated");
-    expect(rec?.details).toEqual({ before: [...appRegistry.APP_IDS], after: ["events", "gantt", "members"] });
+    const details = rec?.details as { before: string[]; after: string[] };
+    expect(details.before).toEqual([...appRegistry.APP_IDS]);
+    expect(toggles(details.after)).toEqual(["events", "gantt", "members"]);
   });
 
   it("PUT rejects an unknown app id (400) and leaves the setting untouched", async () => {

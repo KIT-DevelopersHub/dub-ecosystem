@@ -1,9 +1,9 @@
-// イベント設定 > 使うアプリ: a switch per registered app, legacy events show everything on,
+// イベント設定 > 使うアプリ: a switch per event-scoped app (org-wide apps are not listed), legacy events show everything on,
 // a toggle saves the FULL set optimistically (rolled back on failure), イベント is locked
 // on, and a viewer cannot flip anything.
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { appRegistry } from "@dub/types";
+import { event as evNs } from "@dub/types";
 import { DubError } from "@dub/errors";
 import { EventAppsSettings } from "../src/components/EventAppsSettings";
 import { createMockEventApi } from "../src/api/mockData";
@@ -17,8 +17,10 @@ describe("EventAppsSettings", () => {
     const { items } = await api.listEvents({});
     renderWithProviders(<EventAppsSettings eventId={items[0]!.id} canWrite />, { api });
     await waitFor(() => expect(screen.getByTestId("fe3-event-apps")).toBeTruthy());
-    for (const id of appRegistry.APP_IDS) expect(sw(id).checked).toBe(true);
+    for (const id of evNs.EVENT_TOGGLEABLE_APPS) expect(sw(id).checked).toBe(true);
     expect(sw("events").disabled).toBe(true); // always on
+    // org-wide apps are always on and not a per-event switch
+    for (const id of ["mail", "chat", "notifications", "calendar"]) expect(screen.queryByTestId(`fe3-event-apps-${id}`)).toBeNull();
   });
 
   it("a new event starts with イベント・ガント・ロール管理; turning 運営メンバー on saves the full set", async () => {
@@ -35,13 +37,14 @@ describe("EventAppsSettings", () => {
     renderWithProviders(<EventAppsSettings eventId={created.id} canWrite />, { api });
     await waitFor(() => expect(sw("gantt").checked).toBe(true));
     expect(sw("members").checked).toBe(false);
-    expect(sw("mail").checked).toBe(false);
 
     fireEvent.click(sw("members"));
     await waitFor(() => expect(sw("members").checked).toBe(true)); // optimistic, save still pending
     release();
     await waitFor(() => expect(save).toHaveBeenCalledWith(created.id, { enabledApps: ["events", "gantt", "members", "admin"] }));
-    expect((await api.getEventApps(created.id)).enabledApps).toEqual(["events", "gantt", "members", "admin"]);
+    const saved = (await api.getEventApps(created.id)).enabledApps;
+    expect(saved.filter((a) => evNs.isEventToggleableApp(a))).toEqual(["events", "gantt", "members", "admin"]);
+    expect(saved).toContain("mail"); // org-wide: always on
   });
 
   it("rolls the switch back when the save fails", async () => {
@@ -59,6 +62,6 @@ describe("EventAppsSettings", () => {
     const created = await api.createEvent({ title: "x" });
     renderWithProviders(<EventAppsSettings eventId={created.id} canWrite={false} />, { api });
     await waitFor(() => expect(sw("gantt").checked).toBe(true));
-    for (const id of appRegistry.APP_IDS) expect(sw(id).disabled).toBe(true);
+    for (const id of evNs.EVENT_TOGGLEABLE_APPS) expect(sw(id).disabled).toBe(true);
   });
 });

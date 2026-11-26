@@ -283,6 +283,7 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async deleteTeam(id: string): Promise<void> {
       // Detach the team from all people, then remove it. People are kept.
       await db.run(`DELETE FROM member_team_links WHERE team_id = ?`, id);
+      await db.run(`DELETE FROM member_event_teams WHERE team_id = ?`, id);
       await db.run(`DELETE FROM member_teams WHERE id = ?`, id);
     },
     async maxTeamSortOrder(orgId): Promise<number> {
@@ -484,6 +485,35 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     },
     async deleteOnboardingMeeting(orgId, teamId): Promise<void> {
       await db.run(`DELETE FROM member_onboarding_meetings WHERE org_id = ? AND team_id = ?`, orgId, teamId ?? "");
+    },
+
+    // ---- 運営メンバー per event ----
+    async getEventStaff(eventId): Promise<{ personIds: string[]; teamIds: string[] }> {
+      const [people, teams] = await Promise.all([
+        db.all<{ person_id: string }>(`SELECT person_id FROM member_event_people WHERE event_id = ? ORDER BY person_id`, eventId),
+        db.all<{ team_id: string }>(`SELECT team_id FROM member_event_teams WHERE event_id = ? ORDER BY team_id`, eventId),
+      ]);
+      return { personIds: people.map((r) => r.person_id), teamIds: teams.map((r) => r.team_id) };
+    },
+    async addEventPerson(eventId, personId, addedBy, addedAt): Promise<void> {
+      await db.run(
+        `INSERT INTO member_event_people (event_id, person_id, added_by, added_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (event_id, person_id) DO NOTHING`,
+        eventId, personId, addedBy, addedAt,
+      );
+    },
+    async removeEventPerson(eventId, personId): Promise<void> {
+      await db.run(`DELETE FROM member_event_people WHERE event_id = ? AND person_id = ?`, eventId, personId);
+    },
+    async addEventTeam(eventId, teamId, addedBy, addedAt): Promise<void> {
+      await db.run(
+        `INSERT INTO member_event_teams (event_id, team_id, added_by, added_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (event_id, team_id) DO NOTHING`,
+        eventId, teamId, addedBy, addedAt,
+      );
+    },
+    async removeEventTeam(eventId, teamId): Promise<void> {
+      await db.run(`DELETE FROM member_event_teams WHERE event_id = ? AND team_id = ?`, eventId, teamId);
     },
   } satisfies MemberRepo;
 }

@@ -142,9 +142,9 @@ export function useJoinApplicant() {
   const api = useHrApi();
   const qc = useQueryClient();
   const toast = useToast();
-  return useMutation<hr.JoinApplicantResponse, unknown, { applicant: hr.Applicant; memberId?: string | null }>({
-    mutationFn: ({ applicant, memberId }) =>
-      api.join(applicant.id, { expectedVersion: applicant.version, ...(memberId ? { memberId } : {}) }),
+  return useMutation<hr.JoinApplicantResponse, unknown, { applicant: hr.Applicant; memberId?: string | null; eventId?: string | null }>({
+    mutationFn: ({ applicant, memberId, eventId }) =>
+      api.join(applicant.id, { expectedVersion: applicant.version, ...(memberId ? { memberId } : {}), ...(eventId ? { eventId } : {}) }),
     onSuccess: (res) => {
       toast.show({ kind: "success", title: `${res.applicant.name} さんを採用し、名簿に追加しました` });
       void qc.invalidateQueries({ queryKey: HR_LIST_KEY });

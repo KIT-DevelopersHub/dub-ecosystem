@@ -193,6 +193,16 @@ describe("人事: 面談結果 — 合格の所属 (チーム・上長)", () => 
     expect(mails.at(-1)!.mail.textBody).toContain("所属チーム: 会場、広報");
   });
 
+  it("puts the hired person on the event chosen in the form (idempotent on retry); a malformed event is 400 at claim", async () => {
+    const { app, mails, deps } = setup();
+    const id = await bookedApplicant(app, mails);
+    expect((await claim(app, id, { decision: "pass", reason: "ok", eventId: "bad id" })).status).toBe(400);
+    await claim(app, id, { decision: "pass", reason: "ok", eventId: "evt_1" });
+    const linked = await link(app, id, { identityUserId: "usr_new", address: "a@developershub.jp", eventId: "evt_1" });
+    await link(app, id, { identityUserId: "usr_new", address: "a@developershub.jp", eventId: "evt_1" });
+    expect((await deps.repo.getEventStaff("evt_1")).personIds).toEqual([linked.json.memberId]);
+  });
+
   it("an empty team list means no team, even when the applicant had a desired team", async () => {
     const { app, mails, deps } = setup();
     const id = await bookedApplicant(app, mails);

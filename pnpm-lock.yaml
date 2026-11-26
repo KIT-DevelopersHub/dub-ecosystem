@@ -1702,6 +1702,9 @@ importers:
       '@dub/types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@dub/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       hono:
         specifier: ^4.6.14
         version: 4.13.1

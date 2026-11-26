@@ -28,6 +28,8 @@ export function allSchemas(): string[] {
     sqlFile("../../../infra/d1/migrations/event/0006_event_ai_digest.sql"),
     // Per-event enabled apps: createEvent writes the default set into event_event_apps.
     sqlFile("../../../infra/d1/migrations/event/0007_event_enabled_apps.sql"),
+    // 運営メンバー per event (member_event_people / member_event_teams).
+    sqlFile("../../../infra/d1/migrations/member/0029_event_staff.sql"),
     ...TASK_MIGRATIONS.map((m) => m.up),
     // #260: the gantt WBS/team columns (team_id/parent_id/wbs) live in a physical
     // migration that is intentionally NOT mirrored into TASK_MIGRATIONS (pinned to

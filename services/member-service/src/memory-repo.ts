@@ -14,6 +14,8 @@ export class InMemoryMemberRepo implements MemberRepo {
   private participations = new Map<string, ParticipationRow>(); // id -> row
   private onboarding = new Map<string, OnboardingItemRow>(); // id -> row
   private meetings = new Map<string, OnboardingMeetingRow>(); // orgId|teamId -> row
+  private eventPeople = new Map<string, Set<string>>(); // eventId -> personIds
+  private eventTeams = new Map<string, Set<string>>(); // eventId -> teamIds
 
   private setLinks(personId: string, teamIds: string[]): void {
     this.links.set(personId, new Set(teamIds));
@@ -45,6 +47,7 @@ export class InMemoryMemberRepo implements MemberRepo {
   async deleteTeam(id: string): Promise<void> {
     this.teams.delete(id);
     for (const set of this.links.values()) set.delete(id);
+    for (const set of this.eventTeams.values()) set.delete(id);
   }
   async maxTeamSortOrder(orgId: common.OrgId): Promise<number> {
     let max = 0;
@@ -160,5 +163,29 @@ export class InMemoryMemberRepo implements MemberRepo {
   }
   async deleteOnboardingMeeting(orgId: common.OrgId, teamId: string | null): Promise<void> {
     this.meetings.delete(`${orgId}|${teamId ?? ""}`);
+  }
+
+  // ---- 運営メンバー per event ----
+  async getEventStaff(eventId: string): Promise<{ personIds: string[]; teamIds: string[] }> {
+    return {
+      personIds: [...(this.eventPeople.get(eventId) ?? [])].sort(cmp),
+      teamIds: [...(this.eventTeams.get(eventId) ?? [])].sort(cmp),
+    };
+  }
+  async addEventPerson(eventId: string, personId: string): Promise<void> {
+    const set = this.eventPeople.get(eventId) ?? new Set<string>();
+    set.add(personId);
+    this.eventPeople.set(eventId, set);
+  }
+  async removeEventPerson(eventId: string, personId: string): Promise<void> {
+    this.eventPeople.get(eventId)?.delete(personId);
+  }
+  async addEventTeam(eventId: string, teamId: string): Promise<void> {
+    const set = this.eventTeams.get(eventId) ?? new Set<string>();
+    set.add(teamId);
+    this.eventTeams.set(eventId, set);
+  }
+  async removeEventTeam(eventId: string, teamId: string): Promise<void> {
+    this.eventTeams.get(eventId)?.delete(teamId);
   }
 }

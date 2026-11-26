@@ -332,7 +332,30 @@ Each event chooses which launcher apps it uses (イベント設定 > 使うア�
   wins). Unknown id ⇒ `400 VALIDATION_FAILED`; `events` is always kept on; archived event ⇒
   `409 EVENT_ARCHIVED_IMMUTABLE`.
 - This is a **UX setting, not authorization**: the shell greys (never removes) launcher tiles
-  of apps not enabled for the current event. App RBAC stays with ロール管理.
+  of apps not enabled for the current event (admins too). App RBAC stays with ロール管理.
+- Only **event-scoped** apps are switches (`event.EVENT_TOGGLEABLE_APPS` / `isEventToggleableApp`:
+  イベント・マイタスク・ガントチャート・運営メンバー・参加届・LP管理・スポンサー・ロール管理).
+  Org-wide apps (メール・チャット・通知・カレンダー・Drive共有・人事・目標管理・会計 …) are
+  **always** in `enabledApps`, whatever is stored or sent.
+
+#### Related: 運営メンバー per event (member-service)
+
+One org-wide roster (`member_people`) and 班 list (`member_teams`); an event **selects** its
+staff / 班 from them (`member_event_people` / `member_event_teams`, member migration 0029 —
+nothing is duplicated, roles stay org-wide). Type `member.EventStaff`
+(`{ eventId, personIds, teamIds }`), helper `member.scopeOverviewToEvent`, validator
+`@dub/validation parseEventScopeId`.
+
+| Route | Permission | |
+|---|---|---|
+| `GET /api/v1/members/events/:eventId/staff` | 運営メンバー 閲覧 | `EventStaff` (ids only; read rows via overview / org-overview) |
+| `PUT\|DELETE /api/v1/members/events/:eventId/people/:personId` | 運営メンバー 編集 | add / remove one roster person (idempotent) ⇒ `EventStaff` |
+| `PUT\|DELETE /api/v1/members/events/:eventId/teams/:teamId` | 運営メンバー 編集 | use / stop using one 班 (idempotent) ⇒ `EventStaff` |
+
+Optional `eventId` on `POST /members/people`, `POST /members/teams`,
+`POST /members/participation/:id/resolve` (link / create) and `POST /members/hr/applicants/:id/join`
+also selects the new / joined person (or team) for that event. Malformed event id ⇒ `400`;
+unknown person / team ⇒ `404`.
 
 ---
 

@@ -4468,6 +4468,31 @@ function createMembersStore() {
     mk("member_6", "田村 未", "メンバー", "invited", [], 48, null, "情報工学科", "1年"),
   ];
 
+  // 運営メンバー per event: 名簿とチームは全体で 1 つ。イベントはそこから運営メンバーと班を選ぶ。
+  // evt_1 (北陸ITカンファレンス 2026) = 法人チーム以外の 7 班とその全員、evt_3 (Hackit 秋) = 開発と
+  // 集客広報の 2 班と 7 人だけ、evt_2 (運営定例) = まだ誰も選んでいない。
+  const eventStaff = new Map<string, { people: Set<string>; teams: Set<string> }>();
+  const staffOf = (eventId: string) => {
+    let s = eventStaff.get(eventId);
+    if (!s) eventStaff.set(eventId, (s = { people: new Set(), teams: new Set() }));
+    return s;
+  };
+  {
+    const conf = staffOf("evt_1");
+    for (const t of teams) if (t.id !== "team_corp") conf.teams.add(t.id);
+    for (const m of members) if (m.teamIds.length === 0 || m.teamIds.some((t) => conf.teams.has(t))) conf.people.add(m.id);
+    const hack = staffOf("evt_3");
+    for (const t of ["team_dev", "team_pr"]) hack.teams.add(t);
+    for (const id of ["member_1", "member_d1", "member_d2", "member_d3", "member_e1", "member_e5", "member_e6"]) hack.people.add(id);
+  }
+  const staffJson = (eventId: string) => {
+    const s = staffOf(eventId);
+    return { eventId, personIds: [...s.people].sort(), teamIds: [...s.teams].sort() };
+  };
+  const enroll = (eventId: unknown, personId: string): void => {
+    if (typeof eventId === "string" && eventId !== "") staffOf(eventId).people.add(personId);
+  };
+
   // ネットワークは本番と同じく役職(position)未設定。最後の2人だけ position=member。
   for (const mem of members) {
     if (!mem.id.startsWith("member_n")) continue;
@@ -4789,6 +4814,7 @@ function createMembersStore() {
       a.stage = "hired";
       a.memberId = memberId;
       bump(a);
+      enroll(body?.eventId, memberId);
       hrEvent(a.id, "joined", from, "hired", body?.memberId ? "既存の名簿に紐付け" : "名簿に新規追加", nowIso());
       return json({ applicant: { ...a }, memberId });
     }
@@ -4830,6 +4856,7 @@ function createMembersStore() {
       const created = mk(nid("member"), a.name, "メンバー", "added", placeTeams ?? (a.desiredTeamId ? [a.desiredTeamId] : []), members.length, a.email, a.department, a.grade, issued?.identityUserId ?? null, placeLeader);
       members.push(created);
       memberId = created.id;
+      enroll(req.eventId, memberId);
     }
     const from = a.stage;
     a.stage = hrResultValues.DECISION_STAGE[req.decision];
@@ -4877,11 +4904,29 @@ function createMembersStore() {
       return json({ teams: teams.map((t) => ({ ...t })), myTeamIds: [...(me?.teamIds ?? [])] });
     }
 
+    // 運営メンバー per event (member-service と同じ形: id の一覧だけ・入れる/外すは冪等)。
+    let ev = /^\/api\/v1\/members\/events\/([^/]+)\/staff$/.exec(pathname);
+    if (ev && method === "GET") return json(staffJson(decodeURIComponent(ev[1]!)));
+    ev = /^\/api\/v1\/members\/events\/([^/]+)\/(people|teams)\/([^/]+)$/.exec(pathname);
+    if (ev && (method === "PUT" || method === "DELETE")) {
+      const eventId = decodeURIComponent(ev[1]!);
+      const id = decodeURIComponent(ev[3]!);
+      const isPerson = ev[2] === "people";
+      if (method === "PUT" && !(isPerson ? members.some((x) => x.id === id) : teams.some((x) => x.id === id))) {
+        return notFound(`${method} ${pathname}`);
+      }
+      const set = isPerson ? staffOf(eventId).people : staffOf(eventId).teams;
+      if (method === "PUT") set.add(id);
+      else set.delete(id);
+      return json(staffJson(eventId));
+    }
+
     // teams
     if (method === "POST" && pathname === "/api/v1/members/teams") {
       const name = String(body?.name ?? "");
       const t: DemoTeam = { id: nid("team"), key: slug(body?.key ?? name) || `team-${teams.length + 1}`, name, color: body?.color ?? null, description: body?.description ?? null };
       teams.push(t);
+      if (typeof body?.eventId === "string" && body.eventId) staffOf(body.eventId).teams.add(t.id);
       return json(t, 201);
     }
     let m = /^\/api\/v1\/members\/teams\/([^/]+)$/.exec(pathname);
@@ -4898,6 +4943,7 @@ function createMembersStore() {
       if (method === "DELETE") {
         teams.splice(teams.indexOf(t), 1);
         for (const mem of members) mem.teamIds = mem.teamIds.filter((id) => id !== t.id);
+        for (const st of eventStaff.values()) st.teams.delete(t.id);
         return json({ ok: true });
       }
     }
@@ -4931,6 +4977,7 @@ function createMembersStore() {
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
+      enroll(body?.eventId, mem.id);
       return json(mem, 201);
     }
     // reverse lookup: member linked to an identity user (offboarding fan-out, #1/#2).
@@ -5125,6 +5172,7 @@ function createMembersStore() {
         }
         mem.version += 1; mem.updatedAt = isoNow();
         p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
+        enroll(body?.eventId, mem.id);
         return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
       }
       if (action === "create") {
@@ -5136,6 +5184,7 @@ function createMembersStore() {
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(created);
+        enroll(body?.eventId, created.id);
         p.memberId = created.id; p.matchKind = "created_new"; p.reviewState = "added"; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
       }
@@ -6905,7 +6954,7 @@ export function createDemoFetch(): typeof fetch {
         if (!perms.includes("members:onboard_mail") || !perms.includes("hr:write")) {
           return problem("FORBIDDEN", "permission denied: hr:write + members:onboard_mail", 403);
         }
-        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown; teamIds?: unknown; leaderId?: unknown };
+        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown; teamIds?: unknown; leaderId?: unknown; eventId?: unknown };
         if (!hrResultValues.isInterviewDecision(req.decision)) return problem("VALIDATION_FAILED", "合否を選んでください", 400, [{ field: "decision", reason: "invalid" }]);
         const reason = typeof req.reason === "string" ? req.reason.trim() : "";
         if (!reason) return problem("VALIDATION_FAILED", "理由を入力してください", 400, [{ field: "reason", reason: "required" }]);
@@ -6922,6 +6971,7 @@ export function createDemoFetch(): typeof fetch {
             includeReasonInMail: req.includeReasonInMail === true,
             ...(Array.isArray(req.teamIds) ? { teamIds: req.teamIds.filter((t): t is string => typeof t === "string") } : {}),
             ...(typeof req.leaderId === "string" ? { leaderId: req.leaderId } : {}),
+            ...(typeof req.eventId === "string" ? { eventId: req.eventId } : {}),
           },
           (displayName) => {
             const made = roster.onboard(localPart, displayName);

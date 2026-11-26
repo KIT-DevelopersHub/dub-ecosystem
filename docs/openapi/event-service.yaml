@@ -215,6 +215,9 @@ paths:
         An event that was never configured (customized=false; every event created before this
         feature) resolves to EVERY app enabled. New events start with EVENT_DEFAULT_ENABLED_APPS
         (events, gantt, admin). The shell greys launcher tiles of apps not in enabledApps.
+        Only the event-scoped apps (event.EVENT_TOGGLEABLE_APPS: events, tasks, gantt, members,
+        participation, lp, sponsor, admin) are per-event switches; every org-wide app (mail, chat,
+        notifications, calendar, ...) is ALWAYS in enabledApps.
       parameters:
         - name: id
           in: path
@@ -747,7 +750,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AppId'
-          description: Launcher order; always includes "events".
+          description: Launcher order; always includes "events" and every org-wide (non-toggleable) app.
         customized:
           type: boolean
           description: false = never configured (legacy event, every app enabled).

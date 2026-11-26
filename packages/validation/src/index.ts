@@ -50,4 +50,4 @@ export { validateCreateTaskRequest, validateUpdateTaskRequest } from "./task";
 
 export { validateSendMailRequest } from "./mail";
 
-export { checkEnabledApps, validateSaveEventAppsRequest } from "./event";
+export { checkEnabledApps, validateSaveEventAppsRequest, checkEventScopeId, parseEventScopeId } from "./event";
