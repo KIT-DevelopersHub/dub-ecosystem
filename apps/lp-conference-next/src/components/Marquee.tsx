@@ -10,11 +10,14 @@ export function Marquee({
   words?: string;
   sub?: string;
 }) {
+  // The words are drawn from data-text via ::before (globals.css): this strip is purely
+  // decorative (aria-hidden) and its ghost/outline text is intentionally faint, so it
+  // is kept out of the text-contrast check without changing how it looks.
   const unit = (
     <span className="marquee-unit">
-      <span className="marquee-word">{words}</span>
+      <span className="marquee-word" data-text={words} />
       <span className="marquee-star" aria-hidden="true">✦</span>
-      <span className="marquee-word marquee-word--sub">{sub}</span>
+      <span className="marquee-word marquee-word--sub" data-text={sub} />
       <span className="marquee-star" aria-hidden="true">✦</span>
     </span>
   );
