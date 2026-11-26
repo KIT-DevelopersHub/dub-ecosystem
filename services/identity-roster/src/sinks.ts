@@ -2,12 +2,12 @@
 // Degraded fallbacks keep the P0 unit deployable before audit-log / auth-service
 // bindings exist; the fail-close contract still holds once they are wired.
 import { createServiceClient, type RequestContext } from "@dub/http";
-import { publishAudit, type AuditRecordEnvelopeV1 } from "@dub/events";
+import { CONSUMER_QUEUE_BINDINGS, createEvent, publishAudit, publishEvent, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
 import { errors } from "@dub/errors";
 import type { auditLog } from "@dub/types";
 import { HDR_INTERNAL, INTERNAL_HEADER_VALUE } from "@dub/observability";
 import { identity, type meeting } from "@dub/types";
-import type { AuditSink, RequestCtx, RoleMembershipOutcome, RoleMembershipSink, SessionRevoker } from "./deps";
+import type { AuditSink, DomainEventSink, RequestCtx, RoleMembershipOutcome, RoleMembershipSink, SessionRevoker } from "./deps";
 import type { Env } from "./env";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
 
@@ -115,4 +115,31 @@ export function createRoleMembershipSink(
 function fail(msg: identity.RoleMembershipChangedV1, message: string): RoleMembershipOutcome {
   console.warn(JSON.stringify({ service: SERVICE, event: "role_membership_propagation_failed", messageId: msg.id, userId: msg.userId, change: msg.change, roleIds: msg.roleIds, reason: msg.reason, message }));
   return { ok: false, message };
+}
+
+/**
+ * Domain events (#850: identity.user.activated -> chat). Paid deploy: the EVT_* Queue binding;
+ * free tier: the @dub/freeq outbox under `evt.<consumer>` (freeq-drain delivers evt.chat to
+ * chat-service). Best-effort: a failure is logged, never thrown — activation must not roll
+ * back because a side effect could not be queued (the admin bulk action covers misses).
+ */
+export function createDomainEventSink(env: Env): DomainEventSink | undefined {
+  const db = env.OUTBOX_DB;
+  const queues: Record<string, unknown> = {};
+  for (const [consumer, binding] of Object.entries(CONSUMER_QUEUE_BINDINGS)) {
+    const real = (env as unknown as Record<string, unknown>)[binding];
+    if (real) queues[binding] = real;
+    else if (db) queues[binding] = outboxQueue<DubEventEnvelope>(db, `evt.${consumer}`);
+  }
+  if (Object.keys(queues).length === 0) return undefined;
+  return {
+    async userActivated(input, ctx): Promise<void> {
+      try {
+        const event = createEvent("identity.user.activated", input, { requestId: ctx.requestId, actorId: ctx.actorId });
+        await publishEvent(queues as Parameters<typeof publishEvent>[0], event);
+      } catch (err) {
+        console.warn(JSON.stringify({ level: "warn", service: SERVICE, message: "identity.user.activated publish failed", userId: input.userId, err: String(err) }));
+      }
+    },
+  };
 }

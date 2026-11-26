@@ -205,7 +205,12 @@ export class ChatService {
   }
 
   // ---- channels ----
-  async createChannel(ctx: ReqCtx, body: CreateChannelRequest): Promise<Channel> {
+  /**
+   * `opts.system`: a server-initiated create on the member's behalf (times channels, #850).
+   * The route gate already authorized the admin or the event is INTERNAL, so the member's own
+   * chat:create_private is not asked.
+   */
+  async createChannel(ctx: ReqCtx, body: CreateChannelRequest, opts: { system?: boolean } = {}): Promise<Channel> {
     const type = body.type;
     if (type !== "event" && type !== "topic" && type !== "dm") {
       throw errors.validationFailed([{ field: "type", reason: "invalid" }]);
@@ -217,7 +222,7 @@ export class ChatService {
     // POLICY_TABLE's chat:create covers public channels and DMs; a DM is private by nature, not
     // by the caller's choice, so only a real private channel needs the extra key. It lives here
     // because the gate cannot see the request body.
-    if (type !== "dm" && visibility === "private") {
+    if (type !== "dm" && visibility === "private" && !opts.system) {
       const held = await this.deps.authz(ctx.userId, this.deps.orgId, ["chat:create_private"]);
       if (!held.includes("chat:create_private")) {
         throw new DubError(CommonErrorCodes.FORBIDDEN, "chat:create_private required", {

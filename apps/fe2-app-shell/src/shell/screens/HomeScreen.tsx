@@ -25,6 +25,7 @@ import { useConferenceEvents } from "./dashboard/useConferenceEvents.ts";
 import { useRecentVisits } from "../useVisitTracker.tsx";
 import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
+import { LoadErrorState } from "../LoadErrorState.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { RegularMeetingsCard } from "./dashboard/RegularMeetingsCard.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
@@ -38,6 +39,7 @@ import {
   taskTotal,
   usageStatusFromPct,
   worstFreeTier,
+  FREE_TIER_UNAVAILABLE_LABEL,
   type MetricStatus,
 } from "./dashboard/dashboardData.ts";
 
@@ -222,7 +224,7 @@ export function HomeScreen({
   // from the shell router (main.tsx wires router.navigate). Absent in unit tests.
   onNavigate?: (path: string) => void;
 }): JSX.Element {
-  const { data, isPending, errorFor, refetch } = useBffHome(api);
+  const { data, isPending, error: homeError, errorFor, refetch } = useBffHome(api);
   // Drives the same "current event" selection the header's イベント switcher
   // (GlobalEventSwitcher) and the Event app hub (/events → EventHubPage) read —
   // see openEvent() below.
@@ -247,6 +249,9 @@ export function HomeScreen({
   const hasTasks = data?.taskSummary !== undefined && !taskError;
   const freeTier = usageError ? [] : freeTierFromMetrics(data?.usageSummary?.metrics ?? []);
   const worst = worstFreeTier(freeTier);
+  // Metrics exist but none could be measured (e.g. usage-meter has no Cloudflare token)
+  // → say so instead of showing "データがありません" or a fake 0%.
+  const freeTierUnavailable = freeTier.length > 0 && worst === null;
   const orgMembers = membersError ? undefined : data?.orgStats?.members;
   const orgTeams = membersError ? undefined : data?.orgStats?.teams;
 
@@ -293,6 +298,16 @@ export function HomeScreen({
   const unreadStatus: MetricStatus = notificationsError ? "info" : unread > 0 ? "warn" : "good";
 
   const rootRef = useViewportFit<HTMLElement>();
+
+  // The whole /bff/home call failed: say so (+ 再試行) instead of a dashboard of 0s.
+  if (homeError) {
+    return (
+      <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">
+        <PageHeader testId="fe2-home-header" title="ダッシュボード" />
+        <LoadErrorState error={homeError} onRetry={refetch} subject="ダッシュボード" testId="fe2-home-error" />
+      </main>
+    );
+  }
 
   return (
     <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">
@@ -341,7 +356,15 @@ export function HomeScreen({
               value={worst ? `${Math.round(worst.pct)}%` : "—"}
               status={worstStatus}
               {...(worst ? { meter: { pct: worst.pct, status: worstStatus, ariaLabel: "無料枠の最逼迫指標" } } : {})}
-              hint={usageError ? "取得できませんでした" : worst ? worst.label : "データがありません"}
+              hint={
+                usageError
+                  ? "取得できませんでした"
+                  : worst
+                    ? worst.label
+                    : freeTierUnavailable
+                      ? FREE_TIER_UNAVAILABLE_LABEL
+                      : "データがありません"
+              }
             />
             <KpiTile
               testId="fe2-kpi-unread"
@@ -407,6 +430,22 @@ export function HomeScreen({
             ) : (
               <ul className="fe2-usage-list">
                 {freeTier.map((m) => {
+                  if (m.pct === null) {
+                    return (
+                      <li key={m.key} className="fe2-usage-row" data-testid={`fe2-usage-${m.key}`}>
+                        <div className="fe2-usage-top">
+                          <span className="fe2-usage-label">{m.label}</span>
+                          <span
+                            className="fe2-usage-pct"
+                            data-testid={`fe2-usage-${m.key}-unavailable`}
+                            style={{ color: toCssVarName("color.gray.400") }}
+                          >
+                            {FREE_TIER_UNAVAILABLE_LABEL}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  }
                   const st = usageStatusFromPct(m.pct);
                   const meta = statusMeta(st);
                   return (

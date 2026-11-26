@@ -30,9 +30,9 @@ export function NotificationList(props: NotificationListProps): ReactNode {
     return (
       <EmptyState
         icon="alert"
-        title="Couldn’t load notifications"
-        description="Something went wrong while loading your inbox."
-        action={<Button onClick={props.onRetry}>Retry</Button>}
+        title="通知を読み込めませんでした"
+        description="時間をおいて再試行してください。"
+        action={<Button onClick={props.onRetry}>再試行</Button>}
         testId="fe5-inbox-error"
       />
     );
@@ -46,8 +46,8 @@ export function NotificationList(props: NotificationListProps): ReactNode {
     return (
       <EmptyState
         icon="inbox"
-        title="You’re all caught up"
-        description="No notifications to show."
+        title="通知はありません"
+        description="新しい通知が届くとここに表示されます。"
         testId="fe5-inbox-empty"
       />
     );

@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { gateway } from "@dub/types";
-import type { ApiClient } from "../lib/api-client.tsx";
+import { ApiError, type ApiClient } from "../lib/api-client.tsx";
 import { AuthProvider, RequireAuth, RequirePermission, useAuth, useAppCapability } from "./AuthProvider.tsx";
 
 const ME: gateway.MeResponse = {
@@ -75,6 +75,31 @@ describe("auth guards", () => {
     );
     await waitFor(() => expect(onUnauth).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("secret")).toBeNull();
+  });
+});
+
+describe("/me transient failure (#855)", () => {
+  it("429 on /me shows an error + 再試行 (not a blank body / logout), and 再試行 recovers", async () => {
+    const onUnauth = vi.fn();
+    let calls = 0;
+    const me = () => {
+      calls++;
+      return calls === 1
+        ? Promise.reject(new ApiError(429, { error: { code: "RATE_LIMITED", message: "too many", retryable: true } }))
+        : Promise.resolve(ME);
+    };
+    wrap(
+      makeApi(me),
+      <RequireAuth>
+        <span data-testid="secret">secret</span>
+      </RequireAuth>,
+      onUnauth,
+    );
+    const err = await screen.findByTestId("fe2-auth-error");
+    expect(err).toHaveTextContent("アクセスが集中しています");
+    expect(onUnauth).not.toHaveBeenCalled();
+    act(() => screen.getByRole("button", { name: "再試行" }).click());
+    await waitFor(() => expect(screen.getByTestId("secret")).toBeInTheDocument());
   });
 });
 

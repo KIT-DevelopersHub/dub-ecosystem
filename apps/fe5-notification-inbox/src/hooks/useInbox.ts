@@ -106,13 +106,13 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
           onError: (err, rollback) =>
             keepOnNotFound(err, rollback, () => {
               setState((s) => removeItem(s, id)); // 404 -> drop the row (test 6)
-              toast.show("info", "This notification is no longer available.");
+              toast.show("info", "この通知はすでに削除されています。");
             }),
         },
         id,
       ).catch((err) => {
         if (isApiError(err) && err.status !== 404 && !err.code.endsWith("_NOT_FOUND")) {
-          toast.show("error", "Could not mark as read. Please try again.");
+          toast.show("error", "既読にできませんでした。もう一度お試しください。");
         }
       });
     },
@@ -142,13 +142,13 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
           onError: (err, rollback) =>
             keepOnNotFound(err, rollback, () => {
               setState((s) => removeItem(s, id)); // 404 -> drop the row
-              toast.show("info", "This notification is no longer available.");
+              toast.show("info", "この通知はすでに削除されています。");
             }),
         },
         id,
       ).catch((err) => {
         if (isApiError(err) && err.status !== 404 && !err.code.endsWith("_NOT_FOUND")) {
-          toast.show("error", "Could not mark as unread. Please try again.");
+          toast.show("error", "未読に戻せませんでした。もう一度お試しください。");
         }
       });
     },
@@ -182,7 +182,7 @@ export function useInbox(options: UseInboxOptions): UseInboxResult {
       },
       undefined,
     ).catch(() => {
-      toast.show("error", "Could not mark all as read. Please try again.");
+      toast.show("error", "すべて既読にできませんでした。もう一度お試しください。");
     });
   }, [api, state, type, decrement, toast]);
 

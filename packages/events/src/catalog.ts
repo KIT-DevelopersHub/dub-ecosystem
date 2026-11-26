@@ -5,6 +5,7 @@ import type {
   TaskCreatedPayload, TaskUpdatedPayload, TaskAssignedPayload, TaskStatusChangedPayload,
   TaskDueSoonPayload, TaskArchivedPayload, TaskDependencyChangedPayload,
   NotificationRequestedPayload, PublicInquiryReceivedPayload,
+  IdentityUserActivatedPayload,
   ChatMessageCreatedPayload, ChatMessageDeletedPayload, ChatChannelCreatedPayload, ChatMemberChangedPayload,
   FileRegisteredPayload, FileUpdatedPayload, FileDeletedPayload, FileLinkedPayload, FileUnlinkedPayload,
   DriveFileCreatedPayload, DriveFileMovedPayload, DriveFileTrashedPayload, DriveSheetWrittenPayload,
@@ -48,6 +49,7 @@ export interface DubEventPayloadMap {
   "chat.channel.created": ChatChannelCreatedPayload;
   "chat.member.added": ChatMemberChangedPayload;
   "chat.member.removed": ChatMemberChangedPayload;
+  "identity.user.activated": IdentityUserActivatedPayload;
   "file.registered": FileRegisteredPayload;
   "file.updated": FileUpdatedPayload;
   "file.deleted": FileDeletedPayload;
@@ -80,7 +82,8 @@ export type ConsumerService =
   | "file-meta"
   | "github-sync"
   | "mail-automation"
-  | "mobile-bff";
+  | "mobile-bff"
+  | "chat";
 
 // consumer -> queue binding name (theme#1 decision6; Queue names use dub-q- prefix).
 export const CONSUMER_QUEUE_BINDINGS = {
@@ -91,6 +94,7 @@ export const CONSUMER_QUEUE_BINDINGS = {
   "github-sync": "EVT_GITHUB_SYNC",
   "mail-automation": "EVT_MAIL_AUTOMATION",
   "mobile-bff": "EVT_MOBILE_BFF",
+  chat: "EVT_CHAT", // #850 times channels in chat (free tier: outbox topic evt.chat)
 } as const satisfies Record<ConsumerService, string>;
 
 // pub/sub table = routing config. Table change = contract change.
@@ -117,6 +121,7 @@ export const SUBSCRIPTIONS = {
   "chat.channel.created": ["notification"],
   "chat.member.added": ["notification"],
   "chat.member.removed": ["notification"],
+  "identity.user.activated": ["chat"],
   "file.registered": [],
   "file.updated": [],
   "file.deleted": [],

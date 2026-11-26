@@ -22,7 +22,7 @@ export function NotificationBell(): ReactNode {
         type="button"
         className={styles.bellButton}
         data-testid="fe5-bell-button"
-        aria-label={`Notifications${count > 0 ? `, ${count} unread` : ""}`}
+        aria-label={`通知${count > 0 ? `（未読 ${count} 件）` : ""}`}
         onClick={() => openNotificationDialog()}
       >
         <Icon name="bell" aria-hidden="true" />

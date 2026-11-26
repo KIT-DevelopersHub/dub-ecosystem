@@ -73,7 +73,7 @@ export function NotificationCard(props: NotificationCardProps): ReactNode {
         className={styles.item}
         data-testid={`fe5-inbox-item-${item.id}`}
         data-unread={unread}
-        aria-label={`${unread ? "Unread. " : ""}${item.title}`}
+        aria-label={`${unread ? "未読: " : ""}${item.title}`}
         onClick={() => onActivate(item)}
         onKeyDown={onKeyDown}
       >

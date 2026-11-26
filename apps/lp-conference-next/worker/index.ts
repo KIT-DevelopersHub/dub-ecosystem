@@ -36,9 +36,11 @@ import {
   type ProposalConfig,
 } from "./proposals.ts";
 import { handlePass, matchPassRoute } from "./ticket-pass.ts";
+import { handleReceipt, matchReceiptRoute } from "./ticket-receipt.ts";
 import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supportsSiteConfig } from "./site-config.ts";
 import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
 import { contentInjections, contentSelector } from "./lp-content.ts";
+import { joinTicketsAttributes } from "../src/lib/join-tickets.ts";
 import type { LpContentSectionId } from "../../../packages/types/src/lp.ts";
 
 interface Fetcher {
@@ -181,6 +183,8 @@ export default {
     // Before everything: tickets stay usable with sales off, and no cookie or version logic touches them.
     const pass = matchPassRoute(url.pathname);
     if (pass) return handlePass(req, pass, { demo: env.TICKETS_DEMO === "1", internal: ticketsInternal(env) });
+    const receipt = matchReceiptRoute(url.pathname);
+    if (receipt) return handleReceipt(req, receipt, { demo: env.TICKETS_DEMO === "1", internal: ticketsInternal(env) });
     const ticketsPath = isTicketsPath(url.pathname);
     // LP管理「プレビュー」タブの ?tickets=on|off はこの閲覧者にだけ効く（公開中の LP は不変）。
     const mode = ticketsPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
@@ -260,7 +264,8 @@ export default {
     // 公開設定は v3.6 以降の版だけ（古い版は属性を知らないので付けない）。
     const siteConfig = page && layout !== null && supportsSiteConfig(r.version);
     const siteLayoutValue = siteConfig ? await layout : null;
-    const attrs = htmlAttributes(siteLayoutValue);
+    // JOIN 参加者カードの購入リンク切り替え（販売 on + CTA 差し替え on）。古い版は CSS が無く無害。
+    const attrs = { ...htmlAttributes(siteLayoutValue), ...joinTicketsAttributes(cfg) };
     // 中身（協力団体・お知らせ・登壇者・スポンサー）。公開表示は表示中のセクションだけ、プレビューは全部。
     const content = Object.entries(contentInjections(siteLayoutValue, r.preview || cfgDraft)) as [LpContentSectionId, string][];
     const previewing = [
