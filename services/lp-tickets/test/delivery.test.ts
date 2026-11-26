@@ -666,6 +666,7 @@ describe.each<RepoKind>(["memory", "d1"])("delivery (%s repo)", (kind) => {
     expect(snap.types!.length).toBe(1);
     expect(snap.settings).toBeTruthy();
     expect(snap.coupons).toEqual([]);
+    expect(snap.checkins).toEqual([]);
     const raw = b.objects.get(key)!;
     for (const t of await h.tickets(o.id)) {
       expect(raw).not.toContain((await ticketToken(SECRET, t.id)).split(".")[1]);

@@ -189,3 +189,81 @@ export interface LpTicketReceiptNameInput {
   /** 1..LP_TICKET_RECEIPT_NAME_MAX 字 */
   receiptName: string;
 }
+
+// ---- 当日受付（チェックイン）: 権限 lp:checkin ----
+
+/**
+ * ok = 今受付した / already = この開催日はもう受付済み / void = 返金・取消済みの券（または未確定の注文）/
+ * wrong_day = Day 券をその券の日以外に読んだ / unknown = 券が見つからない・コードが読めない。
+ */
+export type LpTicketCheckinResult = "ok" | "already" | "void" | "wrong_day" | "unknown";
+
+/**
+ * 券種と開催日の照合結果。all_days = 通し券（dayLabel 空）/ match = dayLabel の日付が開催日と一致 /
+ * unverified = dayLabel から日付が読めず照合できなかった（受付は通す・画面で注意を出す）。
+ */
+export type LpTicketCheckinDayCheck = "all_days" | "match" | "unverified";
+
+/** POST /api/v1/lp/tickets/checkin */
+export interface LpTicketCheckinInput {
+  /** QR の中身（チケット URL `…/t/<token>`）・トークン・チケット ID（手入力）のどれか。 */
+  code: string;
+  /** 開催日 'YYYY-MM-DD'（JST）。省略 = 今日（JST）。 */
+  eventDay?: string;
+}
+
+/** 受付で見せる券の情報。holderName が null なら buyerName を名札に使う。 */
+export interface LpTicketCheckinTicket {
+  ticketId: string;
+  /** 注文番号（注文 ID の末尾 8 文字・大文字）。メールと同じ表記。 */
+  orderRef: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  holderName: string | null;
+  buyerName: string;
+}
+
+/** POST /api/v1/lp/tickets/checkin の応答。受付できなくても 200 で result に理由が入る。 */
+export interface LpTicketCheckinResponse {
+  result: LpTicketCheckinResult;
+  eventDay: string;
+  /** unknown のときだけ null。 */
+  ticket: LpTicketCheckinTicket | null;
+  /** ok = 今回の時刻 / already = 最初に受付した時刻。それ以外は null。 */
+  checkedInAt: string | null;
+  checkedInBy: string | null;
+  /** ok / already / wrong_day のとき。 */
+  dayCheck: LpTicketCheckinDayCheck | null;
+}
+
+/** 受付一覧の 1 行。 */
+export interface LpTicketCheckin {
+  ticketId: string;
+  eventDay: string;
+  checkedInAt: string;
+  checkedInBy: string;
+  orderRef: string;
+  ticketTypeName: string;
+  dayLabel: string;
+  holderName: string | null;
+  buyerName: string;
+}
+
+/** GET /api/v1/lp/tickets/checkins?day=&cursor= — 新しい順。 */
+export interface LpTicketCheckinsPage {
+  eventDay: string;
+  /** その開催日の受付数。 */
+  count: number;
+  /** 受付のある開催日ごとの受付数（日付順）。 */
+  days: { eventDay: string; count: number }[];
+  items: LpTicketCheckin[];
+  nextCursor: string | null;
+}
+
+/** DELETE /api/v1/lp/tickets/checkin/:ticketId?day= — 受付の取り消し（読み間違え用）。 */
+export interface LpTicketCheckinUndoResponse {
+  ticketId: string;
+  eventDay: string;
+  /** false = もともと受付されていなかった（何もしていない）。 */
+  removed: boolean;
+}

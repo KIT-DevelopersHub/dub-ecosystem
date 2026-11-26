@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Checkbox, DatePicker, Select, Switch, TextField } from "../src/components/Inputs";
+import { Checkbox, DatePicker, Select, Switch, TextField, Textarea } from "../src/components/Inputs";
 
 describe("TextField", () => {
   it("emits the new string value on change", () => {
@@ -66,5 +66,34 @@ describe("DatePicker", () => {
     render(<DatePicker id="d" value={null} onChange={onChange} testId="d" />);
     fireEvent.change(screen.getByTestId("d"), { target: { value: "2026-12-25" } });
     expect(onChange).toHaveBeenCalledWith("2026-12-25");
+  });
+});
+
+describe("Textarea", () => {
+  it("autoGrow sets the height from the content (no inner scrollbar)", () => {
+    const spy = vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(120);
+    const { rerender } = render(<Textarea id="t" value="" onChange={() => {}} rows={1} autoGrow testId="t" />);
+    const el = screen.getByTestId("t");
+    expect(el).toHaveAttribute("data-autogrow", "true");
+    expect(el.style.height).toBe("120px");
+    spy.mockReturnValue(240);
+    rerender(<Textarea id="t" value={"長い文".repeat(80)} onChange={() => {}} rows={1} autoGrow testId="t" />);
+    expect(el.style.height).toBe("240px");
+    spy.mockRestore();
+  });
+
+  it("without autoGrow keeps the native height", () => {
+    render(<Textarea id="t" value="" onChange={() => {}} testId="t" />);
+    expect(screen.getByTestId("t")).not.toHaveAttribute("data-autogrow");
+    expect(screen.getByTestId("t").style.height).toBe("");
+  });
+
+  it("singleLine ignores Enter and turns pasted newlines into spaces", () => {
+    const onChange = vi.fn();
+    render(<Textarea id="t" value="" onChange={onChange} singleLine testId="t" />);
+    const el = screen.getByTestId("t");
+    expect(fireEvent.keyDown(el, { key: "Enter" })).toBe(false);
+    fireEvent.change(el, { target: { value: "一行目\r\n二行目\n三行目" } });
+    expect(onChange).toHaveBeenCalledWith("一行目 二行目 三行目");
   });
 });
