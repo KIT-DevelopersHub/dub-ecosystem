@@ -123,6 +123,9 @@ function completionStatus(pct: number): MetricStatus {
   return "critical";
 }
 
+/** Shown when no upcoming 本戦 has a date (the source of truth is the イベントアプリ). */
+export const COUNTDOWN_UNSET_HINT = "開催日が未設定です — イベントアプリで入力してください";
+
 /** Countdown urgency: ≤3d 逼迫, ≤7d 注意, else 情報. */
 function countdownStatus(days: number): MetricStatus {
   if (days <= 3) return "critical";
@@ -241,7 +244,7 @@ export function HomeScreen({
   const membersError = errorFor("member-service");
 
   const events = data?.upcomingEvents ?? [];
-  const conferenceEvents = useConferenceEvents(api);
+  const conferenceQuery = useConferenceEvents(api);
   const unread = data?.unreadCount ?? 0;
 
   // Live dashboard aggregates from /bff/home. A source in partialErrors leaves its
@@ -289,8 +292,9 @@ export function HomeScreen({
   };
 
   // ── derived KPI values ────────────────────────────────────────────────────────
-  // 本戦 = the conference event's startsAt (event data). Hidden when unset or past.
-  const conference = pickConference([...events, ...conferenceEvents]);
+  // 本戦 = the conference event's startsAt, i.e. the 開始日時 entered in the イベントアプリ.
+  // No upcoming date → an explicit 未設定 tile (never a hardcoded fallback date).
+  const conference = pickConference([...events, ...conferenceQuery.events]);
   const days = conference ? daysUntil(conference.dateISO) : null;
   const cdStatus = days === null ? "info" : countdownStatus(days);
   const completion = taskCompletionPct(segments);
@@ -340,7 +344,20 @@ export function HomeScreen({
                 status={cdStatus}
                 hint={`${conference.name}・${conference.dateLabel}`}
               />
-            ) : null}
+            ) : conferenceQuery.isPending ? (
+              <div className="fe2-kpi fe2-kpi-skeleton" data-testid="fe2-kpi-countdown-skeleton">
+                <SkeletonLoader lines={3} />
+              </div>
+            ) : (
+              <KpiTile
+                testId="fe2-kpi-countdown"
+                icon="clock"
+                label="本戦まで"
+                value="—"
+                status="info"
+                hint={conferenceQuery.isError ? "取得できませんでした" : COUNTDOWN_UNSET_HINT}
+              />
+            )}
             <KpiTile
               testId="fe2-kpi-tasks"
               icon="check-square"
