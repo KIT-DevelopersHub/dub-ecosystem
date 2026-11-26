@@ -9,7 +9,7 @@ export interface PermissionCatalogEntry {
   dangerous: boolean; // FE7 warning + auth-client always-sync check
 }
 
-// P0 frozen catalog (102 keys). `<domain>:<action>` (self-service keys carry a
+// P0 frozen catalog (103 keys). `<domain>:<action>` (self-service keys carry a
 // `:self` scope segment), lowercase, no wildcard, default deny. Adding a key =
 // contract change (theme2). The github:* / drive:* / webhook:read keys were
 // promoted from wire-boundary string casts (github-sync, drive-proxy,
@@ -35,6 +35,8 @@ export const PERMISSION_CATALOG = [
   { key: "task:read", name: "Read tasks", description: "View tasks", domain: "task", dangerous: false },
   { key: "task:write", name: "Write tasks", description: "Create/update tasks and edit dependencies", domain: "task", dangerous: false },
   { key: "task:delete", name: "Delete tasks", description: "Soft-delete tasks", domain: "task", dangerous: false },
+  // #881: without it a task:write holder edits only tasks assigned to them or created by them.
+  { key: "task:edit_all", name: "Edit all tasks", description: "Edit every task (gantt bars, fields, dependencies, attachments), not only the ones assigned to or created by the caller", domain: "task", dangerous: false },
   { key: "file:read", name: "Read files", description: "View/search metadata and download from R2", domain: "file", dangerous: false },
   { key: "file:write", name: "Write files", description: "Register/update/link/upload", domain: "file", dangerous: false },
   { key: "file:admin", name: "Administer files", description: "Force visibility/owner changes and restore", domain: "file", dangerous: true },
@@ -145,7 +147,7 @@ export const PERMISSION_CATALOG = [
   { key: "identity:impersonate", name: "View the app as another member", description: "Start a short, audited impersonation session to see exactly what a member sees (admins cannot be impersonated)", domain: "impersonation", dangerous: true },
 ] as const satisfies readonly PermissionCatalogEntry[];
 
-// Closed union of the 102 keys (open `${string}:${string}` template retired).
+// Closed union of the 103 keys (open `${string}:${string}` template retired).
 export type PermissionKey = (typeof PERMISSION_CATALOG)[number]["key"];
 
 export type UserStatus = "active" | "invited" | "disabled" | "rejected";

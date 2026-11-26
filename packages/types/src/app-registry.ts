@@ -80,7 +80,7 @@ export const APP_MANIFEST = [
   { id: "events", label: "イベント", navPath: "/events", domain: "event", permissions: ["event:read"], access: { view: "app:events:view", edit: "app:events:edit" },
     detailPermissions: ["event:read", "event:write", "event:admin"] },
   { id: "tasks", label: "マイタスク", navPath: "/me/tasks", domain: "task", permissions: ["task:read"], access: { view: "app:tasks:view", edit: "app:tasks:edit" },
-    detailPermissions: ["task:read", "task:write", "task:delete"] },
+    detailPermissions: ["task:read", "task:write", "task:delete", "task:edit_all"] },
   // gantt reads the SAME task:* domain keys as マイタスク. Claiming them here too would show
   // one key in two 詳細 dialogs, so ガント owns no fine-grained key: 無効/閲覧/編集 is its whole
   // surface (its own app:gantt:* pair still toggles it independently of マイタスク).

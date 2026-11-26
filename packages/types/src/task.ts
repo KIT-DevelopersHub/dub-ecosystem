@@ -1,5 +1,6 @@
 // task — task-service namespace. Optimistic-locked CRUD; task_dependencies owned here.
 import type { TaskId, EventId, UserId, TeamId, FileId, ISODateTime, Versioned, Paginated, CursorQuery } from "./common";
+export * from "./task-edit"; // #881: who may edit one task (assignee / creator / task:edit_all)
 
 export type TaskStatus = "todo" | "in_progress" | "blocked" | "done" | "cancelled"; // closed (D6)
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
