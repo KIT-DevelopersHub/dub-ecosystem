@@ -74,6 +74,15 @@ export function useEventPageLayoutQuery(eventId: common.EventId | null) {
   });
 }
 
+export function useEventAppsQuery(eventId: common.EventId | null) {
+  const api = useEventApi();
+  return useQuery<event.EventAppsResponse>({
+    queryKey: eventId ? eventKeys.apps(eventId) : eventKeys.details(),
+    queryFn: () => api.getEventApps(eventId as common.EventId),
+    enabled: eventId !== null,
+  });
+}
+
 export function useActionsQuery(eventId: common.EventId, query?: ListActionsQuery) {
   const api = useEventApi();
   return useQuery<ListActionsResponse>({

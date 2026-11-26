@@ -13,6 +13,8 @@ export const eventKeys = {
   eventDetails: (eventId: common.EventId) => [...eventKeys.detail(eventId), "eventDetails"] as const,
   sectionLayout: (eventId: common.EventId) => [...eventKeys.detail(eventId), "sectionLayout"] as const,
   pageLayout: (eventId: common.EventId) => [...eventKeys.detail(eventId), "pageLayout"] as const,
+  // Shared with the FE2 shell launcher (exported) so a toggle greys the tile at once.
+  apps: (eventId: common.EventId) => [...eventKeys.detail(eventId), "apps"] as const,
   digest: (eventId: common.EventId) => [...eventKeys.detail(eventId), "aiDigest"] as const,
   actions: (eventId: common.EventId) => [...eventKeys.detail(eventId), "actions"] as const,
   action: (actionId: common.ActionId) => [...eventKeys.all, "action", actionId] as const,

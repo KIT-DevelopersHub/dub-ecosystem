@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
+import { auth as authValues, event as eventValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 
@@ -193,6 +193,23 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
     actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
   },
 };
+
+// 使うアプリ (per-event enabled apps). In-session like the event edits above.
+// evt_1 = the default set + 運営メンバー, evt_2 = the default set a NEW event gets,
+// evt_3 = never configured (legacy) => every app, exactly like prod's existing events.
+const DEMO_EVENT_APPS: Record<string, { apps: string[]; updatedAt: string }> = {
+  evt_1: { apps: [...eventValues.EVENT_DEFAULT_ENABLED_APPS, "members"], updatedAt: "2026-11-01T00:00:00Z" },
+  evt_2: { apps: [...eventValues.EVENT_DEFAULT_ENABLED_APPS], updatedAt: "2026-11-01T00:00:00Z" },
+};
+function demoEventApps(eventId: string): event.EventAppsResponse {
+  const row = DEMO_EVENT_APPS[eventId];
+  return {
+    eventId,
+    enabledApps: eventValues.resolveEnabledApps(row?.apps),
+    customized: row !== undefined,
+    updatedAt: row?.updatedAt ?? null,
+  };
+}
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
   evt_1: [
@@ -2898,6 +2915,20 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     if (askId && method === "POST") return json({ status: "disabled", answer: null, sources: [] } satisfies event.AskEventResponse);
   }
 
+  // 使うアプリ save — full replace, unknown ids rejected like event-service.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/apps$/);
+    if (id && method === "PUT") {
+      const apps = (body as { enabledApps?: unknown } | undefined)?.enabledApps;
+      if (!eventValues.isEnabledAppList(apps)) {
+        const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "unknown app id", retryable: false } };
+        return json(err, 400);
+      }
+      DEMO_EVENT_APPS[id] = { apps: eventValues.resolveEnabledApps(apps), updatedAt: isoNow() };
+      return json(demoEventApps(id));
+    }
+  }
+
   // Shared section layout save — version-locked (see DemoSectionLayout above).
   {
     const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
@@ -2971,8 +3002,13 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       if (id) return json(loadDemoSectionLayout(id));
     }
     {
+      const id = seg(/^\/api\/v1\/events\/([^/]+)\/apps$/);
+      if (id) return EVENTS.some((e) => e.id === id) ? json(demoEventApps(id)) : notFound(`GET ${pathname}`);
+    }
+    {
       const id = seg(/^\/api\/v1\/events\/([^/]+)$/);
-      if (id) return EVENT_DETAIL[id] ? json(EVENT_DETAIL[id]) : notFound(`GET ${pathname}`);
+      const ev = id ? EVENT_DETAIL[id] : undefined;
+      if (id) return ev ? json({ ...ev, enabledApps: demoEventApps(id).enabledApps }) : notFound(`GET ${pathname}`);
     }
     // tasks
     if (pathname === "/api/v1/tasks") {

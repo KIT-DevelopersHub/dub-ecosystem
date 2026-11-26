@@ -3,6 +3,7 @@ import { Button } from "@dub/ui";
 import { useNavigation, useRouteParams } from "../contracts/navigation";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { EventEditForm } from "../components/EventEditForm";
+import { EventAppsSettings } from "../components/EventAppsSettings";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useArchiveEvent } from "../hooks/useEventMutations";
 import { eventRoutes } from "../lib/routes";
@@ -25,6 +26,9 @@ function EventSettingsInner({ eventId }: { eventId: string }) {
 
       <h2 className={styles.sectionTitle}>基本情報</h2>
       <EventEditForm event={ev} canWrite={permissions.write} />
+
+      <h2 className={styles.sectionTitle}>使うアプリ</h2>
+      <EventAppsSettings eventId={eventId} canWrite={permissions.write && ev.archivedAt === null} />
 
       <h2 className={styles.sectionTitle}>危険な操作</h2>
       <p className={styles.kvLabel}>アーカイブすると一覧から隠れ、編集できなくなります（論理削除）。</p>

@@ -90,3 +90,7 @@ export { EventListPage } from "./pages/EventListPage";
 export { EventDetailPage } from "./pages/EventDetailPage";
 export { ActionDetailPage } from "./pages/ActionDetailPage";
 export { EventSettingsPage } from "./pages/EventSettingsPage";
+
+// 使うアプリ (per-event enabled apps): the shell launcher reads the same cache key so a
+// toggle in イベント設定 greys the tile at once.
+export { EventAppsSettings, EVENT_APPS_MARKER } from "./components/EventAppsSettings";

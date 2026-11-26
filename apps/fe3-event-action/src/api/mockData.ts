@@ -217,6 +217,17 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
   const store = createStore(seed);
   const orgId = seed.orgId ?? "org_devhub";
   const digests = new Map<string, event.EventDigest>();
+  // 使うアプリ: no entry = legacy (every app). createEvent writes the default set.
+  const eventApps = new Map<string, { apps: string[]; updatedAt: string }>();
+  const appsResponse = (eid: string): event.EventAppsResponse => {
+    const row = eventApps.get(eid);
+    return {
+      eventId: eid,
+      enabledApps: ev.resolveEnabledApps(row?.apps),
+      customized: row !== undefined,
+      updatedAt: row?.updatedAt ?? null,
+    };
+  };
   const delay = () => (latencyMs > 0 ? new Promise((r) => setTimeout(r, latencyMs)) : Promise.resolve());
 
   function getEventOr404(eid: string): event.DubEvent {
@@ -277,6 +288,7 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
         updatedAt: now(),
       };
       store.events.set(eid, e);
+      eventApps.set(eid, { apps: ev.resolveEnabledApps(req.enabledApps ?? ev.EVENT_DEFAULT_ENABLED_APPS), updatedAt: now() });
       return e;
     },
 
@@ -287,7 +299,29 @@ export function createMockEventApi(seed: MockSeed = {}, latencyMs = 0): EventApi
         .filter((a) => a.eventId === eid && a.archivedAt === null)
         .sort((a, b) => a.sortOrder - b.sortOrder)
         .map(toActionSummary);
-      return { ...e, actions };
+      return { ...e, actions, enabledApps: appsResponse(eid).enabledApps };
+    },
+
+    async getEventApps(eid: common.EventId): Promise<event.EventAppsResponse> {
+      await delay();
+      getEventOr404(eid);
+      return appsResponse(eid);
+    },
+
+    async saveEventApps(eid: common.EventId, req: event.SaveEventAppsRequest): Promise<event.EventAppsResponse> {
+      await delay();
+      const e = getEventOr404(eid);
+      if (e.archivedAt !== null) {
+        throw new DubError(EventErrorCodes.ARCHIVED_IMMUTABLE, "Event is archived (read-only)", { status: 409 });
+      }
+      if (!ev.isEnabledAppList(req.enabledApps)) {
+        throw new DubError(CommonErrorCodes.VALIDATION_FAILED, "Validation failed", {
+          status: 400,
+          details: [{ field: "enabledApps", reason: "invalid_enum" }],
+        });
+      }
+      eventApps.set(eid, { apps: ev.resolveEnabledApps(req.enabledApps), updatedAt: now() });
+      return appsResponse(eid);
     },
 
     async updateEvent(eid: common.EventId, req: event.UpdateEventRequest): Promise<event.DubEvent> {

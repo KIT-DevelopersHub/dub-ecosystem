@@ -36,6 +36,10 @@ export interface EventApi {
   getEventPageLayout(id: common.EventId): Promise<EventPageLayout>;
   saveEventPageLayout(id: common.EventId, req: SaveEventPageLayoutRequest): Promise<EventPageLayout>;
 
+  // Apps this event uses (イベント設定 > 使うアプリ). event:write to save; full replace.
+  getEventApps(id: common.EventId): Promise<event.EventAppsResponse>;
+  saveEventApps(id: common.EventId, req: event.SaveEventAppsRequest): Promise<event.EventAppsResponse>;
+
   listActions(eventId: common.EventId, query?: ListActionsQuery): Promise<ListActionsResponse>;
   createAction(eventId: common.EventId, req: CreateActionRequest): Promise<event.DubAction>;
   getAction(id: common.ActionId): Promise<event.DubAction>;
@@ -92,6 +96,14 @@ export function createHttpEventApi(client: ApiClient): EventApi {
       client.request<EventSectionLayout, SaveEventSectionLayoutRequest>({
         method: "PUT",
         path: `/api/v1/events/${id}/section-layout`,
+        body: req,
+      }),
+    getEventApps: (id) =>
+      client.request<event.EventAppsResponse>({ method: "GET", path: `/api/v1/events/${id}/apps` }),
+    saveEventApps: (id, req) =>
+      client.request<event.EventAppsResponse, event.SaveEventAppsRequest>({
+        method: "PUT",
+        path: `/api/v1/events/${id}/apps`,
         body: req,
       }),
     getEventPageLayout: (id) =>

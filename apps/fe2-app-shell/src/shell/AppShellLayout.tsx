@@ -26,6 +26,7 @@ import { ImpersonationBanner } from "./ImpersonationBanner.tsx";
 import { HeaderAccountSwitcher } from "./HeaderAccountSwitcher.tsx";
 import { ProfileReminderBanner, useMissingProfileKeys } from "./ProfileReminder.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
+import { EVENT_DISABLED_REASON, isEventDisabled, useCurrentEventEnabledApps } from "../lib/eventApps.ts";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -85,7 +86,13 @@ function canOpen(entry: NavEntry, can: Can): boolean {
   return entry.requiredPermissions === undefined || entry.requiredPermissions.every((p) => can(p));
 }
 
-function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
+// 使うアプリ: an app the CURRENT event does not use is greyed (disabled + reason), never
+// removed — the per-event choice made in イベント設定 (lib/eventApps). null = unknown.
+export function toLauncherItems(
+  navEntries: NavEntry[],
+  can: Can,
+  eventEnabledApps: ReadonlySet<string> | null = null,
+): AppLauncherItem[] {
   return [...navEntries]
     .sort((a, b) => a.order - b.order)
     .flatMap((entry) => {
@@ -100,6 +107,10 @@ function toLauncherItems(navEntries: NavEntry[], can: Can): AppLauncherItem[] {
         href: entry.path,
       };
       if (typeof badge === "number" && badge > 0) item.badgeCount = badge;
+      if (isEventDisabled(entry.appId, eventEnabledApps)) {
+        item.disabled = true;
+        item.disabledReason = EVENT_DISABLED_REASON;
+      }
       return [item];
     });
 }
@@ -197,6 +208,7 @@ export function AppShellLayout({
   const navigateRef = useRef(onNavigate);
   navigateRef.current = onNavigate;
   const { can } = usePermissions();
+  const eventEnabledApps = useCurrentEventEnabledApps(api, can("app:events:view") && can("event:read"));
   const [acctOpen, setAcctOpen] = useState(false);
   // カラー設定 (表示設定) dialog — theme lives inside it, not directly in the ⚙ menu.
   const [colorOpen, setColorOpen] = useState(false);
@@ -322,7 +334,7 @@ export function AppShellLayout({
             testId="fe2-app-launcher"
             title="アプリ"
             label="アプリ一覧"
-            items={toLauncherItems(navEntries, can)}
+            items={toLauncherItems(navEntries, can, eventEnabledApps)}
             {...(onNavigate ? { onSelect: (item: AppLauncherItem) => onNavigate(item.href ?? item.id) } : {})}
           />
           {headerWidgets.map((Widget, i) => (
