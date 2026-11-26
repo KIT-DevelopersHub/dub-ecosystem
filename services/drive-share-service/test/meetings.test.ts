@@ -136,7 +136,8 @@ describe("create", () => {
     const m = await service.create("usr_admin", BASE);
     const patch = vi.spyOn(calendar, "patchEvent");
     await service.update(m.id, { startsAt: "2026-10-20T03:00:00.000Z", durationMinutes: 90 });
-    expect(Object.keys(patch.mock.calls[0]![2]).sort()).toEqual(["end", "start", "timeZone"]);
+    // The repeat rule always goes along (Dub's is the one that counts), title / description do not.
+    expect(Object.keys(patch.mock.calls[0]![2]).sort()).toEqual(["end", "recurrence", "start", "timeZone"]);
   });
 
   it("does not hold the response for opening the Meet", async () => {
@@ -733,7 +734,7 @@ describe("Google Calendar is the source of truth", () => {
     expect(store.meetings.size).toBe(1);
   });
 
-  it("edits made in Google Calendar (title / time / length / repeat) are pulled into Dub", async () => {
+  it("edits made in Google Calendar (title / time / length) are pulled into Dub — the repeat is not", async () => {
     const { service, calendar, store } = buildMeetings({ roster: roster() });
     const m = await service.create("usr_admin", BASE);
     const ev = eventOf(calendar);
@@ -748,7 +749,7 @@ describe("Google Calendar is the source of truth", () => {
       title: "開発定例（時間変更）",
       startsAt: "2026-10-21T02:00:00.000Z",
       durationMinutes: 90,
-      recurrence: "biweekly",
+      recurrence: "weekly",
       until: null,
     });
   });
@@ -904,5 +905,96 @@ describe("MeetingSyncDO alarm scheduling", () => {
     expect(nextAlarmAt(now + 10_000, now)).toBeNull();
     expect(nextAlarmAt(now + 3_600_000, now, 60_000)).toBe(now + 60_000);
     expect(nextAlarmAt(now + 30_000, now, 60_000)).toBeNull();
+  });
+});
+
+describe("the repeat rule is Dub's alone (never changed on Dub's own)", () => {
+  type Mock = ReturnType<typeof createMockCalendarClient>;
+  const seriesOf = (calendar: unknown, id: string) => {
+    for (const c of (calendar as Mock).state.calendars.values()) {
+      const ev = c.events.get(id);
+      if (ev) return { cal: c, ev };
+    }
+    throw new Error(`no event ${id}`);
+  };
+  /** Google Calendar's "this and following" from 11/24: the series ends the day before, a new event repeats on. */
+  const splitInGoogle = (calendar: unknown, id: string) => {
+    const { cal, ev } = seriesOf(calendar, id);
+    ev.recurrence = ["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261123T145959Z"];
+    cal.events.set(`${id}_R20261124T100000`, { ...ev, id: `${id}_R20261124T100000`, start: "2026-11-24T10:00:00.000Z", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=TU"] });
+  };
+  const NOW = () => "2026-11-26T05:54:48.000Z";
+
+  it("a series ended in Google (split) does not shorten Dub's: the sync keeps recurrence / until and writes no rule", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster(), now: NOW });
+    const m = await service.create("usr_admin", BASE);
+    const row = store.meetings.get(m.id)!;
+    splitInGoogle(calendar, row.googleEventId);
+    const patch = vi.spyOn(calendar, "patchEvent");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await service.sync();
+    expect(store.meetings.get(m.id)).toMatchObject({ recurrence: "weekly", until: null });
+    expect(patch.mock.calls.every(([, , p]) => !("recurrence" in p))).toBe(true);
+    const logged = warn.mock.calls.map(([l]) => JSON.parse(String(l)) as { event: string; fields?: string[]; google?: string[] });
+    expect(logged.some((l) => l.event === "meeting_sync_pulled_from_google" && l.fields?.includes("until"))).toBe(false);
+    expect(logged.find((l) => l.event === "meeting_sync_recurrence_drift_kept")?.google).toEqual(["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261123T145959Z"]);
+    warn.mockRestore();
+  });
+
+  it("a role member change on a meeting not edited in Dub patches attendees only, and leaves its repeat alone", async () => {
+    let users = USERS;
+    const r = { ...roster(), listActiveUsers: async (roleId?: string) => users.filter((u) => !roleId || u.roleIds.includes(roleId)) };
+    const { service, calendar, store } = buildMeetings({ roster: r, now: NOW });
+    const m = await service.create("usr_admin", { ...BASE, until: "2027-03-31" });
+    const row = store.meetings.get(m.id)!;
+    splitInGoogle(calendar, row.googleEventId);
+    users = [...USERS, { id: "usr_d", email: "d@dub.example", name: "D", roleIds: ["role_dev"] }];
+    const patch = vi.spyOn(calendar, "patchEvent");
+    const res = await service.syncRoles(["role_dev"]);
+    expect(res.invitedAdded).toBe(1);
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(patch.mock.calls[0]![1]).toBe(row.googleEventId); // the series, never one occurrence
+    expect(Object.keys(patch.mock.calls[0]![2])).toEqual(["attendees"]);
+    expect(store.meetings.get(m.id)).toMatchObject({ recurrence: "weekly", until: "2027-03-31" });
+  });
+
+  it("an end date cleared in Dub goes to the series as the whole rule without UNTIL, and the next sync does not put it back", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster(), now: NOW });
+    const m = await service.create("usr_admin", BASE);
+    const row = store.meetings.get(m.id)!;
+    // The state the earlier bug left: D1 and Google both cut at 11/25.
+    store.meetings.set(m.id, { ...row, until: "2026-11-25" });
+    seriesOf(calendar, row.googleEventId).ev.recurrence = ["RRULE:FREQ=WEEKLY;UNTIL=20261125T145959Z"];
+    const patch = vi.spyOn(calendar, "patchEvent");
+    const updated = await service.update(m.id, { until: null });
+    expect(updated.until).toBeNull();
+    expect(patch.mock.calls[0]![1]).toBe(row.googleEventId);
+    expect(patch.mock.calls[0]![2].recurrence).toEqual(["RRULE:FREQ=WEEKLY"]);
+    expect(seriesOf(calendar, row.googleEventId).ev.recurrence).toEqual(["RRULE:FREQ=WEEKLY"]);
+    // Even if Google still answered with the old UNTIL, the sync must not revert Dub's edit.
+    seriesOf(calendar, row.googleEventId).ev.recurrence = ["RRULE:FREQ=WEEKLY;UNTIL=20261125T145959Z"];
+    await service.sync();
+    expect(store.meetings.get(m.id)).toMatchObject({ recurrence: "weekly", until: null });
+  });
+
+  it("any save in Dub (title only) pushes Dub's full rule, restoring one Google cut short", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster(), now: NOW });
+    const m = await service.create("usr_admin", { ...BASE, until: "2027-03-31" });
+    const row = store.meetings.get(m.id)!;
+    splitInGoogle(calendar, row.googleEventId);
+    await service.update(m.id, { title: "開発定例（改）" });
+    expect(seriesOf(calendar, row.googleEventId).ev.recurrence).toEqual(["RRULE:FREQ=WEEKLY;UNTIL=20270331T145959Z"]);
+  });
+
+  it("an occurrence deleted in Google (EXDATE) is not a changed rule", async () => {
+    const { service, calendar, store } = buildMeetings({ roster: roster(), now: NOW });
+    const m = await service.create("usr_admin", BASE);
+    const row = store.meetings.get(m.id)!;
+    seriesOf(calendar, row.googleEventId).ev.recurrence = ["EXDATE;TZID=Asia/Tokyo:20261117T190000", "RRULE:FREQ=WEEKLY"];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await service.sync();
+    expect(warn.mock.calls.some(([l]) => String(l).includes("meeting_sync_recurrence_drift_kept"))).toBe(false);
+    expect(store.meetings.get(m.id)).toMatchObject({ recurrence: "weekly", until: null });
+    warn.mockRestore();
   });
 });
