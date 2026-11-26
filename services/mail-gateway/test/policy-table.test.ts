@@ -122,6 +122,7 @@ const READS = [
   "GET /mail/sent",
   "GET /mail/sent/:id",
   "GET /mail/sent/:id/attachments/:attId",
+  "GET /mail/templates",
   "GET /mail/threads/:id",
   "POST /mail/avatars",
   "POST /mail/blocks",
@@ -142,6 +143,8 @@ const WRITES = [
   "POST /mail/outbox",
   "POST /mail/scheduled",
   "PUT /mail/drafts/:id",
+  "DELETE /mail/templates/:id",
+  "PUT /mail/templates/:id",
 ];
 // The Cloudflare Email Routing proxy — address issuance and forwarding rules. The subset
 // `mail:admin` guards that is reachable at a URL beginning /mail/admin/.
@@ -206,7 +209,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(62);
+    expect(everyRoute).toHaveLength(65);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing

@@ -99,3 +99,15 @@ export function useUsersQuery(ids: readonly common.UserId[]) {
     enabled: ids.length > 0,
   });
 }
+
+// AI digest (#879). The server answers { enabled:false } while the feature flag is OFF,
+// so the panel can say 「停止中」 instead of erroring.
+export function useEventDigestQuery(eventId: common.EventId | null, enabled = true) {
+  const api = useEventApi();
+  return useQuery<event.GetEventDigestResponse>({
+    queryKey: eventId ? eventKeys.digest(eventId) : eventKeys.details(),
+    queryFn: () => api.getEventDigest(eventId as common.EventId),
+    enabled: enabled && eventId !== null,
+    retry: 1,
+  });
+}

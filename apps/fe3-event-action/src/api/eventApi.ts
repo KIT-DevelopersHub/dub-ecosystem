@@ -42,6 +42,11 @@ export interface EventApi {
   updateAction(id: common.ActionId, req: UpdateActionRequest): Promise<event.DubAction>;
   archiveAction(id: common.ActionId): Promise<void>;
 
+  // AI digest + Q&A (#879; server feature flag, default OFF). Shapes from @dub/types event.
+  getEventDigest(id: common.EventId): Promise<event.GetEventDigestResponse>;
+  runEventDigest(id: common.EventId): Promise<event.RunEventDigestResponse>;
+  askEvent(id: common.EventId, req: event.AskEventRequest): Promise<event.AskEventResponse>;
+
   // assignee display-name batch resolution (theme2 B1; N+1 avoidance, max 50).
   getUsers(ids: readonly common.UserId[]): Promise<common.Paginated<identity.UserSummary>>;
 }
@@ -117,6 +122,16 @@ export function createHttpEventApi(client: ApiClient): EventApi {
         body: req,
       }),
     archiveAction: (id) => client.request<void>({ method: "DELETE", path: `/api/v1/actions/${id}` }),
+    getEventDigest: (id) =>
+      client.request<event.GetEventDigestResponse>({ method: "GET", path: `/api/v1/events/${id}/digest` }),
+    runEventDigest: (id) =>
+      client.request<event.RunEventDigestResponse>({ method: "POST", path: `/api/v1/events/${id}/digest/run` }),
+    askEvent: (id, req) =>
+      client.request<event.AskEventResponse, event.AskEventRequest>({
+        method: "POST",
+        path: `/api/v1/events/${id}/ask`,
+        body: req,
+      }),
     getUsers: (ids) =>
       client.request<common.Paginated<identity.UserSummary>>({
         method: "GET",

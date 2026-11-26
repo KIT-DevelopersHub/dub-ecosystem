@@ -42,6 +42,8 @@ export const DEFAULT_PREFERENCES: PreferenceEntry[] = [
   // covers plain channel messages (test 18 still holds: no entry enables the "chat" channel).
   { type: "chat.mention", channels: ["in_app"] },
   { type: "chat.dm", channels: ["in_app"] },
+  // 新着メール (#869): in_app + push like other non-chat types; switch off per user here.
+  { type: "mail.received", channels: ["in_app", "push"] },
 ];
 
 export class MockApiError extends Error implements ApiError {

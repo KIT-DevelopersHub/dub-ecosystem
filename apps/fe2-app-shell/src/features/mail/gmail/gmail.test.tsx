@@ -50,6 +50,9 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     deleteDraft: vi.fn().mockResolvedValue(undefined),
     addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
     removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
+    listTemplates: vi.fn().mockResolvedValue([]),
+    saveTemplate: vi.fn().mockImplementation((id: string, t: object) => Promise.resolve({ ...t, id, updatedAt: "2026-01-01T00:00:00.000Z" })),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
     listBlocks: vi.fn().mockResolvedValue([]),
     addBlock: vi.fn().mockImplementation((req: { value: string; kind?: "address" | "domain" }) => Promise.resolve({ value: req.value.toLowerCase(), kind: req.kind ?? "address", createdAt: "2026-01-01T00:00:00.000Z" })),
     getForward: vi.fn().mockResolvedValue({ target: null, status: "none", enabled: false, active: false, available: true, requestedAt: null, verifiedAt: null, lastResult: null, lastError: null, lastAt: null }),
@@ -245,6 +248,12 @@ describe("GmailApp (hydrates from the gateway)", () => {
     // The live subject shows; no bundled demo thread ("キックオフ") leaks into the bundle.
     expect(screen.getByText("登壇のご相談")).toBeInTheDocument();
     expect(screen.queryByText(/キックオフ/)).not.toBeInTheDocument();
+  });
+
+  it("opens the conversation named by a new-mail notification link (/mail?open=<id>, #869)", async () => {
+    render(wrap(<GmailApp openMessageId="mailin_1" />));
+    expect((await screen.findAllByTestId("fe2-mail-thread-message")).length).toBeGreaterThan(0);
+    expect(screen.queryAllByTestId("fe2-mail-inbox-item")).toHaveLength(0);
   });
 
   it("shows the empty state when the gateway returns no mail (no demo fallback)", async () => {

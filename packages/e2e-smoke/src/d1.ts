@@ -22,6 +22,10 @@ const sqlFile = (rel: string): string =>
 export function allSchemas(): string[] {
   return [
     EVENT_SCHEMA_MIGRATION.up,
+    // #879: the event repo now INSERT/SELECTs venue/capacity, and the digest tables ship
+    // alongside — apply the physical migrations so the seeded D1 matches production.
+    sqlFile("../../../infra/d1/migrations/event/0005_event_venue_capacity.sql"),
+    sqlFile("../../../infra/d1/migrations/event/0006_event_ai_digest.sql"),
     ...TASK_MIGRATIONS.map((m) => m.up),
     // #260: the gantt WBS/team columns (team_id/parent_id/wbs) live in a physical
     // migration that is intentionally NOT mirrored into TASK_MIGRATIONS (pinned to
@@ -64,6 +68,7 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0023_user_forward.sql"),
     sqlFile("../../../services/mail-gateway/db/0024_team_list.sql"),
     sqlFile("../../../services/mail-gateway/db/0025_drafts_inline_cid.sql"),
+    sqlFile("../../../services/mail-gateway/db/0026_mail_templates.sql"),
   ];
 }
 

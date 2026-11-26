@@ -41,6 +41,9 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   { pattern: "chat.*", label: "チャット", icon: "message-square", group: "system" },
   { pattern: "chat.mention", label: "チャットでメンションされました", icon: "message-square", group: "system" },
   { pattern: "chat.dm", label: "ダイレクトメッセージ", icon: "message-square", group: "system" },
+  // 新着メール (mail-gateway -> POST /notify, mail.MAIL_RECEIVED_NOTIFY_TYPE).
+  { pattern: "mail.*", label: "メール", icon: "inbox", group: "system" },
+  { pattern: "mail.received", label: "新しいメールが届きました", icon: "inbox", group: "system" },
   // LP管理 (lp-analytics). スポンサー資料請求 → app:sponsor:edit holders (lpSponsor.LP_SPONSOR_NOTIFY_TYPE).
   { pattern: "lp.*", label: "LP管理", icon: "megaphone", group: "system" },
   { pattern: "lp.sponsor_inquiry", label: "スポンサーの資料請求", icon: "megaphone", group: "system" },

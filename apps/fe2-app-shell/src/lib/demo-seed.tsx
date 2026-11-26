@@ -126,6 +126,34 @@ const EVENTS: event.EventSummary[] = [
   { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-09-01T00:00:00Z" },
 ];
 
+// AI のまとめ (#879) demo = the production default: flag OFF, no LLM. The server then
+// sends a preview built from the event's own rows (facts + actions) and deterministic
+// 食い違い; evt_1 carries one (the legacy free-text 定員 says 250).
+function demoDigestState(eventId: string): event.GetEventDigestResponse {
+  const ev = EVENT_DETAIL[eventId];
+  const link = `/events?eventId=${eventId}`;
+  const lines: event.EventDigestLine[] = ev
+    ? [
+        {
+          text: [`イベント「${ev.title}」`, ev.startsAt ? `開催日 ${ev.startsAt.slice(0, 10)}` : "", ev.venue ? `会場 ${ev.venue}` : "", typeof ev.capacity === "number" ? `定員 ${ev.capacity}人` : ""]
+            .filter((p) => p !== "")
+            .join("・"),
+          source: "event",
+          link,
+        },
+        ...ev.actions.map((a) => ({ text: `アクション「${a.title}」`, source: "actions" as const, link: `/events/${eventId}` })),
+      ]
+    : [];
+  const discrepancies: event.EventDigestDiscrepancy[] =
+    eventId === "evt_1" ? [{ field: "capacity", eventValue: "300", sourceValue: "250", source: "event", link }] : [];
+  return {
+    enabled: false,
+    provider: { id: "offline", status: "disabled" },
+    digest: null,
+    preview: { lines, discrepancies, collectedAt: isoNow() },
+  };
+}
+
 const EVENT_DETAIL: Record<string, event.EventDetail> = {
   evt_1: {
     version: 3,
@@ -136,6 +164,8 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
     phase: "preparing",
     startsAt: "2026-08-05T01:00:00Z",
     endsAt: "2026-08-05T09:00:00Z",
+    venue: "金沢工業大学 扇が丘キャンパス",
+    capacity: 300,
     archivedAt: null,
     createdAt: "2026-05-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -482,9 +512,11 @@ function saveDemoSectionLayout(next: DemoSectionLayout): void {
 }
 
 // ── notifications ─────────────────────────────────────────────────────────────
+// 通知設定の上書き (in-session; a reload resets like the rest of the demo).
+const DEMO_NOTIF_PREFS = new Map<string, notification.PreferenceEntry>();
 const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
-  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
+  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail_message", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
   // チャット (chat.mention / chat.dm, via chat.message.created -> notification, in_app
   // default-ON exception). resourceType "channel" deep-links into fe6-chat's own route
@@ -496,13 +528,13 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_6", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「会場レイアウト確定」の期限は明日です。", readAt: null, createdAt: "2026-08-02T00:50:00Z", resourceType: "task", resourceId: "tsk_2" },
   { id: "ntf_7", type: "chat.mention", title: "メンションされました", body: "#project-alpha で受付ボランティアの集合時間についてメンションされました。", readAt: null, createdAt: "2026-08-02T00:40:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_8", type: "task.assigned", title: "タスクが割り当てられました", body: "「スポンサー資料の最終確認」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T00:30:00Z", resourceType: "task", resourceId: "tsk_3" },
-  { id: "ntf_9", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんから登壇資料についてのメールが届いています。", readAt: null, createdAt: "2026-08-02T00:20:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_9", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんから登壇資料についてのメールが届いています。", readAt: null, createdAt: "2026-08-02T00:20:00Z", resourceType: "mail_message", resourceId: "msg_2" },
   { id: "ntf_10", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」の運営ミーティングは本日 19:00 からです。", readAt: null, createdAt: "2026-08-02T00:10:00Z", resourceType: "event", resourceId: "evt_1" },
   { id: "ntf_11", type: "task.completed", title: "タスクが完了しました", body: "「受付名簿の作成」が完了になりました。", readAt: null, createdAt: "2026-08-02T00:00:00Z", resourceType: "task", resourceId: "tsk_4" },
   { id: "ntf_12", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから懇親会の会場についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T23:50:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_13", type: "event.invited", title: "イベントに招待されました", body: "「運営定例ミーティング」に招待されました。", readAt: null, createdAt: "2026-08-01T23:40:00Z", resourceType: "event", resourceId: "evt_2" },
   { id: "ntf_14", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「当日タイムテーブル作成」の期限は 3 日後です。", readAt: null, createdAt: "2026-08-01T23:30:00Z", resourceType: "task", resourceId: "tsk_5" },
-  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "会場担当者から搬入時間の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T23:20:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "会場担当者から搬入時間の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T23:20:00Z", resourceType: "mail_message", resourceId: "msg_3" },
   { id: "ntf_16", type: "chat.mention", title: "メンションされました", body: "#project-alpha でノベルティの発注数についてメンションされました。", readAt: null, createdAt: "2026-08-01T23:10:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_17", type: "task.assigned", title: "タスクが割り当てられました", body: "「アンケートフォーム作成」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T23:00:00Z", resourceType: "task", resourceId: "tsk_10" },
   { id: "ntf_18", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「運営定例ミーティング」が planning になりました。", readAt: null, createdAt: "2026-08-01T22:50:00Z", resourceType: "event", resourceId: "evt_2" },
@@ -510,12 +542,12 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_20", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから当日の集合場所についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:30:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_21", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「司会台本の作成」の期限は明日です。", readAt: null, createdAt: "2026-08-01T22:20:00Z", resourceType: "task", resourceId: "tsk_6" },
   { id: "ntf_22", type: "chat.mention", title: "メンションされました", body: "#project-alpha で懇親会の参加人数についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:18:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
-  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "スポンサー企業から協賛内容の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T22:16:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "スポンサー企業から協賛内容の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T22:16:00Z", resourceType: "mail_message", resourceId: "msg_2" },
   { id: "ntf_24", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」のリハーサルは明日 10:00 からです。", readAt: null, createdAt: "2026-08-01T22:14:00Z", resourceType: "event", resourceId: "evt_1" },
   { id: "ntf_25", type: "task.assigned", title: "タスクが割り当てられました", body: "「名札の印刷」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T22:12:00Z", resourceType: "task", resourceId: "tsk_12" },
   { id: "ntf_26", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから備品リストについてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:10:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_27", type: "task.completed", title: "タスクが完了しました", body: "「会場の下見」が完了になりました。", readAt: null, createdAt: "2026-08-01T22:08:00Z", resourceType: "task", resourceId: "tsk_13" },
-  { id: "ntf_28", type: "mail.received", title: "新着メール", body: "登壇者からスライド提出のメールが届いています。", readAt: null, createdAt: "2026-08-01T22:06:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_28", type: "mail.received", title: "新着メール", body: "登壇者からスライド提出のメールが届いています。", readAt: null, createdAt: "2026-08-01T22:06:00Z", resourceType: "mail_message", resourceId: "msg_3" },
   { id: "ntf_29", type: "chat.mention", title: "メンションされました", body: "#project-alpha で配信機材の手配についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:04:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_30", type: "event.invited", title: "イベントに招待されました", body: "「スタッフ打ち上げ」に招待されました。", readAt: null, createdAt: "2026-08-01T22:02:00Z", resourceType: "event", resourceId: "evt_2" },
 ];
@@ -1238,6 +1270,7 @@ function createMailStore() {
   // submit returns the first send's ack instead of appending a second Sent row.
   const idemAcks = new Map<string, mail.SendMailResponse>();
   const draftsByAccount: Record<string, mail.MailDraft[]> = {};
+  const templatesByAccount: Record<string, mail.MailTemplate[]> = {};
 
   function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
@@ -1384,6 +1417,24 @@ function createMailStore() {
         saveFlags([...flags.values()]);
       }
       return json({ updated: hit.length });
+    }
+    // 定型文 (#867): per-account, in-session; one sample so the picker is not empty in the demo.
+    {
+      const list = (templatesByAccount[me.id] ??= [
+        { id: "tpl-demo-interview", title: "加入面談のご案内", subject: "【DevelopersHub】加入面談の日程について", body: "こんにちは、DevelopersHub 運営です。\n\n加入面談の候補日をお送りします。ご都合のよい日時をご返信ください。\n\nよろしくお願いいたします。", updatedAt: "2026-08-01T00:00:00.000Z" },
+      ]);
+      if (pathname === "/api/v1/mail/templates" && method === "GET") return json({ items: [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) } satisfies mail.MailTemplateList);
+      const one = /^\/api\/v1\/mail\/templates\/([^/]+)$/.exec(pathname);
+      if (one && method === "PUT") {
+        const id = decodeURIComponent(one[1]!);
+        const saved: mail.MailTemplate = { ...(body as mail.MailTemplateInput), id, updatedAt: new Date().toISOString() };
+        templatesByAccount[me.id] = [saved, ...list.filter((t) => t.id !== id)];
+        return json(saved);
+      }
+      if (one && method === "DELETE") {
+        templatesByAccount[me.id] = list.filter((t) => t.id !== decodeURIComponent(one[1]!));
+        return json({ id: decodeURIComponent(one[1]!), deleted: true });
+      }
     }
     // 下書き: per-account, in-session (a reload resets, like Sent).
     {
@@ -2837,6 +2888,16 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // AI のまとめ (#879) — flag OFF like production: GET = preview, run = 409, ask = disabled.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/digest$/);
+    if (id && method === "GET") return json(demoDigestState(id));
+    const runId = seg(/^\/api\/v1\/events\/([^/]+)\/digest\/run$/);
+    if (runId && method === "POST") return json({ error: { code: "EVENT_AI_DIGEST_DISABLED", message: "AI digest is disabled" } }, 409);
+    const askId = seg(/^\/api\/v1\/events\/([^/]+)\/ask$/);
+    if (askId && method === "POST") return json({ status: "disabled", answer: null, sources: [] } satisfies event.AskEventResponse);
+  }
+
   // Shared section layout save — version-locked (see DemoSectionLayout above).
   {
     const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
@@ -2876,6 +2937,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         phase: b.phase ?? cur.phase,
         startsAt: b.startsAt !== undefined ? b.startsAt : cur.startsAt,
         endsAt: b.endsAt !== undefined ? b.endsAt : cur.endsAt,
+        venue: b.venue !== undefined ? b.venue : (cur.venue ?? null),
+        capacity: b.capacity !== undefined ? b.capacity : (cur.capacity ?? null),
         version: cur.version + 1,
         updatedAt: isoNow(),
       };
@@ -2956,6 +3019,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     if (pathname === "/api/v1/notifications/inbox/unread-count") {
       return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
     }
+    // 通知設定 (server shape: the overrides the demo user saved, e.g. 新着メール off).
+    if (pathname === "/api/v1/notifications/preferences") return json({ userId: "demo", entries: [...DEMO_NOTIF_PREFS.values()] });
     // admin: Notification管理 list (audience='admin' notifications to publish).
     if (pathname === "/api/v1/notifications/manage") {
       return json(page(ADMIN_NOTIFICATIONS.map((a) => ({ ...a }))));
@@ -3077,7 +3142,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         return json(null, 204);
       }
     }
-    if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
+    if (pathname === "/api/v1/notifications/preferences") {
+      for (const e of ((body as { entries?: notification.PreferenceEntry[] } | null)?.entries ?? [])) DEMO_NOTIF_PREFS.set(e.type, e);
+      return json({ userId: "demo", entries: [...DEMO_NOTIF_PREFS.values()] });
+    }
     // Persist a bar's window after a leaf move/resize (Notion-style edit). Mutates the task
     // columns + the gantt row so the change survives a refetch/reload (in-session). Returns
     // the updated GanttRow. Parents never reach here (the client blocks a parent resize).
@@ -4331,18 +4399,44 @@ function createMembersStore() {
     mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 21, null, "建築学科", "2年", null, "member_v1"),
     mk("member_v3", "田口 涼太", "メンバー", "added", ["team_venue"], 22, null, "建築学科", "1年", null, "member_2"),
     mk("member_v4", "谷 真央", "メンバー", "added", ["team_venue"], 23, null, "建築学科", "2年", null, "member_2"),
-    // 集客広報 — リーダー2人、各リーダーに配下2人。
+    // 集客広報 — 班が3つ(広報班はリーダー2人)。各リーダーに配下。
     mk("member_e1", "白木 彩", "オーガナイザー", "added", ["team_pr"], 24, null, "メディア情報学科", "3年"),
     mk("member_e2", "石井 里奈", "広報リーダー", "added", ["team_pr"], 25, null, "メディア情報学科", "2年", null, "member_e1"),
     mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 26, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
     mk("member_e4", "藤田 直人", "メンバー", "added", ["team_pr"], 27, null, "メディア情報学科", "1年", null, "member_e2"),
     mk("member_e5", "中田 桜", "デザインリーダー", "added", ["team_pr"], 28, null, "メディア情報学科", "3年", null, "member_e1"),
     mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 29, null, "メディア情報学科", "2年", null, "member_e5"),
+    // 組織図の「班」確認用: 広報班の共同リーダー(leaderId が同じチームのリーダー)と、3つ目の SNS 班。
+    mk("member_e7", "村上 千尋", "広報リーダー", "added", ["team_pr"], 30, null, "メディア情報学科", "2年", null, "member_e2"),
+    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 31, null, "メディア情報学科", "2年", null, "member_e1"),
+    mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 32, null, "メディア情報学科", "1年", null, "member_e8"),
+    // ネットワーク — 本番の集客広報と同じ形(position 未設定・役割は roleTitle だけ)の確認用。
+    // リーダー4人に配下は居ない / メンバー3人はオーガナイザーを leaderId に持つ / 役割も役職も無い人。
+    mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 33, null, "情報工学科", "3年"),
+    mk("member_n2", "片山 美咲", "オーガナイザー", "added", ["team_network"], 34, null, "情報工学科", "3年"),
+    mk("member_n3", "川口 隼", "リーダー", "added", ["team_network"], 35, null, "情報工学科", "2年"),
+    mk("member_n4", "北村 楓", "リーダー", "added", ["team_network"], 36, null, "電気電子工学科", "2年"),
+    mk("member_n5", "久保 蒼", "リーダー", "added", ["team_network"], 37, null, "情報工学科", "2年"),
+    mk("member_n6", "小松 遥", "リーダー", "added", ["team_network"], 38, null, "電気電子工学科", "2年"),
+    mk("member_n7", "斉藤 湊", "メンバー", "added", ["team_network"], 39, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n8", "坂本 杏", "メンバー", "added", ["team_network"], 40, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n9", "杉山 翔", "メンバー", "invited", ["team_network"], 41, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n10", "関 美月", "メンバー", "added", ["team_network"], 42, null, "電気電子工学科", "1年"),
+    mk("member_n11", "高木 陸斗", null, "added", ["team_network"], 43, null, "情報工学科", "1年"),
+    mk("member_n12", "竹内 心", null, "added", ["team_network"], 44, null, "情報工学科", "1年"),
+    mk("member_n13", "千葉 悠真", null, "added", ["team_network"], 45, null, "電気電子工学科", "1年"),
+    mk("member_n14", "土屋 七海", null, "added", ["team_network"], 46, null, "電気電子工学科", "1年"),
     // 辞退 — 名簿一覧では既定で隠れ、辞退者フィルタでのみ表示される確認用。
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 30),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 47),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 31, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 48, null, "情報工学科", "1年"),
   ];
+
+  // ネットワークは本番と同じく役職(position)未設定。最後の2人だけ position=member。
+  for (const mem of members) {
+    if (!mem.id.startsWith("member_n")) continue;
+    mem.position = mem.id === "member_n13" || mem.id === "member_n14" ? "member" : null;
+  }
 
   // フリガナ(読み仮名)の seed。参加届からの流入を模して 姓/名 の分割カナを各メンバーへ付与し、
   // 名簿一覧の「フリガナ」列・カナ検索・(fe7 側の)五十音ソートを実データで確認できるようにする。
@@ -4377,6 +4471,9 @@ function createMembersStore() {
     member_e4: ["ふじた", "なおと"],
     member_e5: ["なかた", "さくら"],
     member_e6: ["にしむら", "たく"],
+    member_e7: ["むらかみ", "ちひろ"],
+    member_e8: ["もりもと", "ようた"],
+    member_e9: ["はせがわ", "ゆい"],
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };
