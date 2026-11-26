@@ -69,3 +69,14 @@ export function orgChartOrder(members: readonly OrgMember[]): OrgMember[] {
   for (const m of rest) out.push(m);
   return out;
 }
+
+/**
+ * 名簿の表示順(#873): 役職でまとめて オーガナイザー → リーダー → メンバー。
+ * 同じ役職の中は組織図順(チーム/リーダー配下のまとまり → sortOrder)を保つ安定ソート。
+ */
+export function rosterOrder(members: readonly OrgMember[]): OrgMember[] {
+  return orgChartOrder(members)
+    .map((m, i) => ({ m, i, t: TIER_RANK[tierOf(m)] }))
+    .sort((a, b) => a.t - b.t || a.i - b.i)
+    .map((x) => x.m);
+}
