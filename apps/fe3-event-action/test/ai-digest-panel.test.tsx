@@ -1,5 +1,6 @@
-// 「AI のまとめ」 panel (#879): release gate (admins only), 停止中 states (flag OFF /
-// Mac mini offline), cited lines + 食い違い banner, and the venue/capacity input parser.
+// 「AI のまとめ」 panel (#879): shown to every member, the chat closed with the 公開予定
+// notice, the flag-OFF preview (or the notice when there is nothing to show), 停止中 when
+// the Mac mini is offline, cited lines + 食い違い banner, and the venue/capacity parser.
 import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { event } from "@dub/types";
@@ -7,6 +8,7 @@ import { EventAiDigestPanel } from "../src/components/EventAiDigestPanel";
 import { parseCapacityInput } from "../src/components/EventEditForm";
 import { createMockEventApi } from "../src/api/mockData";
 import type { EventApi } from "../src/api/eventApi";
+import { AI_RELEASE_DATE_LABEL } from "../src/lib/aiDigestRelease";
 import { renderWithProviders, resetAuth, setAuth } from "./util";
 
 const ADMIN = ["identity:admin", "event:read", "event:write", "event:admin"] as const;
@@ -35,21 +37,56 @@ const DIGEST: event.EventDigest = {
 afterEach(() => resetAuth());
 
 describe("EventAiDigestPanel", () => {
-  it("is hidden from non-admin members while unreleased", () => {
-    setAuth(["event:read", "event:write"]);
-    renderWithProviders(<EventAiDigestPanel eventId="evt_1" canRun={false} />, {
-      api: apiWith({ enabled: true, provider: { id: "fake", status: "online" }, digest: DIGEST }),
-    });
-    expect(screen.queryByTestId("fe3-ai-digest")).toBeNull();
+  const MEMBER = ["event:read", "event:write"] as const;
+  const PREVIEW: event.EventDigestPreview = {
+    lines: [
+      { text: "イベント「北陸ITカンファレンス」・定員 300人", source: "event", link: "/events?eventId=evt_1" },
+      { text: "アクション「会場予約」", source: "actions", link: "/events/evt_1" },
+    ],
+    discrepancies: [{ field: "capacity", eventValue: "300", sourceValue: "250", source: "event", link: "/events?eventId=evt_1" }],
+    collectedAt: "2026-11-26T00:00:00.000Z",
+  };
+  const OFF = { enabled: false, provider: { id: "offline", status: "disabled" as const }, digest: null };
+
+  it("a member sees the panel and the chat; the chat cannot be sent and shows the 公開予定 notice", async () => {
+    setAuth([...MEMBER]);
+    renderWithProviders(<EventAiDigestPanel eventId="evt_1" canRun={false} />, { api: apiWith({ ...OFF, preview: PREVIEW }) });
+    expect(screen.getByTestId("fe3-ai-digest")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("fe3-ai-ask")).toBeTruthy());
+    expect(screen.getByTestId("fe3-ai-chat-unavailable").textContent).toBe(`現在は利用できません。${AI_RELEASE_DATE_LABEL} 公開予定です。`);
+    expect(AI_RELEASE_DATE_LABEL).toBe("12/3");
+    const input = screen.getByTestId("fe3-ai-ask-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "会場は？" } });
+    expect((screen.getByTestId("fe3-ai-ask-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId("fe3-ai-run")).toBeNull();
   });
 
-  it("shows a skeleton first, then 停止中 when the feature flag is OFF (run + ask disabled)", async () => {
+  it("flag OFF with a preview: shows the event's own lines + 食い違い, no AI badge, no 停止中", async () => {
+    setAuth([...MEMBER]);
+    renderWithProviders(<EventAiDigestPanel eventId="evt_1" canRun={false} />, { api: apiWith({ ...OFF, preview: PREVIEW }) });
+    await waitFor(() => expect(screen.getByTestId("fe3-ai-preview-lines")).toBeTruthy());
+    expect(screen.getByTestId("fe3-ai-discrepancy").textContent).toContain("250");
+    expect(screen.getByTestId("fe3-ai-preview-meta").textContent).toContain("12/3 公開予定です。");
+    expect(screen.queryByTestId("fe3-ai-stopped")).toBeNull();
+    expect(screen.queryByTestId("fe3-ai-digest-coming-soon")).toBeNull();
+    expect(screen.queryByText("AI が作った要約です")).toBeNull();
+  });
+
+  it("flag OFF with nothing to show: the まとめ欄 shows the same 公開予定 notice", async () => {
+    setAuth([...MEMBER]);
+    renderWithProviders(<EventAiDigestPanel eventId="evt_1" canRun={false} />, { api: apiWith(OFF) });
+    await waitFor(() => expect(screen.getByTestId("fe3-ai-digest-coming-soon")).toBeTruthy());
+    expect(screen.getByTestId("fe3-ai-digest-coming-soon").textContent).toContain("現在は利用できません。12/3 公開予定です。");
+  });
+
+  it("admin: skeleton first, then flag OFF keeps 今すぐ要約 and the chat disabled", async () => {
     setAuth([...ADMIN]);
     renderWithProviders(<EventAiDigestPanel eventId="evt_1" canRun />, {
       api: apiWith({ enabled: false, provider: { id: "local:mac-mini", status: "disabled" }, digest: null }),
     });
     expect(screen.getByTestId("fe3-ai-skeleton")).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId("fe3-ai-stopped").textContent).toContain("停止中"));
+    await waitFor(() => expect(screen.getByTestId("fe3-ai-digest-coming-soon")).toBeTruthy());
     expect((screen.getByTestId("fe3-ai-run") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId("fe3-ai-ask-submit") as HTMLButtonElement).disabled).toBe(true);
   });
@@ -77,17 +114,14 @@ describe("EventAiDigestPanel", () => {
     expect(ext.getAttribute("target")).toBe("_blank");
   });
 
-  it("an online ask that the server reports offline shows 停止中 instead of an answer", async () => {
+  it("canRun=false hides 今すぐ要約 even with a digest", async () => {
     setAuth([...ADMIN]);
     renderWithProviders(<EventAiDigestPanel eventId="evt_1" canRun={false} />, {
       api: apiWith({ enabled: true, provider: { id: "fake", status: "online" }, digest: DIGEST }),
     });
     await waitFor(() => expect(screen.getByTestId("fe3-ai-lines")).toBeTruthy());
-    expect(screen.queryByTestId("fe3-ai-run")).toBeNull(); // canRun=false: no 今すぐ要約
-    fireEvent.change(screen.getByTestId("fe3-ai-ask-input"), { target: { value: "会場は？" } });
-    fireEvent.click(screen.getByTestId("fe3-ai-ask-submit"));
-    await waitFor(() => expect(screen.getByTestId("fe3-ai-stopped")).toBeTruthy());
-    expect(screen.queryByTestId("fe3-ai-answer")).toBeNull();
+    expect(screen.queryByTestId("fe3-ai-run")).toBeNull();
+    expect((screen.getByTestId("fe3-ai-ask-submit") as HTMLButtonElement).disabled).toBe(true);
   });
 });
 

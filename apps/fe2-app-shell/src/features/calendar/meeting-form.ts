@@ -47,6 +47,13 @@ export function emptyMeetingForm(now: Date = new Date()): MeetingFormValues {
   };
 }
 
+/** 作成 > ミーティング tab: the defaults of the former 「ミーティングを設定」 (全体, 21:00, 60 min,
+ *  毎週), keeping the title and the day already chosen in the dialog. */
+export function meetingFormForTab(d: { title: string; startDate: string }): MeetingFormValues {
+  const base = emptyMeetingForm();
+  return { ...base, title: d.title.trim().slice(0, TITLE_MAX), date: d.startDate || base.date };
+}
+
 /** A repeating 予定 from the 作成 dialog, carried into the meeting form. A role label that is a
  *  meeting target becomes the target (else 全体); the length snaps to the nearest 所要時間 option. */
 export function meetingFormFromDraft(

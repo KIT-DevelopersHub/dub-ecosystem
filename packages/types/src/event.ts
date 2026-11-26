@@ -195,10 +195,22 @@ export interface EventDigest {
 /** disabled = feature flag off; offline = provider (Mac mini) not connected. */
 export type EventAiProviderStatus = "disabled" | "offline" | "online";
 
+/**
+ * What can be shown without any LLM while the digest is OFF: the event's own facts and
+ * actions as cited lines, plus deterministic 食い違い. Built on read, never stored.
+ */
+export interface EventDigestPreview {
+  lines: EventDigestLine[];
+  discrepancies: EventDigestDiscrepancy[];
+  collectedAt: ISODateTime;
+}
+
 export interface GetEventDigestResponse {
   enabled: boolean;
   provider: { id: string; status: EventAiProviderStatus };
   digest: EventDigest | null;
+  /** Present while enabled=false (no LLM involved). Absent/null otherwise. */
+  preview?: EventDigestPreview | null;
 }
 
 export interface RunEventDigestResponse {

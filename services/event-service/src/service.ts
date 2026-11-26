@@ -24,7 +24,9 @@ import type {
   Keyset,
 } from "./types";
 import { ProviderOfflineError } from "./digest/types";
-import { collectAll, runDigest } from "./digest/runner";
+import { collectAll, eventFacts, MAX_DIGEST_LINES, runDigest } from "./digest/runner";
+import { mapActions, mapEvent } from "./digest/collectors";
+import { findDiscrepancies } from "./digest/discrepancy";
 import {
   isValidPhaseTransition,
   phaseTransitionNeedsAdmin,
@@ -446,13 +448,32 @@ export class EventService {
   }
 
   async getEventDigest(_ctx: ReqCtx, id: common.EventId): Promise<event.GetEventDigestResponse> {
-    await this.loadEvent(id);
+    const ev = await this.loadEvent(id);
     const d = this.digestOn();
     if (!d) {
-      return { enabled: false, provider: { id: this.deps.digest?.provider.id ?? "none", status: "disabled" }, digest: null };
+      return {
+        enabled: false,
+        provider: { id: this.deps.digest?.provider.id ?? "none", status: "disabled" },
+        digest: null,
+        preview: await this.digestPreview(ev),
+      };
     }
     const [status, digest] = await Promise.all([d.provider.status(), d.repo.getDigest(id)]);
     return { enabled: true, provider: { id: d.provider.id, status }, digest };
+  }
+
+  /** Flag OFF: the event's own rows only (no remote collectors, no LLM, no write). */
+  private async digestPreview(ev: EventRow): Promise<event.EventDigestPreview> {
+    const actions = await this.deps.repo.actionsForEvent(ev.id, INCLUDE_ACTIONS_CAP);
+    const details = (await this.deps.repo.getEventDetails(ev.id))?.data ?? null;
+    const snaps = [mapEvent(ev, details), mapActions(ev.id, actions)];
+    return {
+      lines: snaps
+        .flatMap((s) => s.items.map((i) => ({ text: i.text, source: i.source, link: i.link })))
+        .slice(0, MAX_DIGEST_LINES),
+      discrepancies: findDiscrepancies(eventFacts(ev), snaps),
+      collectedAt: this.deps.now(),
+    };
   }
 
   /** 「今すぐ要約」 (admin) and the DO alarm. `userId` is whose read permissions the collectors carry. */

@@ -71,7 +71,7 @@ export const EVENT: AreaSpec = {
       service: S,
       requires: VIEW,
       description: "イベントの AI のまとめ（出典リンクつき）と食い違いを取得する",
-      hint: "{ enabled, provider{id,status}, digest{lines[]{text,source,link}, discrepancies[], model, generatedAt} | null }。enabled=false は機能停止中",
+      hint: "{ enabled, provider{id,status}, digest{lines[]{text,source,link}, discrepancies[], model, generatedAt} | null, preview?{lines[], discrepancies[], collectedAt} }。enabled=false は機能停止中(preview は LLM なしでイベント自身から集めた情報)",
     }),
     read({
       id: "events.actions.list",
