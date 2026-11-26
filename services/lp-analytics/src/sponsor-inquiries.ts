@@ -2,13 +2,15 @@
 // 入力の決まりと HTTP 契約は @dub/types lpSponsor が正本（LP Worker と fe2 も同じものを読む）。
 //
 // 通知は受付の後に best-effort で送る（届かなくても受付は成功・届いた先は notified_via に残す）:
-//  - Dub チャット: LP管理で選んだチャンネルに chat-service のシステムメッセージで流す（SVC_CHAT）。
-//  - メール: LP管理のスポンサーチームのアドレス、無ければ LP_SPONSOR_NOTIFY_EMAIL（mail-gateway /send）。
+//  - Dub 通知: app:sponsor:edit を持つ人（ロール管理で決まる）の受信箱へ。notification-service
+//    POST /notify（SVC_NOTIFICATION）。push は受信箱の通知に自動で付き、メールは各自の通知設定で on にした人だけ。
+//  - メール（任意）: LP管理のスポンサーチームのアドレス、無ければ LP_SPONSOR_NOTIFY_EMAIL（mail-gateway /send）。
+//    Dub のアカウントを持たない共有アドレス（sponsor@ など）向け。
 // 依頼者への受付メールは入力された文字列を一切入れない（公開フォームを第三者宛ての踏み台にさせない）。
 import type { Fetcher } from "@cloudflare/workers-types";
 import { errors } from "@dub/errors";
 import { createServiceClient } from "@dub/http";
-import { lp, lpSponsor, type mail } from "@dub/types";
+import { lp, lpSponsor, type mail, type notification } from "@dub/types";
 import type { ReqCtx } from "./types";
 
 export const SPONSOR_SITE = lp.LP_PUBLISH_SITE;
@@ -24,7 +26,6 @@ const SIGNATURE = "北陸ITカンファレンス スポンサーチーム（Deve
 export interface SponsorSettingsRow {
   site: string;
   enabled: boolean;
-  notifyChannelId: string | null;
   notifyEmail: string | null;
   updatedBy: string | null;
   updatedAt: string;
@@ -53,12 +54,13 @@ export interface SponsorInquiryRepo {
 
 /** スポンサーチームへの通知と受付メールの送り口。どれも throw しない（false = 届かなかった）。 */
 export interface SponsorNotifier {
-  postToChannel(requestId: string, channelId: string, body: string): Promise<boolean>;
+  /** Dub 通知（受信箱 + push）。 */
+  notifyApp(requestId: string, req: notification.NotifyRequest): Promise<boolean>;
   sendMail(requestId: string, m: { to: string; subject: string; textBody: string }, idempotencyKey: string): Promise<boolean>;
 }
 
 export const NOOP_SPONSOR_NOTIFIER: SponsorNotifier = {
-  postToChannel: async () => false,
+  notifyApp: async () => false,
   sendMail: async () => false,
 };
 
@@ -75,7 +77,7 @@ export interface SponsorDeps {
 
 // ---- 文面（純粋関数） ----
 
-/** スポンサーチーム向け（チャット / メール共通）。社内宛てなので入力をそのまま載せる。 */
+/** スポンサーチーム向けのメール本文。社内宛てなので入力をそのまま載せる。 */
 export function renderTeamNotice(i: lpSponsor.LpSponsorInquiryInput): string {
   return [
     "スポンサーに興味があるという連絡が LP から届きました。",
@@ -107,6 +109,32 @@ export function renderAckMail(email: string): { to: string; subject: string; tex
   };
 }
 
+export const SPONSOR_NOTIFY_TITLE = "スポンサーの資料請求が届きました";
+const NOTIFY_MESSAGE_HEAD = 200;
+
+/** Dub 通知（受信箱）。本文は 会社名・担当者名・メール・ひとこと（先頭のみ）。 */
+export function buildSponsorAppNotify(id: string, i: lpSponsor.LpSponsorInquiryInput): notification.NotifyRequest {
+  const message = i.message.length > NOTIFY_MESSAGE_HEAD ? `${i.message.slice(0, NOTIFY_MESSAGE_HEAD)}…` : i.message;
+  return {
+    type: lpSponsor.LP_SPONSOR_NOTIFY_TYPE,
+    recipientIds: [],
+    recipientPermissions: [lpSponsor.LP_SPONSOR_NOTIFY_PERMISSION],
+    title: SPONSOR_NOTIFY_TITLE,
+    body: [
+      `会社名: ${i.companyName || "（未記入）"}`,
+      `担当者名: ${i.contactName || "（未記入）"}`,
+      `メールアドレス: ${i.email}`,
+      `ひとこと: ${message || "（未記入）"}`,
+    ].join("\n"),
+    // in_app（push は自動で付く）+ email（既定 off・各自の通知設定で on にできる）。
+    channels: ["in_app", "email"],
+    dedupKey: `lp.sponsor_inquiry:${id}`,
+    // fe5 がこの組を LP管理 > スポンサー募集（/lp/sponsors）へのリンクにする。
+    resourceType: "lp_sponsor_inquiry",
+    resourceId: id,
+  };
+}
+
 export function sponsorCursor(p: { createdAt: string; id: string }): string {
   return `${p.createdAt}~${p.id}`;
 }
@@ -134,7 +162,6 @@ export class SponsorInquiryService {
       site: SPONSOR_SITE,
       enabled: s?.enabled ?? false,
       publicUrl: `${this.deps.lpBaseUrl.replace(/\/+$/, "")}/sponsors`,
-      notifyChannelId: s?.notifyChannelId ?? null,
       notifyEmail: s?.notifyEmail ?? null,
       defaultNotifyEmail: this.deps.defaultNotifyEmail,
       totals,
@@ -227,8 +254,8 @@ export class SponsorInquiryService {
     const notice = renderTeamNotice(input);
     const { notifier } = this.deps;
     const teamEmail = settings.notifyEmail ?? this.deps.defaultNotifyEmail;
-    const [chat, team] = await Promise.all([
-      settings.notifyChannelId ? notifier.postToChannel(requestId, settings.notifyChannelId, notice) : Promise.resolve(false),
+    const [app, team] = await Promise.all([
+      notifier.notifyApp(requestId, buildSponsorAppNotify(row.id, input)),
       teamEmail
         ? notifier.sendMail(
             requestId,
@@ -238,7 +265,7 @@ export class SponsorInquiryService {
         : Promise.resolve(false),
       notifier.sendMail(requestId, renderAckMail(input.email), `lp-sponsor-ack:${row.id}`),
     ]);
-    const via = chat && team ? "both" : chat ? "chat" : team ? "mail" : "none";
+    const via = app && team ? "both" : app ? "app" : team ? "mail" : "none";
     if (via !== "none") await this.repo.setSponsorInquiryNotified(SPONSOR_SITE, row.id, via);
     if (via === "none") console.warn(JSON.stringify({ level: "warn", message: "lp sponsor inquiry not notified", id: row.id }));
     return { id: row.id };
@@ -246,14 +273,21 @@ export class SponsorInquiryService {
 }
 
 /** Service Binding 経由の送り口。mail-gateway /send はユーザー無しのシステム送信として呼ぶ。 */
-export function createSponsorNotifier(chat: Fetcher | undefined, mailGateway: Fetcher | undefined): SponsorNotifier {
-  const chatClient = chat ? createServiceClient(chat, { service: "chat-service", caller: "lp-analytics" }) : null;
+export function createSponsorNotifier(notificationSvc: Fetcher | undefined, mailGateway: Fetcher | undefined): SponsorNotifier {
+  const notifyClient = notificationSvc
+    ? createServiceClient(notificationSvc, { service: "notification", caller: "lp-analytics" })
+    : null;
   const mailClient = mailGateway ? createServiceClient(mailGateway, { service: "mail-gateway", caller: "lp-analytics" }) : null;
   return {
-    async postToChannel(requestId, channelId, body) {
-      if (!chatClient) return false;
+    async notifyApp(requestId, req) {
+      if (!notifyClient) return false;
       try {
-        await chatClient.post({ requestId }, "/internal/system-messages", { channelId, body, meta: { source: "lp-sponsor-inquiry" } });
+        await notifyClient.post<{ notificationId: string; deduplicated: boolean }, notification.NotifyRequest>(
+          { requestId },
+          "/notify",
+          req,
+          { timeoutMs: 12_000, retry: false },
+        );
         return true;
       } catch {
         return false;

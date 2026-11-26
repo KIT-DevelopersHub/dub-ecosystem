@@ -48,7 +48,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
       lpBaseUrl: env.LP_BASE_URL ?? DEFAULT_LP_BASE_URL,
       now: nowIso,
       newId: () => newId("lps"),
-      notifier: createSponsorNotifier(env.SVC_CHAT, env.SVC_MAIL),
+      notifier: createSponsorNotifier(env.SVC_NOTIFICATION, env.SVC_MAIL),
       defaultNotifyEmail: env.LP_SPONSOR_NOTIFY_EMAIL?.trim() || null,
       dailyCap: Number(env.LP_DAILY_SPONSOR_CAP) > 0 ? Number(env.LP_DAILY_SPONSOR_CAP) : DEFAULT_DAILY_SPONSOR_CAP,
     },

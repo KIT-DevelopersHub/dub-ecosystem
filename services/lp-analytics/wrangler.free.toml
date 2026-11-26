@@ -28,10 +28,10 @@ service = "dub-identity-roster"   # POST /authz/check (app:lp:view / app:lp:edit
 binding = "SVC_LP_TICKETS"
 service = "dub-lp-tickets"        # 公開設定の release のうちチケット販売の 2 項目の正本
 
-# スポンサー募集（/sponsors の資料請求）の通知: Dub チャットのチャンネルへ投稿・スポンサーチームと依頼者へメール。
+# スポンサー募集（/sponsors の資料請求）の通知: Dub 通知（app:sponsor:edit を持つ人）・スポンサーチームと依頼者へメール。
 [[services]]
-binding = "SVC_CHAT"
-service = "dub-chat-service"
+binding = "SVC_NOTIFICATION"
+service = "dub-notification-service"
 
 [[services]]
 binding = "SVC_MAIL"

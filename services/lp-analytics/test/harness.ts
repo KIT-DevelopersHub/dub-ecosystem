@@ -3,7 +3,7 @@
 import type { MiddlewareHandler } from "hono";
 import { DubError, CommonErrorCodes } from "@dub/errors";
 import { createDbClient } from "@dub/db";
-import type { identity } from "@dub/types";
+import type { identity, notification } from "@dub/types";
 import { policy } from "@dub/types";
 import { memoryD1 } from "../../../infra/d1/src/node-d1";
 import { applyAll } from "../../../infra/d1/src/apply";
@@ -37,21 +37,21 @@ export async function makeRepos(kind: RepoKind): Promise<{ repo: LpRepo; sponsor
   return { repo: createD1LpRepo(client), sponsorRepo: sponsorInquiryRepo(client) };
 }
 
-/** Records every chat post / mail instead of sending. `fail` makes that channel report undelivered. */
+/** Records every Dub notification / mail instead of sending. `fail` makes that channel report undelivered. */
 export interface FakeSponsorNotifier extends SponsorNotifier {
-  posts: { channelId: string; body: string }[];
+  notifies: notification.NotifyRequest[];
   mails: { to: string; subject: string; textBody: string; key: string }[];
-  fail: { chat: boolean; mail: boolean };
+  fail: { app: boolean; mail: boolean };
 }
 
 export function fakeSponsorNotifier(): FakeSponsorNotifier {
   const f: FakeSponsorNotifier = {
-    posts: [],
+    notifies: [],
     mails: [],
-    fail: { chat: false, mail: false },
-    async postToChannel(_rid, channelId, body) {
-      if (f.fail.chat) return false;
-      f.posts.push({ channelId, body });
+    fail: { app: false, mail: false },
+    async notifyApp(_rid, req) {
+      if (f.fail.app) return false;
+      f.notifies.push(req);
       return true;
     },
     async sendMail(_rid, m, key) {

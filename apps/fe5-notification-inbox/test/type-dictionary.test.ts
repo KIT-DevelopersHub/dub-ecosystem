@@ -46,6 +46,14 @@ describe("resolveCategory (server type -> tab category)", () => {
     expect(resolveCategory("member.participation.submitted")).toBe("participation");
   });
 
+  it("maps the LP sponsor inquiry to スポンサー with a Japanese label", () => {
+    expect(resolveCategory("lp.sponsor_inquiry")).toBe("sponsor");
+    expect(matchesCategoryFilter("lp.sponsor_inquiry", "sponsor")).toBe(true);
+    const d = resolveTypeDisplay("lp.sponsor_inquiry");
+    expect(d.known).toBe(true);
+    expect(d.label).toBe("スポンサーの資料請求");
+  });
+
   it("maps mail.* to メール", () => {
     expect(resolveCategory("mail.message.received")).toBe("mail");
     expect(resolveCategory("mail.message.sent")).toBe("mail");

@@ -23,10 +23,10 @@ service = "identity-roster"
 binding = "SVC_LP_TICKETS"
 service = "lp-tickets"
 
-# スポンサー募集（/sponsors の資料請求）の通知: Dub チャットのチャンネルへ投稿・スポンサーチームと依頼者へメール。
+# スポンサー募集（/sponsors の資料請求）の通知: Dub 通知（app:sponsor:edit を持つ人）・スポンサーチームと依頼者へメール。
 [[services]]
-binding = "SVC_CHAT"
-service = "chat-service"
+binding = "SVC_NOTIFICATION"
+service = "notification"
 
 [[services]]
 binding = "SVC_MAIL"

@@ -14,14 +14,13 @@ function problem(code: string, message: string, status: number): Response {
 export function createDemoLpSponsorStore(lpPublicUrl: string) {
   const settings = {
     enabled: false,
-    notifyChannelId: null as string | null,
     notifyEmail: null as string | null,
     updatedAt: null as string | null,
     updatedBy: null as string | null,
   };
   const seed: [string, string, string, string, lpSponsor.LpSponsorInquiryStatus, Item["notifiedVia"], string][] = [
     ["株式会社カナザワソフト", "金沢 花子", "hanako@example.jp", "ゴールドプランの詳細を知りたいです。", "new", "both", "2026-11-20T02:10:00Z"],
-    ["", "", "info@example.jp", "", "new", "mail", "2026-11-19T08:30:00Z"],
+    ["", "", "info@example.jp", "", "new", "app", "2026-11-19T08:30:00Z"],
     ["北陸クラウド株式会社", "富山 次郎", "jiro@example.jp", "ブース出展は可能でしょうか。", "sent", "both", "2026-11-15T05:00:00Z"],
   ];
   const items: Item[] = seed.map(([companyName, contactName, email, message, status, notifiedVia, createdAt], i) => ({

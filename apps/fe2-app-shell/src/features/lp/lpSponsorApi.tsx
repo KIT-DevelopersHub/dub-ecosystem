@@ -11,7 +11,7 @@ export interface LpSponsorApi {
   get(): Promise<lpSponsor.LpSponsorInquiriesState>;
   /** 公開/停止 (app:lp:edit + lp:publish)。 */
   setEnabled(input: { enabled: boolean }): Promise<lpSponsor.LpSponsorInquiriesState>;
-  /** 通知先（Dub チャットのチャンネル・スポンサーチームのメール）(app:lp:edit + lp:publish)。 */
+  /** 追加の通知メール（スポンサーチームの共有アドレス）(app:lp:edit + lp:publish)。 */
   setNotify(input: lpSponsor.LpSponsorNotifyInput): Promise<lpSponsor.LpSponsorInquiriesState>;
   /** 資料請求の一覧・新しい順 (app:lp:edit = 個人情報)。 */
   list(query: { cursor?: string; limit?: number }): Promise<lpSponsor.LpSponsorInquiriesPage>;

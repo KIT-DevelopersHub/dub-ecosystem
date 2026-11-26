@@ -18,7 +18,7 @@ export interface InboxFilter {
 
 export const EMPTY_FILTER: InboxFilter = { unreadOnly: false, category: "all", type: "" };
 
-const CATEGORY_VALUES: CategoryFilter[] = ["all", "app_update", "mail", "participation", "feedback", "other"];
+const CATEGORY_VALUES: CategoryFilter[] = ["all", "app_update", "mail", "participation", "sponsor", "feedback", "other"];
 
 function parseCategory(raw: string | null): CategoryFilter {
   return raw !== null && (CATEGORY_VALUES as string[]).includes(raw) ? (raw as CategoryFilter) : "all";

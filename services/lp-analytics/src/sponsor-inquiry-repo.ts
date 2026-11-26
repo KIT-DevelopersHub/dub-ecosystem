@@ -44,7 +44,6 @@ export function sponsorInquiryRepo(db: DbClient): SponsorInquiryRepo {
       const r = await db.first<{
         site: string;
         enabled: number;
-        notify_channel_id: string | null;
         notify_email: string | null;
         updated_by: string | null;
         updated_at: string;
@@ -53,7 +52,6 @@ export function sponsorInquiryRepo(db: DbClient): SponsorInquiryRepo {
         ? {
             site: r.site,
             enabled: r.enabled === 1,
-            notifyChannelId: r.notify_channel_id,
             notifyEmail: r.notify_email,
             updatedBy: r.updated_by,
             updatedAt: r.updated_at,
@@ -72,11 +70,10 @@ export function sponsorInquiryRepo(db: DbClient): SponsorInquiryRepo {
     },
     async setSponsorNotify(site, n, updatedBy, updatedAt) {
       await db.run(
-        `INSERT INTO lp_sponsor_inquiry_settings (site, notify_channel_id, notify_email, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(site) DO UPDATE SET notify_channel_id = excluded.notify_channel_id, notify_email = excluded.notify_email,
+        `INSERT INTO lp_sponsor_inquiry_settings (site, notify_email, updated_by, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(site) DO UPDATE SET notify_email = excluded.notify_email,
            updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
         site,
-        n.notifyChannelId,
         n.notifyEmail,
         updatedBy,
         updatedAt,
@@ -162,7 +159,7 @@ export function memorySponsorInquiryRepo(): SponsorInquiryRepo & { sponsorInquir
   const settings = new Map<string, SponsorSettingsRow>();
   const rows: SponsorInquiryRow[] = [];
   const upsert = (site: string, patch: Partial<SponsorSettingsRow>, updatedBy: string, updatedAt: string) => {
-    const cur = settings.get(site) ?? { site, enabled: false, notifyChannelId: null, notifyEmail: null, updatedBy: null, updatedAt };
+    const cur = settings.get(site) ?? { site, enabled: false, notifyEmail: null, updatedBy: null, updatedAt };
     settings.set(site, { ...cur, ...patch, updatedBy, updatedAt });
   };
   const key = (p: SponsorInquiryRow) => `${p.createdAt}~${p.id}`;
@@ -176,7 +173,7 @@ export function memorySponsorInquiryRepo(): SponsorInquiryRepo & { sponsorInquir
       upsert(site, { enabled }, by, at);
     },
     async setSponsorNotify(site, n, by, at) {
-      upsert(site, { notifyChannelId: n.notifyChannelId, notifyEmail: n.notifyEmail }, by, at);
+      upsert(site, { notifyEmail: n.notifyEmail }, by, at);
     },
     async insertSponsorInquiry(row) {
       rows.push({ ...row });

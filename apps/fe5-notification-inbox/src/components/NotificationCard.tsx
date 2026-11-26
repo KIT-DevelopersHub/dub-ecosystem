@@ -46,6 +46,8 @@ export function itemLinkUrl(item: InboxItem): string | null {
       return `/files/${item.resourceId}`;
     case "channel": // chat.mention / chat.dm (resourceId = channelId, fe6-chat's own segment name)
       return `/chat/channels/${item.resourceId}`;
+    case "lp_sponsor_inquiry": // LP の資料請求 (lp-analytics) → LP管理 > スポンサー募集の一覧
+      return "/lp/sponsors";
     default:
       return null;
   }

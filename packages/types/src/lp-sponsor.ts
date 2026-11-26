@@ -6,8 +6,10 @@ export const LP_SPONSOR_COMPANY_MAX = 100;
 export const LP_SPONSOR_NAME_MAX = 100;
 export const LP_SPONSOR_EMAIL_MAX = 254;
 export const LP_SPONSOR_MESSAGE_MAX = 1000;
-/** Dub チャットのチャンネル id（chat-service の newId("chn")）。 */
-export const LP_SPONSOR_CHANNEL_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+/** 資料請求の Dub 通知（notification-service）の type。通知設定でこの type ごとにミュートできる。 */
+export const LP_SPONSOR_NOTIFY_TYPE = "lp.sponsor_inquiry";
+/** 通知を受け取る人 = この権限を持つ人（ロール管理で「スポンサー」アプリの編集を持つロール）。 */
+export const LP_SPONSOR_NOTIFY_PERMISSION = "app:sponsor:edit";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** new = 未対応 / sent = 資料送付済み / closed = 対応終了。 */
@@ -21,9 +23,7 @@ export interface LpSponsorInquiriesState {
   enabled: boolean;
   /** LP_BASE_URL + "/sponsors" */
   publicUrl: string;
-  /** 通知を流す Dub チャットのチャンネル id。null = チャットには流さない。 */
-  notifyChannelId: string | null;
-  /** 通知を送るスポンサーチームのメール。null = 環境の既定（LP_SPONSOR_NOTIFY_EMAIL）を使う。 */
+  /** 通知を送るスポンサーチームのメール（Dub 通知に加えて送る・任意）。null = 環境の既定（LP_SPONSOR_NOTIFY_EMAIL）を使う。 */
   notifyEmail: string | null;
   /** notifyEmail が null のときに使われる環境の既定（未設定なら null）。 */
   defaultNotifyEmail: string | null;
@@ -34,7 +34,6 @@ export interface LpSponsorInquiriesState {
 
 /** POST /lp/sponsor-inquiries/notify（LP管理）。空文字 / null = 解除。 */
 export interface LpSponsorNotifyInput {
-  notifyChannelId: string | null;
   notifyEmail: string | null;
 }
 
@@ -45,8 +44,8 @@ export interface LpSponsorInquiry {
   email: string;
   message: string;
   status: LpSponsorInquiryStatus;
-  /** スポンサーチームへの通知: chat / mail / both / none（どこにも届かなかった）。 */
-  notifiedVia: "chat" | "mail" | "both" | "none";
+  /** スポンサーチームへの通知: app（Dub 通知）/ mail（チームのメール）/ both / none（どこにも届かなかった）。 */
+  notifiedVia: "app" | "mail" | "both" | "none";
   updatedBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -104,7 +103,6 @@ export function parseLpSponsorNotify(body: unknown): { input: LpSponsorNotifyInp
     if (!ok(v)) issues.push({ field: k, reason: "invalid" });
     return v;
   };
-  const notifyChannelId = opt("notifyChannelId", (v) => LP_SPONSOR_CHANNEL_ID_RE.test(v));
   const notifyEmail = opt("notifyEmail", (v) => v.length <= LP_SPONSOR_EMAIL_MAX && EMAIL_RE.test(v));
-  return { input: { notifyChannelId, notifyEmail }, issues };
+  return { input: { notifyEmail }, issues };
 }

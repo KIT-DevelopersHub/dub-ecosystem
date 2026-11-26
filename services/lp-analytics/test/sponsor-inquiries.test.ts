@@ -28,7 +28,6 @@ describe.each<RepoKind>(["memory", "d1"])("sponsor inquiries (%s)", (kind) => {
     expect(s).toMatchObject({
       enabled: false,
       publicUrl: "https://hokuriku-it-conf.com/sponsors",
-      notifyChannelId: null,
       notifyEmail: null,
       defaultNotifyEmail: "sponsor@example.com",
       totals: { total: 0, open: 0 },
@@ -40,7 +39,7 @@ describe.each<RepoKind>(["memory", "d1"])("sponsor inquiries (%s)", (kind) => {
   it("publishing and the notify target need lp:publish", async () => {
     const { app } = await setup(kind, { publish: false });
     expect((await app.fetch(send("POST", "/lp/sponsor-inquiries/enabled", { enabled: true }))).status).toBe(403);
-    expect((await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyChannelId: "chn_1", notifyEmail: null }))).status).toBe(403);
+    expect((await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyEmail: null }))).status).toBe(403);
   });
 
   it("viewers cannot read the list (personal data)", async () => {
@@ -49,30 +48,43 @@ describe.each<RepoKind>(["memory", "d1"])("sponsor inquiries (%s)", (kind) => {
     expect((await app.fetch(get("/lp/sponsor-inquiries/items"))).status).toBe(403);
   });
 
-  it("validates the notify target; empty clears it", async () => {
+  it("validates the team email; empty clears it", async () => {
     const { app } = await setup(kind);
-    expect((await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyChannelId: "bad id!", notifyEmail: "x" }))).status).toBe(400);
+    expect((await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyEmail: "x" }))).status).toBe(400);
     const s = await body<lpSponsor.LpSponsorInquiriesState>(
-      await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyChannelId: "chn_sponsor", notifyEmail: "team@example.com" })),
+      await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyEmail: "team@example.com" })),
     );
-    expect(s).toMatchObject({ notifyChannelId: "chn_sponsor", notifyEmail: "team@example.com" });
+    expect(s).toMatchObject({ notifyEmail: "team@example.com" });
+    expect(s).not.toHaveProperty("notifyChannelId");
     const cleared = await body<lpSponsor.LpSponsorInquiriesState>(
-      await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyChannelId: "", notifyEmail: null })),
+      await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyEmail: "" })),
     );
-    expect(cleared).toMatchObject({ notifyChannelId: null, notifyEmail: null });
+    expect(cleared).toMatchObject({ notifyEmail: null });
   });
 
-  it("accepts an inquiry: saves it, posts to the channel, mails the team and acknowledges the requester", async () => {
+  it("accepts an inquiry: saves it, notifies app:sponsor:edit holders in Dub, mails the team and acknowledges the requester", async () => {
     const { app, sponsorNotifier } = await setup(kind);
     await open(app);
-    await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyChannelId: "chn_sponsor", notifyEmail: "team@example.com" }));
+    await app.fetch(send("POST", "/lp/sponsor-inquiries/notify", { notifyEmail: "team@example.com" }));
     const res = await app.fetch(submit({ ...VALID, clientKey: KEY }));
     expect(res.status).toBe(201);
+    const { id } = await body<{ id: string }>(res);
 
-    expect(sponsorNotifier.posts).toHaveLength(1);
-    expect(sponsorNotifier.posts[0]!.channelId).toBe("chn_sponsor");
-    expect(sponsorNotifier.posts[0]!.body).toContain("株式会社カナザワ");
-    expect(sponsorNotifier.posts[0]!.body).toContain("hanako@example.com");
+    expect(sponsorNotifier.notifies).toHaveLength(1);
+    const n = sponsorNotifier.notifies[0]!;
+    expect(n).toMatchObject({
+      type: "lp.sponsor_inquiry",
+      recipientIds: [],
+      recipientPermissions: ["app:sponsor:edit"],
+      title: "スポンサーの資料請求が届きました",
+      dedupKey: `lp.sponsor_inquiry:${id}`,
+      resourceType: "lp_sponsor_inquiry",
+      resourceId: id,
+    });
+    expect(n.body).toContain("会社名: 株式会社カナザワ");
+    expect(n.body).toContain("担当者名: 金沢 花子");
+    expect(n.body).toContain("メールアドレス: hanako@example.com");
+    expect(n.body).toContain("ひとこと: 資料をください");
     const team = sponsorNotifier.mails.find((m) => m.to === "team@example.com")!;
     expect(team.subject).toContain("株式会社カナザワ");
     const ack = sponsorNotifier.mails.find((m) => m.to === "hanako@example.com")!;
@@ -93,16 +105,28 @@ describe.each<RepoKind>(["memory", "d1"])("sponsor inquiries (%s)", (kind) => {
     expect((await app.fetch(submit({ email: "" }))).status).toBe(400);
     expect((await app.fetch(submit({ email: "not-mail" }))).status).toBe(400);
     expect((await app.fetch(submit({ email: "a@example.com" }))).status).toBe(201);
-    expect(sponsorNotifier.posts).toHaveLength(0);
+    expect(sponsorNotifier.notifies[0]!.body).toContain("会社名: （未記入）");
     expect(sponsorNotifier.mails.map((m) => m.to).sort()).toEqual(["a@example.com", "sponsor@example.com"]);
     const page = await body<lpSponsor.LpSponsorInquiriesPage>(await app.fetch(get("/lp/sponsor-inquiries/items")));
-    expect(page.items[0]).toMatchObject({ companyName: "", contactName: "", message: "", notifiedVia: "mail" });
+    expect(page.items[0]).toMatchObject({ companyName: "", contactName: "", message: "", notifiedVia: "both" });
+  });
+
+  it("records app / mail separately and cuts a long message in the Dub notification", async () => {
+    const { app, sponsorNotifier } = await setup(kind);
+    await open(app);
+    sponsorNotifier.fail = { app: false, mail: true };
+    expect((await app.fetch(submit({ ...VALID, message: "あ".repeat(500) }))).status).toBe(201);
+    expect(sponsorNotifier.notifies[0]!.body).toContain(`ひとこと: ${"あ".repeat(200)}…`);
+    sponsorNotifier.fail = { app: true, mail: false };
+    expect((await app.fetch(submit(VALID))).status).toBe(201);
+    const page = await body<lpSponsor.LpSponsorInquiriesPage>(await app.fetch(get("/lp/sponsor-inquiries/items")));
+    expect(page.items.map((i) => i.notifiedVia).sort()).toEqual(["app", "mail"]);
   });
 
   it("keeps the inquiry when nothing could be delivered (notifiedVia none)", async () => {
     const { app, sponsorNotifier } = await setup(kind);
     await open(app);
-    sponsorNotifier.fail = { chat: true, mail: true };
+    sponsorNotifier.fail = { app: true, mail: true };
     expect((await app.fetch(submit(VALID))).status).toBe(201);
     const page = await body<lpSponsor.LpSponsorInquiriesPage>(await app.fetch(get("/lp/sponsor-inquiries/items")));
     expect(page.items[0]!.notifiedVia).toBe("none");

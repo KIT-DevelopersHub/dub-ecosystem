@@ -1,5 +1,5 @@
 // LP管理 → スポンサー募集。LP の JOIN スポンサーカード → /sponsors（資料請求フォーム）の公開を切り替え、
-// 資料請求の通知先（Dub チャットのチャンネル / スポンサーチームのメール）を決め、届いた請求の対応状況を付ける。
+// 資料請求の通知（Dub 通知は app:sponsor:edit を持つ人へ固定・追加のメールは任意）を決め、届いた請求の対応状況を付ける。
 //
 // 設計メモ:
 //  - 公開 on/off と通知先は lp:publish（サーバーの表で判定。持っていなければ 403 のトーストで戻る）。
@@ -41,9 +41,9 @@ type Status = lpSponsor.LpSponsorInquiryStatus;
 export const SPONSOR_STATUS_LABELS: Record<Status, string> = { new: "未対応", sent: "資料送付済み", closed: "対応終了" };
 const STATUS_OPTIONS = (Object.keys(SPONSOR_STATUS_LABELS) as Status[]).map((v) => ({ value: v, label: SPONSOR_STATUS_LABELS[v] }));
 const NOTIFIED_LABELS: Record<lpSponsor.LpSponsorInquiry["notifiedVia"], string> = {
-  both: "チャット・メールに通知済み",
-  chat: "チャットに通知済み",
-  mail: "メールに通知済み",
+  both: "Dub 通知・メールで通知済み",
+  app: "Dub 通知で通知済み",
+  mail: "メールで通知済み",
   none: "通知が届いていません",
 };
 
@@ -146,53 +146,32 @@ function StatusCard({ state, canEdit }: { state: State; canEdit: boolean }): JSX
   );
 }
 
-const CHANNEL_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function NotifyCard({ state, canEdit }: { state: State; canEdit: boolean }): JSX.Element {
   const save = useSetSponsorNotify();
-  const [channel, setChannel] = useState(state.notifyChannelId ?? "");
   const [email, setEmail] = useState(state.notifyEmail ?? "");
-  useEffect(() => setChannel(state.notifyChannelId ?? ""), [state.notifyChannelId]);
   useEffect(() => setEmail(state.notifyEmail ?? ""), [state.notifyEmail]);
-  const channelError = channel.trim() && !CHANNEL_RE.test(channel.trim()) ? "チャンネル ID の形式が正しくありません" : null;
   const emailError = email.trim() && !EMAIL_RE.test(email.trim()) ? "メールアドレスの形式が正しくありません" : null;
-  const dirty = channel.trim() !== (state.notifyChannelId ?? "") || email.trim() !== (state.notifyEmail ?? "");
-  const nowhere = !state.notifyChannelId && !state.notifyEmail && !state.defaultNotifyEmail;
+  const dirty = email.trim() !== (state.notifyEmail ?? "");
   return (
     <Card testId="fe2-lp-sponsor-notify" header={<span className={styles.sectionTitle}>通知先</span>}>
       <Stack gap={5}>
+        <span className={styles.note} data-testid="fe2-lp-sponsor-notify-app">
+          資料請求が届くと、「スポンサー」アプリを編集できる人に Dub の通知（通知の受信箱とスマホのプッシュ）で
+          「スポンサーの資料請求が届きました」と知らせます。受け取る人はロール管理で「スポンサー」アプリの編集を持つロールで決まり、
+          各自の通知設定でメールでも受け取れます。
+        </span>
         <span className={styles.note}>
-          資料請求が届くと、スポンサーチームに「スポンサーに興味があるという連絡が来ました」と通知します（両方設定すれば両方に届きます）。
           請求者には受付完了のメールを自動で送ります。資料そのものはチームから手で送ってください。
         </span>
-        {nowhere ? (
-          <Badge tone="warning" testId="fe2-lp-sponsor-notify-nowhere">
-            通知先が未設定です（届いた請求は一覧にだけ残ります）
-          </Badge>
-        ) : null}
         <FormField
-          label="Dub チャットのチャンネル ID"
-          htmlFor="fe2-lp-sponsor-channel"
-          help="スポンサーチームのチャンネルを開いたときの URL 末尾の ID（例: chn_…）。空欄 = チャットには流さない"
-          {...(channelError ? { error: channelError } : {})}
-        >
-          <TextField
-            id="fe2-lp-sponsor-channel"
-            testId="fe2-lp-sponsor-channel"
-            value={channel}
-            placeholder="chn_..."
-            disabled={!canEdit}
-            onChange={setChannel}
-          />
-        </FormField>
-        <FormField
-          label="スポンサーチームのメールアドレス"
+          label="追加で通知するメールアドレス（任意）"
           htmlFor="fe2-lp-sponsor-email"
           help={
             state.defaultNotifyEmail
-              ? `空欄のときは既定の ${state.defaultNotifyEmail} に送ります`
-              : "空欄 = メールでは通知しない"
+              ? `Dub のアカウントが無い共有アドレス向け。空欄のときは既定の ${state.defaultNotifyEmail} に送ります`
+              : "Dub のアカウントが無い共有アドレス向け。空欄 = メールでは送らない"
           }
           {...(emailError ? { error: emailError } : {})}
         >
@@ -210,10 +189,10 @@ function NotifyCard({ state, canEdit }: { state: State; canEdit: boolean }): JSX
             variant="primary"
             size="sm"
             testId="fe2-lp-sponsor-notify-save"
-            disabled={!canEdit || !dirty || !!channelError || !!emailError || save.isPending}
-            onClick={() => save.mutate({ notifyChannelId: channel.trim() || null, notifyEmail: email.trim() || null })}
+            disabled={!canEdit || !dirty || !!emailError || save.isPending}
+            onClick={() => save.mutate({ notifyEmail: email.trim() || null })}
           >
-            通知先を保存
+            保存
           </Button>
         </div>
       </Stack>
