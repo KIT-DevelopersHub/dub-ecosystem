@@ -1,5 +1,5 @@
 // #850: invited -> active publishes identity.user.activated (chat-service creates the member's
-// Slack times channel). Best-effort sink; only on the transition, not on idempotent re-provision.
+// times channel in Dub chat). Best-effort sink; only on the transition, not on idempotent re-provision.
 import { describe, expect, it } from "vitest";
 import { MemIdentityRepo } from "../src/repo/mem-repo";
 import { IdentityService } from "../src/service";

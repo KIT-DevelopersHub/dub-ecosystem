@@ -191,23 +191,22 @@ CREATE TABLE chat_custom_emojis (
 `.trim(),
 };
 
-// Forward-only add-on (#850): each member's Slack times channel (src/slack-times.ts).
-// Physical mirror: infra/d1/migrations/chat/0008_slack_times.sql.
-export const CHAT_SLACK_TIMES_MIGRATION: Migration = {
+// Forward-only add-on (#850): each member's times channel in chat (src/times.ts).
+// Physical mirror: infra/d1/migrations/chat/0008_times.sql.
+export const CHAT_TIMES_MIGRATION: Migration = {
   namespace: "chat",
-  id: "0008_slack_times",
+  id: "0008_times",
   up: `
-CREATE TABLE chat_slack_times (
-  org_id           TEXT NOT NULL,
-  user_id          TEXT NOT NULL,
-  slack_user_id    TEXT NOT NULL,
-  slack_channel_id TEXT NOT NULL,
-  channel_name     TEXT NOT NULL,
-  status           TEXT NOT NULL CHECK (status IN ('created','existing')),
-  created_at       TEXT NOT NULL,
+CREATE TABLE chat_times (
+  org_id       TEXT NOT NULL,
+  user_id      TEXT NOT NULL,
+  channel_id   TEXT NOT NULL,
+  channel_name TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('created','existing')),
+  created_at   TEXT NOT NULL,
   PRIMARY KEY (org_id, user_id)
 );
-CREATE UNIQUE INDEX idx_chat_slack_times_name ON chat_slack_times(org_id, channel_name);
+CREATE UNIQUE INDEX idx_chat_times_name ON chat_times(org_id, channel_name);
 `.trim(),
 };
 

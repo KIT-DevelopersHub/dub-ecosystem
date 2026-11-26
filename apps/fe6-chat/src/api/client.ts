@@ -98,11 +98,11 @@ export interface ChatApiClient {
   customEmojiImage(name: string): Promise<Blob>;
   /** One bounded import batch after `after` (null = from the top). */
   importSlackEmojis(after: string | null): Promise<EmojiImportResult>;
-  // ---- Slack times channels (#850; 編集 + chat:slack_times). Optional: absent = no entry. ----
-  /** Dry run: members without a times channel and the planned names. No Slack writes. */
-  previewSlackTimes?(): Promise<chat.SlackTimesPreviewResponse>;
+  // ---- times channels in chat (#850; 編集 + chat:times). Optional: absent = no entry. ----
+  /** Dry run: members without a times channel and the planned names. Nothing is created. */
+  previewTimes?(): Promise<chat.TimesPreviewResponse>;
   /** One bounded batch; call again while `remaining > 0`. */
-  bulkCreateSlackTimes?(userIds?: string[]): Promise<chat.SlackTimesBulkResponse>;
+  bulkCreateTimes?(userIds?: string[]): Promise<chat.TimesBulkResponse>;
 }
 
 /** GET /api/v1/members/me/mention-teams のレスポンス。 */
@@ -354,11 +354,11 @@ export class HttpChatClient implements ChatApiClient {
   importSlackEmojis(after: string | null): Promise<EmojiImportResult> {
     return this.request<EmojiImportResult>("POST", `${CHAT}/custom-emojis/slack-import`, { after });
   }
-  previewSlackTimes(): Promise<chat.SlackTimesPreviewResponse> {
-    return this.request<chat.SlackTimesPreviewResponse>("GET", `${CHAT}/slack-times/preview`);
+  previewTimes(): Promise<chat.TimesPreviewResponse> {
+    return this.request<chat.TimesPreviewResponse>("GET", `${CHAT}/times/preview`);
   }
-  bulkCreateSlackTimes(userIds?: string[]): Promise<chat.SlackTimesBulkResponse> {
-    return this.request<chat.SlackTimesBulkResponse>("POST", `${CHAT}/slack-times/bulk`, userIds ? { userIds } : {});
+  bulkCreateTimes(userIds?: string[]): Promise<chat.TimesBulkResponse> {
+    return this.request<chat.TimesBulkResponse>("POST", `${CHAT}/times/bulk`, userIds ? { userIds } : {});
   }
 
   async unfurl(url: string): Promise<UnfurlPreview | null> {

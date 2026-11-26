@@ -603,6 +603,27 @@ describe("chat channel delete + org-wide sections (demo store)", () => {
   });
 });
 
+describe("times チャンネル (#850, Dub chat)", () => {
+  interface Item { userId: string; channelName: string | null; channelId: string | null; status: string }
+  it("previews without creating, then creates one owned chat channel per active member", async () => {
+    const a = api();
+    const p = await a.request<{ items: Item[]; recordedCount: number }>({ method: "GET", path: "/api/v1/chat/times/preview" });
+    expect(p.items.length).toBeGreaterThan(0);
+    expect(p.items.every((i) => i.status === "planned" && i.channelName?.startsWith("times-"))).toBe(true);
+    const listNames = async () => (await a.request<{ name: string }[]>({ method: "GET", path: "/api/v1/chat/channels" })).map((c) => c.name);
+    expect((await listNames()).some((n) => n.startsWith("times-"))).toBe(false);
+    let remaining = 1;
+    for (let i = 0; remaining > 0 && i < 20; i++) {
+      remaining = (await a.request<{ results: Item[]; remaining: number }>({ method: "POST", path: "/api/v1/chat/times/bulk", body: {} })).remaining;
+    }
+    const names = (await listNames()).filter((n) => n.startsWith("times-"));
+    expect(names).toHaveLength(p.items.length);
+    expect(new Set(names).size).toBe(names.length);
+    const again = await a.request<{ items: Item[]; recordedCount: number }>({ method: "GET", path: "/api/v1/chat/times/preview" });
+    expect(again).toMatchObject({ items: [], recordedCount: p.items.length });
+  });
+});
+
 describe("カスタム絵文字 (Slack emoji import demo)", () => {
   interface Emoji { name: string; aliasOf: string | null }
   interface Result { total: number; imported: number; nextAfter: string | null }

@@ -40,11 +40,11 @@ export interface Env {
   SLACK_BOT_TOKEN?: string;
   ATTACHMENTS?: R2Bucket;
 
-  // Slack times channels (#850, src/slack-times.ts). Plain vars, all optional:
-  //   SLACK_TIMES_PREFIX  channel name prefix (default "times-")
-  //   SLACK_TIMES_PRIVATE "true" = private channels (default public)
-  //   SLACK_TIMES_AUTO    "false" = no auto-create on member activation (default on)
-  SLACK_TIMES_PREFIX?: string;
-  SLACK_TIMES_PRIVATE?: string;
-  SLACK_TIMES_AUTO?: string;
+  // times channels in chat (#850, src/times.ts). Plain vars, all optional:
+  //   CHAT_TIMES_PREFIX  channel name prefix (default "times-")
+  //   CHAT_TIMES_PRIVATE "true" = private channels (default public)
+  //   CHAT_TIMES_AUTO    "false" = no auto-create on member activation (default on)
+  CHAT_TIMES_PREFIX?: string;
+  CHAT_TIMES_PRIVATE?: string;
+  CHAT_TIMES_AUTO?: string;
 }

@@ -44,7 +44,7 @@ export const POLICY_TABLE = definePolicyTable({
   // The refusal is the gate's 403 `internal_only` rather than the old 404 — the gateway's own
   // internalOnlyPaths still answers 404 at the edge, which is where the hiding belongs.
   "POST /internal/system-messages": INTERNAL,
-  // freeq-drain -> chat domain events (evt.chat: identity.user.activated -> Slack times, #850).
+  // freeq-drain -> chat domain events (evt.chat: identity.user.activated -> times channel, #850).
   "POST /internal/events-async": INTERNAL,
 
   // ---- reads: チャット = 閲覧 (`app:chat:view`) ----
@@ -127,12 +127,12 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /chat/slack-import/jobs/:id": appLevel("chat", "edit", "chat:slack_import"),
   "POST /chat/slack-import/jobs/:id/step": appLevel("chat", "edit", "chat:slack_import"),
 
-  // ---- Slack times channels (#850): 編集 + chat:slack_times (dangerous key) ----
-  // Creates Slack channels and invites members in the real workspace, and the preview lists
-  // every member's email. Own toggle (identity 0035: admin only by default). Org-scoped rows
-  // only; no channel-scoped half.
-  "GET /chat/slack-times/preview": appLevel("chat", "edit", "chat:slack_times"),
-  "POST /chat/slack-times/bulk": appLevel("chat", "edit", "chat:slack_times"),
+  // ---- times channels (#850): 編集 + chat:times (dangerous key) ----
+  // Creates one chat channel per member (owned by that member) and the preview lists every
+  // member's email. Own toggle (identity 0037: admin only by default). Org-scoped rows only;
+  // no channel-scoped half.
+  "GET /chat/times/preview": appLevel("chat", "edit", "chat:times"),
+  "POST /chat/times/bulk": appLevel("chat", "edit", "chat:times"),
 
   // ---- custom emoji ----
   // List + image are what every reader needs to RENDER a reaction (":name:" -> image), so they

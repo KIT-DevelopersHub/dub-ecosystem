@@ -69,7 +69,7 @@ export interface ChatMemberChangedPayload { channelId: ChannelId; userId: UserId
 
 // ---- identity ----
 // invited -> active (identity-roster provision / activateInvited). #850: chat-service creates
-// the member's Slack times channel. Email is carried so the consumer needs no identity lookup.
+// the member's times channel in Dub chat. Email is carried so the consumer needs no identity lookup.
 export interface IdentityUserActivatedPayload { userId: UserId; orgId: string; email: string; displayName: string }
 
 // ---- file / drive ----

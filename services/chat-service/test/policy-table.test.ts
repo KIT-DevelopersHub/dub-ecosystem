@@ -65,7 +65,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   // + 0020 / 0021 / 0023 / 0024 / 0027: chat:delete_channel, chat:slack_import, chat:emoji_import,
   // chat:manage_sections and chat:change_visibility are admin-only by default.
-  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:slack_times", "chat:manage_sections", "chat:change_visibility"],
+  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:times", "chat:manage_sections", "chat:change_visibility"],
   maintainer: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate"],
   organizer: ["app:chat:view", "chat:create"],
   member: ["app:chat:view", "chat:create"],
@@ -142,8 +142,8 @@ const SLACK_IMPORT = [
 // Slack custom emoji import: 編集 + chat:emoji_import (admin only by default).
 const EMOJI_IMPORT = ["POST /chat/custom-emojis/slack-import"];
 
-// Slack times channels (#850): 編集 + chat:slack_times (admin only by default).
-const SLACK_TIMES = ["GET /chat/slack-times/preview", "POST /chat/slack-times/bulk"];
+// times channels in chat (#850): 編集 + chat:times (admin only by default).
+const TIMES = ["GET /chat/times/preview", "POST /chat/times/bulk"];
 
 // Org-wide sidebar sections: reading is in READS; organizing them rewrites every member's
 // sidebar, so 編集 + chat:manage_sections (admin only by default).
@@ -156,7 +156,7 @@ const MANAGE_SECTIONS = [
 
 const READ_ONLY = [...PUBLIC_ROUTES, ...READS].sort();
 const EDITOR = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE].sort();
-const FULL = [...EDITOR, ...DELETE_CHANNEL, ...CHANGE_VISIBILITY, ...SLACK_IMPORT, ...EMOJI_IMPORT, ...SLACK_TIMES, ...MANAGE_SECTIONS].sort();
+const FULL = [...EDITOR, ...DELETE_CHANNEL, ...CHANGE_VISIBILITY, ...SLACK_IMPORT, ...EMOJI_IMPORT, ...TIMES, ...MANAGE_SECTIONS].sort();
 
 describe("role x endpoint matrix (frozen)", () => {
   // Changing a rule changes one of these arrays — a visible diff in review.

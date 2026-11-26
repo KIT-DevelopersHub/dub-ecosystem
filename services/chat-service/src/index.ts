@@ -19,7 +19,7 @@ import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
 import { createUnfurler } from "./unfurl";
 import { SlackImporter } from "./slack-import";
 import { CustomEmojis } from "./custom-emoji";
-import { SlackTimes, readSlackTimesConfig } from "./slack-times";
+import { Times, readTimesConfig } from "./times";
 import { createSlackClient } from "@dub/slack-import";
 import type { Env } from "./env";
 import type { AppDeps, EventPublisher, AuditSink, EventClient, FileClient, MemberClient, RealtimePublisher } from "./types";
@@ -223,13 +223,12 @@ export function buildDeps(env: Env, requestId?: string, ctx?: ExecutionContext):
       bucket: env.ATTACHMENTS ?? null,
       now: nowIso,
     }),
-    // Slack times channels (#850): same LMB token (+ channels:manage / *:write.invites /
-    // users:read.email). maxRetries 0: a 429 surfaces (bulk -> 429, event -> drain retries).
-    slackTimes: new SlackTimes({
+    // times channels in chat (#850): raw D1 for the roster / record reads; channels are
+    // created through ChatService (createApp passes it in).
+    times: new Times({
       db: env.DB,
-      slack: env.SLACK_BOT_TOKEN ? createSlackClient({ token: env.SLACK_BOT_TOKEN, maxRetries: 0 }) : null,
       orgId: env.DUB_DEFAULT_ORG_ID ?? common.DUB_DEFAULT_ORG_ID,
-      config: readSlackTimesConfig(env),
+      config: readTimesConfig(env),
       now: nowIso,
     }),
   };
@@ -288,6 +287,6 @@ export { ChatService } from "./service";
 export { createD1ChatRepo } from "./d1-repo";
 export { InMemoryChatRepo } from "./memory-repo";
 export { NoopRealtimePublisher, DoRealtimePublisher } from "./realtime";
-export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SECTIONS_MIGRATION, CHAT_SLACK_IMPORT_MIGRATION, CHAT_CUSTOM_EMOJI_MIGRATION, CHAT_SHARED_SECTIONS_MIGRATION, CHAT_SLACK_TIMES_MIGRATION } from "./schema";
+export { CHAT_SCHEMA_MIGRATION, CHAT_PINS_MIGRATION, CHAT_SETTINGS_MIGRATION, CHAT_SECTIONS_MIGRATION, CHAT_SLACK_IMPORT_MIGRATION, CHAT_CUSTOM_EMOJI_MIGRATION, CHAT_SHARED_SECTIONS_MIGRATION, CHAT_TIMES_MIGRATION } from "./schema";
 export { signWsTicket, verifyWsTicket, ticketExpiryMs } from "./wsticket";
 export type { AppDeps } from "./types";

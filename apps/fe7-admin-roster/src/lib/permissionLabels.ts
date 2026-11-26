@@ -97,7 +97,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "chat:delete_channel": { label: "チャンネルを削除", description: "チャンネルを完全に削除できるようになります（メッセージもすべて消え、元に戻せません）。" },
   "chat:slack_import": { label: "Slack から取り込み", description: "Slack のチャンネルを選んで、メッセージ・スレッド・リアクション・ファイルごとチャットに取り込めるようになります。" },
   "chat:emoji_import": { label: "Slack の絵文字を取り込み", description: "Slack のカスタム絵文字(画像)をチャットに取り込み、リアクションで使えるようにします。" },
-  "chat:slack_times": { label: "Slack の times を作成", description: "times チャンネルが無いメンバーに、Slack の times チャンネルをまとめて作成・招待できるようになります。" },
+  "chat:times": { label: "times を作成", description: "times チャンネルが無いメンバーに、本人がオーナーの times チャンネルをチャットにまとめて作成できるようになります。" },
   "chat:manage_sections": { label: "セクションを管理", description: "全員に共通のサイドバーのセクションを作成・名前変更・並べ替え・削除し、チャンネルを振り分けられるようになります。" },
   "chat:change_visibility": { label: "チャンネルの公開範囲を変更", description: "チャンネルをパブリック（全員が閲覧・参加できる）とプライベート（メンバーだけ）の間で切り替えられるようになります。" },
   "hr:read": { label: "応募者の閲覧", description: "人事アプリで応募者の情報・面談日・履歴・新メンバーのオンボーディング進捗を見られるようになります（個人情報を含みます）。" },

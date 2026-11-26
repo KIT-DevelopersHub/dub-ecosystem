@@ -61,7 +61,7 @@ export const PERMISSION_CATALOG = [
   { key: "chat:delete_channel", name: "Delete channels", description: "Permanently delete chat channels and all their messages", domain: "chat", dangerous: true },
   { key: "chat:slack_import", name: "Import from Slack", description: "Import Slack channel history (messages, threads, reactions, files) into new chat channels", domain: "chat", dangerous: true },
   { key: "chat:emoji_import", name: "Import Slack custom emoji", description: "Import the Slack workspace's custom emoji (images) for use in chat reactions", domain: "chat", dangerous: true },
-  { key: "chat:slack_times", name: "Create Slack times channels", description: "Preview and bulk-create each member's Slack times channel (creates Slack channels and invites members)", domain: "chat", dangerous: true },
+  { key: "chat:times", name: "Create times channels", description: "Preview and bulk-create each member's own times channel in chat (the member owns it)", domain: "chat", dangerous: true },
   { key: "chat:manage_sections", name: "Manage chat sections", description: "Create, rename, reorder and delete the org-wide chat sidebar sections and assign channels to them", domain: "chat", dangerous: false },
   { key: "chat:change_visibility", name: "Change channel visibility", description: "Switch a chat channel between public and private", domain: "chat", dangerous: true },
   { key: "usage:view", name: "View usage dashboard", description: "View the free-tier usage & billing-guard dashboard", domain: "usage", dangerous: false },

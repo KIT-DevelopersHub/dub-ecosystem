@@ -23,7 +23,7 @@ export interface Env {
   SVC_GITHUB_SYNC?: Fetcher; // github-sync      POST /internal/events-async
   SVC_MOBILE_BFF?: Fetcher; // mo3-mobile-bff   POST /internal/events-async
   SVC_MAIL_AUTOMATION?: Fetcher; // mail-automation POST /internal/events-async (改善#5)
-  SVC_CHAT?: Fetcher; // chat-service    POST /internal/events-async (evt.chat, #850 Slack times)
+  SVC_CHAT?: Fetcher; // chat-service    POST /internal/events-async (evt.chat, #850 times channel)
 }
 
 // The env keys that hold a consumer service binding (used by the routing map).

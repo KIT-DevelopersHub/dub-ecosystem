@@ -111,10 +111,9 @@ bucket_name = "dub-file-attachments"
 #   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0005_slack_import_jobs.sql
 # Custom emoji (src/custom-emoji.ts; images in this bucket under custom-emoji/, token needs emoji:read):
 #   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0006_custom_emojis.sql
-# Slack times channels (#850, src/slack-times.ts; token needs channels:manage, channels:read,
-# channels:write.invites, groups:write, groups:write.invites, users:read, users:read.email):
-#   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0008_slack_times.sql
-# Optional [vars] (defaults shown): SLACK_TIMES_PREFIX="times-" SLACK_TIMES_PRIVATE="false" SLACK_TIMES_AUTO="true"
+# times channels in chat (#850, src/times.ts; no external service):
+#   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0008_times.sql
+# Optional [vars] (defaults shown): CHAT_TIMES_PREFIX="times-" CHAT_TIMES_PRIVATE="false" CHAT_TIMES_AUTO="true"
 # Org-wide sidebar sections (writes need chat:manage_sections, identity/0024):
 #   npx wrangler d1 execute dub-core --remote --file infra/d1/migrations/chat/0007_shared_sections.sql
 #

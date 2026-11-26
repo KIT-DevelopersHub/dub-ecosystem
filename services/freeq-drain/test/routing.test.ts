@@ -96,7 +96,7 @@ describe("deliver (audit.record + live evt.*)", () => {
     expect(readRow(raw, "r4")).toMatchObject({ status: "done" });
   });
 
-  it("POSTs evt.chat to SVC_CHAT https://svc/internal/events-async (#850 Slack times)", async () => {
+  it("POSTs evt.chat to SVC_CHAT https://svc/internal/events-async (#850 times channel)", async () => {
     const { d1, raw } = makeD1();
     const chatSvc = fakeSvc(200);
     const env = { SVC_CHAT: chatSvc.svc } as unknown as Env;

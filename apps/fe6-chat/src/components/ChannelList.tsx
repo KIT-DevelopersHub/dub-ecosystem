@@ -43,8 +43,8 @@ export interface ChannelListProps {
   onImport?: () => void;
   /** Admin-only 「絵文字取り込み」 (Slack custom emoji). Omit to hide the entry. */
   onImportEmoji?: () => void;
-  /** Admin-only 「times 作成」 (Slack times channels, #850). Omit to hide the entry. */
-  onSlackTimes?: () => void;
+  /** Admin-only 「＋ times 作成」 (each member's times channel, #850). Omit to hide the entry. */
+  onTimes?: () => void;
   /** Slack's 「後で」 entry above the channels (saved items + reminders). Omit to hide. */
   later?: { count: number; active: boolean; onOpen: () => void };
 }
@@ -81,7 +81,7 @@ export function ChannelList({
   sectionActions,
   onImport,
   onImportEmoji,
-  onSlackTimes,
+  onTimes,
   later,
 }: ChannelListProps) {
   const layout = buildSidebar(channels, sections, assignments);
@@ -359,9 +359,9 @@ export function ChannelList({
                 ⇩ 絵文字取り込み（Slack）
               </button>
             )}
-            {onSlackTimes && (
-              <button type="button" className={styles.sectionCreate} onClick={onSlackTimes} data-testid="fe6-slack-times-open">
-                ＋ times 作成（Slack）
+            {onTimes && (
+              <button type="button" className={styles.sectionCreate} onClick={onTimes} data-testid="fe6-times-open">
+                ＋ times 作成
               </button>
             )}
           </>

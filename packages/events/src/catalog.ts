@@ -94,7 +94,7 @@ export const CONSUMER_QUEUE_BINDINGS = {
   "github-sync": "EVT_GITHUB_SYNC",
   "mail-automation": "EVT_MAIL_AUTOMATION",
   "mobile-bff": "EVT_MOBILE_BFF",
-  chat: "EVT_CHAT", // #850 Slack times channels (free tier: outbox topic evt.chat)
+  chat: "EVT_CHAT", // #850 times channels in chat (free tier: outbox topic evt.chat)
 } as const satisfies Record<ConsumerService, string>;
 
 // pub/sub table = routing config. Table change = contract change.

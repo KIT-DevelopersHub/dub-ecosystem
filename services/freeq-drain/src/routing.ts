@@ -99,7 +99,7 @@ export const ROUTES: Readonly<Record<string, Route>> = {
     maxAgeMs: MAIL_AUTOMATION_MAX_AGE_MS,
   },
 
-  // #850: identity.user.activated -> chat-service creates the member's Slack times channel.
+  // #850: identity.user.activated -> chat-service creates the member's times channel in Dub chat.
   // origin MUST be "https://svc": chat-service 404s every non-"svc" host (workers.dev is on
   // for its realtime WS), exactly like notification above.
   "evt.chat": { kind: "deliver", binding: "SVC_CHAT", path: EVENTS_ASYNC_PATH, origin: "https://svc" },
