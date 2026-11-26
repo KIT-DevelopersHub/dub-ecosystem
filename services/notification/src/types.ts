@@ -25,6 +25,8 @@ export interface NotifyRecipients {
   // Audiences: the users whose roles hold the audience key (ロール管理 > 通知 — "all" =
   // notif:receive_all for broadcasts/release notes, "admin" = notif:receive_admin).
   audiences?: notification.ReceiveAudience[];
+  // Permission holders (identity GET /internal/permission-holders), e.g. app:sponsor:edit.
+  permissions?: string[];
 }
 
 // Normalized ingest input shared by all three lanes.

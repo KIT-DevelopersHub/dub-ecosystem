@@ -34,6 +34,7 @@ import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
 import { createHrInterviewsDemoStore } from "./demo-hr-interviews.ts";
 import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, createTimesSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
+import { createDemoLpSponsorStore } from "./demo-lp-sponsor.ts";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -6642,6 +6643,7 @@ export function createDemoFetch(): typeof fetch {
   const lpTicketsStore = createLpTicketsStore();
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
+  const lpSponsorStore = createDemoLpSponsorStore((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL);
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
   const accountingStore = createAccountingStore(() => currentMe().user);
   const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.actuals(m));
@@ -6866,6 +6868,7 @@ export function createDemoFetch(): typeof fetch {
       lpStore.handle(method, url.pathname, url, parsedBody) ??
       lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
       lpProposalsStore.handle(method, url.pathname, url, parsedBody) ??
+      lpSponsorStore.handle(method, url.pathname, url, parsedBody) ??
       lpSiteConfigStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;

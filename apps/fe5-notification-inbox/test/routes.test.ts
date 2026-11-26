@@ -25,3 +25,12 @@ describe("resolveLinkUrl", () => {
     expect(resolveLinkUrl("//evil.example")).toEqual({ path: ROUTE_INBOX, fellBack: true });
   });
 });
+
+describe("LP sponsor inquiry link", () => {
+  it("links lp_sponsor_inquiry items to LP管理 > スポンサー募集", async () => {
+    const { itemLinkUrl } = await import("../src/components/NotificationCard");
+    const link = itemLinkUrl({ resourceType: "lp_sponsor_inquiry", resourceId: "lps_1" } as Parameters<typeof itemLinkUrl>[0]);
+    expect(link).toBe("/lp/sponsors");
+    expect(resolveLinkUrl(link)).toEqual({ path: "/lp/sponsors", fellBack: false });
+  });
+});

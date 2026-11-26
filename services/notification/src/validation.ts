@@ -3,7 +3,9 @@
 // avoids lockfile churn across the parallel unit build). Each failure → a FieldError
 // with the NOTIF_VALIDATION_FAILED envelope (design §6).
 import { DubError, errors, type FieldError } from "@dub/errors";
-import { notification } from "@dub/types";
+import { identity, notification } from "@dub/types";
+
+const PERMISSION_KEYS: ReadonlySet<string> = new Set(identity.PERMISSION_CATALOG.map((p) => p.key));
 import {
   CHANNELS,
   MAX_DIRECT_RECIPIENTS,
@@ -79,12 +81,22 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
       hasAudiences = recipientAudiences.length > 0;
     }
   }
-  // Require at least one recipient source (ids, roles or audiences).
-  if (Array.isArray(recipientIds) && recipientIds.length === 0 && !hasRoles && !hasAudiences) {
+  // Optional permission fan-out: the org-wide holders of each key (ロール管理 decides who).
+  const recipientPermissions = b.recipientPermissions;
+  let hasPermissions = false;
+  if (recipientPermissions !== undefined) {
+    if (!Array.isArray(recipientPermissions) || !recipientPermissions.every((k) => typeof k === "string" && PERMISSION_KEYS.has(k))) {
+      fe.push({ field: "recipientPermissions", reason: "invalid_enum", message: "permission catalog keys" });
+    } else {
+      hasPermissions = recipientPermissions.length > 0;
+    }
+  }
+  // Require at least one recipient source (ids, roles, audiences or permissions).
+  if (Array.isArray(recipientIds) && recipientIds.length === 0 && !hasRoles && !hasAudiences && !hasPermissions) {
     fe.push({
       field: "recipientIds",
       reason: "required",
-      message: "recipientIds, recipientRoles or recipientAudiences must be non-empty",
+      message: "recipientIds, recipientRoles, recipientAudiences or recipientPermissions must be non-empty",
     });
   }
 
@@ -121,6 +133,7 @@ export function parseNotifyRequest(body: unknown): notification.NotifyRequest {
   };
   if (hasRoles) out.recipientRoles = recipientRoles as string[];
   if (hasAudiences) out.recipientAudiences = [...new Set(recipientAudiences as notification.ReceiveAudience[])];
+  if (hasPermissions) out.recipientPermissions = [...new Set(recipientPermissions as identity.PermissionKey[])];
   if (channels !== undefined) out.channels = channels as NotificationChannel[];
   if (dedupKey !== undefined) out.dedupKey = dedupKey as string;
   if (resourceType !== undefined) out.resourceType = resourceType as string;

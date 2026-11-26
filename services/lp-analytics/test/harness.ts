@@ -3,13 +3,15 @@
 import type { MiddlewareHandler } from "hono";
 import { DubError, CommonErrorCodes } from "@dub/errors";
 import { createDbClient } from "@dub/db";
-import type { identity } from "@dub/types";
+import type { identity, notification } from "@dub/types";
 import { policy } from "@dub/types";
 import { memoryD1 } from "../../../infra/d1/src/node-d1";
 import { applyAll } from "../../../infra/d1/src/apply";
 import { createApp } from "../src/app";
 import { createD1LpRepo } from "../src/d1-repo";
 import { InMemoryLpRepo } from "../src/memory-repo";
+import type { SponsorInquiryRepo, SponsorNotifier } from "../src/sponsor-inquiries";
+import { memorySponsorInquiryRepo, sponsorInquiryRepo } from "../src/sponsor-inquiry-repo";
 import type { SiteTrafficSource } from "../src/site-traffic";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { AppDeps, LpRepo, TicketRelease, TicketReleaseClient } from "../src/types";
@@ -24,10 +26,41 @@ export const grants = (level: policy.AppAccessLevel): Set<identity.PermissionKey
 export type RepoKind = "memory" | "d1";
 
 export async function makeRepo(kind: RepoKind): Promise<LpRepo> {
-  if (kind === "memory") return new InMemoryLpRepo();
+  return (await makeRepos(kind)).repo;
+}
+
+export async function makeRepos(kind: RepoKind): Promise<{ repo: LpRepo; sponsorRepo: SponsorInquiryRepo }> {
+  if (kind === "memory") return { repo: new InMemoryLpRepo(), sponsorRepo: memorySponsorInquiryRepo() };
   const { db } = memoryD1();
   await applyAll(db);
-  return createD1LpRepo(createDbClient(db, { namespace: "lp" }));
+  const client = createDbClient(db, { namespace: "lp" });
+  return { repo: createD1LpRepo(client), sponsorRepo: sponsorInquiryRepo(client) };
+}
+
+/** Records every Dub notification / mail instead of sending. `fail` makes that channel report undelivered. */
+export interface FakeSponsorNotifier extends SponsorNotifier {
+  notifies: notification.NotifyRequest[];
+  mails: { to: string; subject: string; textBody: string; key: string }[];
+  fail: { app: boolean; mail: boolean };
+}
+
+export function fakeSponsorNotifier(): FakeSponsorNotifier {
+  const f: FakeSponsorNotifier = {
+    notifies: [],
+    mails: [],
+    fail: { app: false, mail: false },
+    async notifyApp(_rid, req) {
+      if (f.fail.app) return false;
+      f.notifies.push(req);
+      return true;
+    },
+    async sendMail(_rid, m, key) {
+      if (f.fail.mail) return false;
+      f.mails.push({ ...m, key });
+      return true;
+    },
+  };
+  return f;
 }
 
 /** Stands in for lp-tickets (the real side is covered by services/lp-tickets/test/release.test.ts). */
@@ -67,8 +100,9 @@ export async function makeApp(
   let seq = 0;
   // ULID-like monotonic ids so "newest first by id" holds like production.
   const id = (p: string) => `${p}_${String(seq++).padStart(8, "0")}`;
-  const repo = await makeRepo(kind);
+  const { repo, sponsorRepo } = await makeRepos(kind);
   const ticketRelease = fakeTicketRelease();
+  const sponsorNotifier = fakeSponsorNotifier();
   const deps: AppDeps = {
     repo,
     authz: fakeAuthz(new Set([...grants(level), ...extraGrants])),
@@ -83,11 +117,20 @@ export async function makeApp(
     newProposalId: () => id("lpp"),
     newSiteConfigHistoryId: () => id("lph"),
     dailyProposalCap: 200,
+    sponsor: {
+      repo: sponsorRepo,
+      lpBaseUrl: "https://hokuriku-it-conf.com",
+      now: () => now,
+      newId: () => id("lps"),
+      notifier: sponsorNotifier,
+      defaultNotifyEmail: "sponsor@example.com",
+      dailyCap: 100,
+    },
     ...overrides,
   };
   const app = createApp(deps);
   const clock: Clock = { set: (iso) => (now = iso) };
-  return { app, repo, clock, deps, ticketRelease };
+  return { app, repo, clock, deps, ticketRelease, sponsorNotifier };
 }
 
 const USER = { "x-dub-user-id": "usr_admin", "x-dub-request-id": "req_test" };
