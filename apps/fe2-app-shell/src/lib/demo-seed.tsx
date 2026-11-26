@@ -126,28 +126,32 @@ const EVENTS: event.EventSummary[] = [
   { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-09-01T00:00:00Z" },
 ];
 
-// AI のまとめ (#879) demo fixtures. Every line cites an in-app path or the public LP.
-const DEMO_DIGESTS: Record<string, event.EventDigest> = {};
-function demoDigestFor(eventId: string): event.EventDigest {
-  return {
-    eventId,
-    lines: [
-      { text: "タスク「会場の机・椅子レイアウト確定」期限 2026-08-02（遅れ）", source: "tasks", link: "/tasks/tsk_1" },
-      { text: "券種「一般」販売 182枚・残り 118枚", source: "tickets", link: "/lp?tab=tickets" },
-      { text: "協賛「株式会社サンプル」提案中", source: "sponsors", link: "/sponsor" },
-      { text: "会議 2026-08-03「運営定例」（議事録あり）", source: "meetings", link: "/calendar" },
-      { text: "チャットの決定「【決定】懇親会は 18:30 から 2F ラウンジ」", source: "chat", link: `/chat?eventId=${eventId}` },
-    ],
-    discrepancies: [
-      { field: "startsAt", eventValue: "2026-08-05", sourceValue: "2026-08-06", source: "lp", link: "https://hokuriku-it-conf.com" },
-    ],
-    model: "fake",
-    trigger: "schedule",
-    generatedAt: "2026-08-02T22:00:00Z",
-  };
-}
+// AI のまとめ (#879) demo = the production default: flag OFF, no LLM. The server then
+// sends a preview built from the event's own rows (facts + actions) and deterministic
+// 食い違い; evt_1 carries one (the legacy free-text 定員 says 250).
 function demoDigestState(eventId: string): event.GetEventDigestResponse {
-  return { enabled: true, provider: { id: "fake", status: "online" }, digest: DEMO_DIGESTS[eventId] ?? demoDigestFor(eventId) };
+  const ev = EVENT_DETAIL[eventId];
+  const link = `/events?eventId=${eventId}`;
+  const lines: event.EventDigestLine[] = ev
+    ? [
+        {
+          text: [`イベント「${ev.title}」`, ev.startsAt ? `開催日 ${ev.startsAt.slice(0, 10)}` : "", ev.venue ? `会場 ${ev.venue}` : "", typeof ev.capacity === "number" ? `定員 ${ev.capacity}人` : ""]
+            .filter((p) => p !== "")
+            .join("・"),
+          source: "event",
+          link,
+        },
+        ...ev.actions.map((a) => ({ text: `アクション「${a.title}」`, source: "actions" as const, link: `/events/${eventId}` })),
+      ]
+    : [];
+  const discrepancies: event.EventDigestDiscrepancy[] =
+    eventId === "evt_1" ? [{ field: "capacity", eventValue: "300", sourceValue: "250", source: "event", link }] : [];
+  return {
+    enabled: false,
+    provider: { id: "offline", status: "disabled" },
+    digest: null,
+    preview: { lines, discrepancies, collectedAt: isoNow() },
+  };
 }
 
 const EVENT_DETAIL: Record<string, event.EventDetail> = {
@@ -2884,20 +2888,14 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
-  // AI のまとめ (#879) — demo uses the deterministic "fake" provider (no model): a sample
-  // digest with source links + one 食い違い, and the Q&A answering 「停止中」 the way
-  // production does until the Mac mini is connected.
+  // AI のまとめ (#879) — flag OFF like production: GET = preview, run = 409, ask = disabled.
   {
     const id = seg(/^\/api\/v1\/events\/([^/]+)\/digest$/);
     if (id && method === "GET") return json(demoDigestState(id));
     const runId = seg(/^\/api\/v1\/events\/([^/]+)\/digest\/run$/);
-    if (runId && method === "POST") {
-      const digest = { ...demoDigestFor(runId), generatedAt: isoNow() };
-      DEMO_DIGESTS[runId] = digest;
-      return json({ ran: true, changedSources: ["tasks", "tickets"], digest } satisfies event.RunEventDigestResponse);
-    }
+    if (runId && method === "POST") return json({ error: { code: "EVENT_AI_DIGEST_DISABLED", message: "AI digest is disabled" } }, 409);
     const askId = seg(/^\/api\/v1\/events\/([^/]+)\/ask$/);
-    if (askId && method === "POST") return json({ status: "offline", answer: null, sources: [] } satisfies event.AskEventResponse);
+    if (askId && method === "POST") return json({ status: "disabled", answer: null, sources: [] } satisfies event.AskEventResponse);
   }
 
   // Shared section layout save — version-locked (see DemoSectionLayout above).
