@@ -6104,7 +6104,7 @@ function createAccountingStore(me: () => { id: string; displayName: string }) {
     if (!parsed.ok) return json({ error: { code: "VALIDATION_FAILED", message: "Validation failed", details: parsed.errors } }, 400);
     const u = me();
     issuer = { ...parsed.value, version: body.expectedVersion + 1, updatedBy: u.id as accountingValues.AccountingIssuer["updatedBy"], updatedByName: u.displayName, updatedAt: new Date().toISOString() };
-    return json(issuer);
+    return json({ ...issuer, warnings: parsed.warnings } satisfies accountingValues.PutIssuerResponse);
   }
   return { handle };
 }

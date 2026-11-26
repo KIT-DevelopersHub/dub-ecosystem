@@ -24,7 +24,7 @@ const ISSUER: accounting.AccountingIssuer = {
 function fakeApi(issuer: accounting.AccountingIssuer | null, over: Partial<AccountingApi> = {}): AccountingApi {
   return {
     getIssuer: vi.fn(async () => ({ issuer })),
-    putIssuer: vi.fn(async ({ expectedVersion, ...s }) => ({ ...ISSUER, ...s, version: expectedVersion + 1 })),
+    putIssuer: vi.fn(async ({ expectedVersion, ...s }) => ({ ...ISSUER, ...s, version: expectedVersion + 1, warnings: [] })),
     ...over,
   };
 }
@@ -51,9 +51,12 @@ describe("会計 demo transport", () => {
     expect((await api.getIssuer()).issuer).toBeNull();
     const base = { name: "法人", officeName: null, postalCode: null, address: null, phone: null, email: null, url: null, taxRatePercent: 10 as const };
     const saved = await api.putIssuer({ ...base, invoiceRegistrationNo: "t7000012050002", expectedVersion: 0 });
-    expect(saved).toMatchObject({ version: 1, invoiceRegistrationNo: "T7000012050002" });
+    expect(saved).toMatchObject({ version: 1, invoiceRegistrationNo: "T7000012050002", warnings: [] });
     await expect(api.putIssuer({ ...base, invoiceRegistrationNo: null, expectedVersion: 0 })).rejects.toMatchObject({ status: 409 });
     await expect(api.putIssuer({ ...base, invoiceRegistrationNo: "T12", expectedVersion: 1 })).rejects.toMatchObject({ status: 400 });
+    // 確認用の数字が合わない番号は保存して warnings で知らせる。
+    const warned = await api.putIssuer({ ...base, invoiceRegistrationNo: "T1234567890123", expectedVersion: 1 });
+    expect(warned).toMatchObject({ version: 2, invoiceRegistrationNo: "T1234567890123", warnings: ["check_digit"] });
   });
 });
 
@@ -76,13 +79,27 @@ describe("AccountingScreen", () => {
     expect(api.putIssuer).not.toHaveBeenCalled();
   });
 
-  it("blocks a registration number whose check digit does not match", async () => {
+  it("warns (without blocking) when the check digit does not match, and still saves", async () => {
     const api = fakeApi(ISSUER);
     mount(api);
     fireEvent.change(await screen.findByTestId("fe2-accounting-field-invoiceRegistrationNo"), { target: { value: "T1234567890123" } });
+    // 入力中から注意が出て、保存ボタンは押せるまま。
+    expect(screen.getByTestId("fe2-accounting-warning-invoiceRegistrationNo")).toHaveTextContent(
+      "登録番号の確認用の数字が合いません。法人の場合は番号をご確認ください（個人事業者の番号はこの確認に当てはまらないことがあります）",
+    );
+    expect(screen.getByTestId("fe2-accounting-save")).not.toBeDisabled();
     fireEvent.click(screen.getByTestId("fe2-accounting-save"));
-    expect(await screen.findByText(/登録番号が正しくありません/)).toBeInTheDocument();
-    expect(api.putIssuer).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.putIssuer).toHaveBeenCalledWith(expect.objectContaining({ invoiceRegistrationNo: "T1234567890123", expectedVersion: 3 })));
+    expect(await screen.findByText("発行者情報を保存しました")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-accounting-warning-invoiceRegistrationNo")).toBeInTheDocument();
+  });
+
+  it("shows no warning for a matching or malformed number", async () => {
+    mount(fakeApi(ISSUER));
+    fireEvent.change(await screen.findByTestId("fe2-accounting-field-invoiceRegistrationNo"), { target: { value: "T7000012050002" } });
+    expect(screen.queryByTestId("fe2-accounting-warning-invoiceRegistrationNo")).toBeNull();
+    fireEvent.change(field("invoiceRegistrationNo"), { target: { value: "T123" } });
+    expect(screen.queryByTestId("fe2-accounting-warning-invoiceRegistrationNo")).toBeNull();
   });
 
   it("saves the normalized values with the current version", async () => {

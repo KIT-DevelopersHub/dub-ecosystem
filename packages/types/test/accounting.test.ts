@@ -36,12 +36,23 @@ describe("accounting.parseIssuerInput", () => {
     const r = accounting.parseIssuerInput({ ...OK, invoiceRegistrationNo: "ｔ７０００-０１２０-５０００２" });
     expect(r.ok && r.value.invoiceRegistrationNo).toBe("T7000012050002");
   });
-  it("reports check_digit (not the shape error) when only the check digit is wrong", () => {
-    const r = accounting.parseIssuerInput({ ...OK, invoiceRegistrationNo: "T1234567890123" });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.errors).toEqual([{ field: "invoiceRegistrationNo", reason: "check_digit" }]);
-    expect(accounting.issuerErrorMessage(r.errors[0]!)).toBe("登録番号が正しくありません（T のすぐ後の確認用の数字が合いません）");
+  it("keeps a number whose check digit does not match, with a check_digit warning (個人事業者の番号を止めない)", () => {
+    const r = accounting.parseIssuerInput({ ...OK, invoiceRegistrationNo: "t 1234-5678-90123" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.invoiceRegistrationNo).toBe("T1234567890123");
+    expect(r.warnings).toEqual(["check_digit"]);
+    expect(accounting.issuerWarningMessage(r.warnings[0]!)).toBe(
+      "登録番号の確認用の数字が合いません。法人の場合は番号をご確認ください（個人事業者の番号はこの確認に当てはまらないことがあります）",
+    );
+  });
+  it("has no warnings for a matching or empty number, and none for a malformed one (that is an error)", () => {
+    const ok = accounting.parseIssuerInput({ ...OK, invoiceRegistrationNo: "T7000012050002" });
+    expect(ok.ok && ok.warnings).toEqual([]);
+    const none = accounting.parseIssuerInput({ ...OK, invoiceRegistrationNo: "" });
+    expect(none.ok && none.warnings).toEqual([]);
+    expect(accounting.invoiceRegistrationNoWarnings("T12345")).toEqual([]);
+    expect(accounting.invoiceRegistrationNoWarnings("T1234567890123")).toEqual(["check_digit"]);
   });
   it("still reports the shape error for a malformed number", () => {
     const r = accounting.parseIssuerInput({ ...OK, invoiceRegistrationNo: "T12345" });
@@ -52,6 +63,7 @@ describe("accounting.parseIssuerInput", () => {
     expect(r).toEqual({
       ok: true,
       value: { name: "法人", officeName: null, postalCode: "920-1234", address: null, phone: "076-000-0000", email: null, url: null, invoiceRegistrationNo: null, taxRatePercent: 10 },
+      warnings: [],
     });
   });
   it("reports one error per bad field", () => {

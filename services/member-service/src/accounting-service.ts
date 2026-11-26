@@ -18,7 +18,7 @@ export class AccountingService {
     return { issuer: row ? toIssuer(row) : null };
   }
 
-  async putIssuer(ctx: ReqCtx, body: accounting.PutIssuerRequest): Promise<accounting.AccountingIssuer> {
+  async putIssuer(ctx: ReqCtx, body: accounting.PutIssuerRequest): Promise<accounting.PutIssuerResponse> {
     const { accountingRepo, orgId, repo, now } = this.deps;
     const expected = (body as { expectedVersion?: unknown } | null)?.expectedVersion;
     if (typeof expected !== "number" || !Number.isInteger(expected) || expected < 0) {
@@ -36,6 +36,6 @@ export class AccountingService {
       updatedAt: now(),
     };
     if (!(await accountingRepo.saveIssuer(row, expected))) throw errVersionConflict();
-    return toIssuer(row);
+    return { ...toIssuer(row), warnings: parsed.warnings };
   }
 }

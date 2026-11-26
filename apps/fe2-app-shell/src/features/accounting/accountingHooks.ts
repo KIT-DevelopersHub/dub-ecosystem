@@ -37,7 +37,7 @@ export function useSaveIssuer() {
       qc.setQueryData<accounting.GetIssuerResponse>(ISSUER_KEY, { issuer: optimisticIssuer(settings, snapshot?.issuer ?? null) });
       return { snapshot };
     },
-    onSuccess: (saved) => {
+    onSuccess: ({ warnings: _w, ...saved }) => {
       qc.setQueryData<accounting.GetIssuerResponse>(ISSUER_KEY, { issuer: saved });
       toast.show({ kind: "success", title: "発行者情報を保存しました" });
     },

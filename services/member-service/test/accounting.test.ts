@@ -33,13 +33,15 @@ describe("会計 発行者情報", () => {
       version: 1,
       updatedBy: "user_caller",
       updatedAt: NOW(),
+      warnings: [],
     });
+    const { warnings: _w, ...savedIssuer } = saved.json;
 
     const got = await call(app, "GET", "/members/accounting/issuer");
-    expect(got.json.issuer).toEqual(saved.json);
+    expect(got.json.issuer).toEqual(savedIssuer);
     const internal = await call(app, "GET", "/members/internal/accounting/issuer", { internal: true, userId: null });
     expect(internal.status).toBe(200);
-    expect(internal.json.issuer).toEqual(saved.json);
+    expect(internal.json.issuer).toEqual(savedIssuer);
   });
 
   it("rejects a malformed registration number / postal code / rate with field errors", async () => {
@@ -51,9 +53,14 @@ describe("会計 発行者情報", () => {
     const fields = (bad.json.error.details as { field: string; reason: string }[]).map((d) => `${d.field}:${d.reason}`).sort();
     expect(fields).toEqual(["invoiceRegistrationNo:invalid", "name:required", "postalCode:invalid", "taxRatePercent:invalid"]);
     expect((await call(app, "GET", "/members/accounting/issuer")).json.issuer).toBeNull();
-    const wrongDigit = await call(app, "PUT", "/members/accounting/issuer", { body: { ...BASE, invoiceRegistrationNo: "T1234567890123", expectedVersion: 0 } });
-    expect(wrongDigit.status).toBe(400);
-    expect(wrongDigit.json.error.details).toEqual([{ field: "invoiceRegistrationNo", reason: "check_digit" }]);
+  });
+
+  it("saves a number whose check digit does not match, with a check_digit warning (個人事業者の番号を止めない)", async () => {
+    const app = createApp(makeDeps({ now: NOW }));
+    const res = await call(app, "PUT", "/members/accounting/issuer", { body: { ...BASE, invoiceRegistrationNo: "T1234567890123", expectedVersion: 0 } });
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ invoiceRegistrationNo: "T1234567890123", version: 1, warnings: ["check_digit"] });
+    expect((await call(app, "GET", "/members/accounting/issuer")).json.issuer).toMatchObject({ invoiceRegistrationNo: "T1234567890123", version: 1 });
   });
 
   it("requires expectedVersion and loses the optimistic lock to a newer save", async () => {

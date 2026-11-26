@@ -69,6 +69,12 @@ function IssuerForm({ issuer, canEdit }: { issuer: accounting.AccountingIssuer |
     const e = parsed.errors.find((x) => x.field === field);
     return e ? accounting.issuerErrorMessage(e) : undefined;
   };
+  // 確認用の数字が合わない時は保存を止めず注意だけ出す (入力中も保存後も同じ式で見る)。
+  const warningOf = (field: accounting.IssuerField): string | undefined => {
+    if (field !== "invoiceRegistrationNo") return undefined;
+    const w = accounting.invoiceRegistrationNoWarnings(form.invoiceRegistrationNo)[0];
+    return w && !errorOf(field) ? accounting.issuerWarningMessage(w) : undefined;
+  };
   const set = (key: keyof Form) => (value: string) => setForm((f) => ({ ...f, [key]: value }));
 
   const onSubmit = (e: FormEvent) => {
@@ -99,6 +105,9 @@ function IssuerForm({ issuer, canEdit }: { issuer: accounting.AccountingIssuer |
                   type={f.type ?? "text"}
                   {...(f.placeholder ? { placeholder: f.placeholder } : {})}
                 />
+                {warningOf(f.key) && (
+                  <p className={styles.warning} role="status" data-testid={`fe2-accounting-warning-${f.key}`}>{warningOf(f.key)}</p>
+                )}
               </FormField>
             ))}
             {s.title === "インボイス" && (

@@ -4,7 +4,7 @@ import type { ApiClient } from "../../lib/api-client.tsx";
 
 export interface AccountingApi {
   getIssuer(): Promise<accounting.GetIssuerResponse>;
-  putIssuer(body: accounting.PutIssuerRequest): Promise<accounting.AccountingIssuer>;
+  putIssuer(body: accounting.PutIssuerRequest): Promise<accounting.PutIssuerResponse>;
 }
 
 const ISSUER = "/api/v1/members/accounting/issuer";
@@ -12,6 +12,6 @@ const ISSUER = "/api/v1/members/accounting/issuer";
 export function createAccountingApi(api: ApiClient): AccountingApi {
   return {
     getIssuer: () => api.request<accounting.GetIssuerResponse>({ method: "GET", path: ISSUER }),
-    putIssuer: (body) => api.request<accounting.AccountingIssuer, accounting.PutIssuerRequest>({ method: "PUT", path: ISSUER, body }),
+    putIssuer: (body) => api.request<accounting.PutIssuerResponse, accounting.PutIssuerRequest>({ method: "PUT", path: ISSUER, body }),
   };
 }

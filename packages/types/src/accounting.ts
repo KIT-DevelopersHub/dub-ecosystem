@@ -49,8 +49,19 @@ export interface PutIssuerRequest extends IssuerSettings {
   expectedVersion: number;
 }
 
+/**
+ * 保存はするが確かめてほしい点。check_digit = 登録番号の確認用の数字が法人番号の式と合わない
+ * (個人事業者の番号は法人番号の式に当てはまらないことがあるので、止めずに知らせるだけ)。
+ */
+export type IssuerWarning = "check_digit";
+
+/** PUT /members/accounting/issuer の 200。保存した値 + warnings (無ければ空)。 */
+export interface PutIssuerResponse extends AccountingIssuer {
+  warnings: IssuerWarning[];
+}
+
 export type IssuerField = keyof IssuerSettings;
-export type IssuerFieldError = { field: IssuerField; reason: "required" | "too_long" | "invalid" | "check_digit" };
+export type IssuerFieldError = { field: IssuerField; reason: "required" | "too_long" | "invalid" };
 
 const FULLWIDTH_DIGIT = /[０-９]/g;
 const halfWidth = (s: string): string => s.replace(FULLWIDTH_DIGIT, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
@@ -74,6 +85,12 @@ export function invoiceRegistrationNoCheckDigitOk(normalized: string): boolean {
   let sum = 0;
   for (let n = 1; n <= 12; n++) sum += Number(base[12 - n]) * (n % 2 === 1 ? 1 : 2);
   return Number(m[1]) === 9 - (sum % 9);
+}
+
+/** 登録番号の入力に対する注意 (形が T + 13 桁の時だけ確認用の数字を見る)。形の誤りはエラー側で扱う。 */
+export function invoiceRegistrationNoWarnings(raw: string): IssuerWarning[] {
+  const n = normalizeInvoiceRegistrationNo(raw);
+  return n !== null && !invoiceRegistrationNoCheckDigitOk(n) ? ["check_digit"] : [];
 }
 
 /** 郵便番号の正規化: 7 桁を NNN-NNNN に。形が違えば null。 */
@@ -101,7 +118,9 @@ export const taxIncluded = (amountJpy: number, ratePercent: number): number =>
  * 入力の検査と正規化。前後の空白は落とし、任意項目の空欄は null。
  * 画面 (保存前のフィールド表示) とサーバ (400 の根拠) が同じ結果を出す。
  */
-export function parseIssuerInput(raw: unknown): { ok: true; value: IssuerSettings } | { ok: false; errors: IssuerFieldError[] } {
+export function parseIssuerInput(
+  raw: unknown,
+): { ok: true; value: IssuerSettings; warnings: IssuerWarning[] } | { ok: false; errors: IssuerFieldError[] } {
   const b = (raw ?? {}) as Record<string, unknown>;
   const errors: IssuerFieldError[] = [];
   const text = (field: IssuerField, max: number, required = false): string | null => {
@@ -137,11 +156,7 @@ export function parseIssuerInput(raw: unknown): { ok: true; value: IssuerSetting
   });
   const email = shaped("email", ISSUER_EMAIL_MAX, (s) => (EMAIL_RE.test(s) ? s : null));
   const url = shaped("url", ISSUER_URL_MAX, (s) => (URL_RE.test(s) ? s : null));
-  let invoiceRegistrationNo = shaped("invoiceRegistrationNo", 20, normalizeInvoiceRegistrationNo);
-  if (invoiceRegistrationNo !== null && !invoiceRegistrationNoCheckDigitOk(invoiceRegistrationNo)) {
-    errors.push({ field: "invoiceRegistrationNo", reason: "check_digit" });
-    invoiceRegistrationNo = null;
-  }
+  const invoiceRegistrationNo = shaped("invoiceRegistrationNo", 20, normalizeInvoiceRegistrationNo);
   const rate = b.taxRatePercent ?? DEFAULT_TAX_RATE;
   if (!TAX_RATES.includes(rate as TaxRatePercent)) errors.push({ field: "taxRatePercent", reason: "invalid" });
 
@@ -149,6 +164,7 @@ export function parseIssuerInput(raw: unknown): { ok: true; value: IssuerSetting
   return {
     ok: true,
     value: { name: name!, officeName, postalCode, address, phone, email, url, invoiceRegistrationNo, taxRatePercent: rate as TaxRatePercent },
+    warnings: invoiceRegistrationNoWarnings(invoiceRegistrationNo ?? ""),
   };
 }
 
@@ -156,7 +172,6 @@ export function parseIssuerInput(raw: unknown): { ok: true; value: IssuerSetting
 export function issuerErrorMessage(e: IssuerFieldError): string {
   if (e.reason === "required") return "入力してください";
   if (e.reason === "too_long") return "長すぎます";
-  if (e.reason === "check_digit") return "登録番号が正しくありません（T のすぐ後の確認用の数字が合いません）";
   switch (e.field) {
     case "invoiceRegistrationNo": return "T と 13 桁の数字で入力してください（例: T7000012050002）";
     case "postalCode": return "7 桁の数字で入力してください（例: 920-0000）";
@@ -164,5 +179,13 @@ export function issuerErrorMessage(e: IssuerFieldError): string {
     case "email": return "メールアドレスの形で入力してください";
     case "url": return "https:// から入力してください";
     default: return "使えない文字が含まれています";
+  }
+}
+
+/** 注意の文言 (画面用)。 */
+export function issuerWarningMessage(w: IssuerWarning): string {
+  switch (w) {
+    case "check_digit":
+      return "登録番号の確認用の数字が合いません。法人の場合は番号をご確認ください（個人事業者の番号はこの確認に当てはまらないことがあります）";
   }
 }
