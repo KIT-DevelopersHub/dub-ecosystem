@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { member } from "@dub/types";
 import type { OrgMember } from "./contracts.ts";
-import { orgChartOrder, rosterOrder } from "./orgChartOrder.ts";
+import { orgChartOrder } from "./orgChartOrder.ts";
+import { rosterOrder } from "./rosterHierarchy.ts";
 
 const P0 = member.emptyPersonProfile();
 const base = { orgId: "o", status: "added" as const, teamIds: [], department: null, grade: null, contact: null, note: null, gmail: null, identityUserId: null, version: 1, createdAt: "t", updatedAt: "t" };

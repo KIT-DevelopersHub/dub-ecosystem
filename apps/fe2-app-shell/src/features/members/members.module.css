@@ -615,3 +615,118 @@
     box-shadow: none;
   }
 }
+
+/* ── 運営名簿: 階層で見る (#873) ── */
+.viewToggle {
+  margin-bottom: var(--dub-space-4);
+}
+.hierarchyScroll {
+  overflow-x: auto;
+  padding-bottom: var(--dub-space-4);
+}
+.hierarchy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-6);
+  width: max-content;
+  min-width: 100%;
+}
+.hierarchyTier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+}
+.hierarchyTierTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+}
+.hierarchyRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dub-space-4);
+}
+.leaderColumn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-3);
+  width: 15rem;
+  flex: none;
+  padding: var(--dub-space-3);
+  border-radius: var(--dub-radius-lg);
+  background: var(--dub-color-surface-sunken);
+}
+.columnMembers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding-left: var(--dub-space-3);
+  border-left: 2px solid var(--dub-color-border-default);
+}
+.columnEmpty {
+  margin: 0;
+  padding-left: var(--dub-space-3);
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.unassignedColumnHead {
+  padding: var(--dub-space-2) var(--dub-space-1);
+  font-size: var(--dub-font-size-sm);
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-secondary);
+}
+.personCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-raised);
+  box-shadow: var(--dub-shadow-sm);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.hierarchyRow > .personCard {
+  width: 15rem;
+  flex: none;
+}
+button.personCard {
+  cursor: pointer;
+}
+button.personCard:hover {
+  border-color: var(--dub-color-border-strong);
+}
+button.personCard:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+.personCard[data-muted] {
+  opacity: 0.6;
+  box-shadow: none;
+}
+.personName {
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.personRole {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.personTeams {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dub-space-1);
+  margin-top: var(--dub-space-1);
+}
