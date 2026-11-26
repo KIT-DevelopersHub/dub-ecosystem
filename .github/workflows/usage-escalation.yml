@@ -1,0 +1,61 @@
+name: usage escalation
+
+# WHY (#902): usage-meter only mailed "D1 行読み取り 73.7%" — nobody decided anything and the
+# mail was forgotten. This turns a free-tier metric near its ceiling into a tracked GitHub
+# Issue (area:usage, P1 / P0 at critical) with what is consuming, the playbook mitigations and
+# what paying would cost, so a human chooses "対策" or "課金".
+#   levels: warn 70% / act 85% / critical 95%, raised when the current pace runs out before the
+#   reset (services/usage-meter/src/escalation.ts). One open Issue per metric; at most one post
+#   per metric per UTC day unless the level rises.
+# Reads only: one ~150-row SELECT on usage_snapshot (prod D1, via the existing deploy token)
+# and Cloudflare GraphQL Analytics for the top consumers. Writes only GitHub Issues with the
+# workflow's own GITHUB_TOKEN — no new secret. Runbook: docs/runbooks/11-usage-free-tier/.
+on:
+  schedule:
+    # every 6 hours (00:17 / 06:17 / 12:17 / 18:17 UTC); usage-meter collects daily + on view.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print the Issues instead of posting them'
+        type: boolean
+        default: false
+
+concurrency:
+  group: usage-escalation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  escalate:
+    name: open / update usage Issues
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @dub/usage-meter...
+
+      - name: Read usage_snapshot (last 8 days, read-only)
+        working-directory: services/usage-meter
+        run: |
+          SQL=$(pnpm exec tsx scripts/usage-escalation.ts --print-sql)
+          pnpm dlx wrangler@4.35.0 d1 execute dub-core --remote --json --command "$SQL" > "$RUNNER_TEMP/usage-rows.json"
+          echo "rows: $(node -e "const j=require(process.argv[1]);console.log(j.flatMap(r=>r.results||[]).length)" "$RUNNER_TEMP/usage-rows.json")"
+
+      - name: Open / update Issues
+        working-directory: services/usage-meter
+        run: |
+          pnpm exec tsx scripts/usage-escalation.ts --rows "$RUNNER_TEMP/usage-rows.json" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
