@@ -66,6 +66,13 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
   };
 }
 
+// Every sync takes the view total from counts(); with the default (rejecting) counts a foreground
+// sync re-asks the list for it, so call-count tests hand in a working counts().
+function okCounts(): MailApi["counts"] {
+  const view = { total: 0, unread: 0 };
+  return vi.fn().mockResolvedValue({ inbox: view, mine: view, others: view, starred: view, archive: view, trash: view, blocked: view });
+}
+
 function wrap(ui: ReactNode, api: MailApi = fakeApi()): JSX.Element {
   return <MailApiProvider value={api}>{ui}</MailApiProvider>;
 }
@@ -273,7 +280,7 @@ describe("GmailApp (hydrates from the gateway)", () => {
       .fn()
       .mockResolvedValueOnce({ items: [], nextCursor: null })
       .mockResolvedValue({ items: DEMO_INBOX_ITEMS, nextCursor: null });
-    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: vi.fn().mockResolvedValue({ items: [], nextCursor: null }) })));
+    render(wrap(<GmailApp />, fakeApi({ listInbox, counts: okCounts(), listSent: vi.fn().mockResolvedValue({ items: [], nextCursor: null }) })));
     expect(await screen.findByTestId("fe2-mail-inbox-empty")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("fe2-mail-refresh"));
     await waitFor(() => expect(screen.getAllByTestId("fe2-mail-inbox-item").length).toBeGreaterThan(0));
@@ -284,7 +291,7 @@ describe("GmailApp (hydrates from the gateway)", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const listInbox = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
-      render(wrap(<GmailApp />, fakeApi({ listInbox })));
+      render(wrap(<GmailApp />, fakeApi({ listInbox, counts: okCounts() })));
       await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(1));
       await act(async () => {
         vi.advanceTimersByTime(MAIL_POLL_MS);
@@ -310,7 +317,7 @@ describe("GmailApp (hydrates from the gateway)", () => {
     const visibility = vi.spyOn(document, "visibilityState", "get");
     try {
       const listInbox = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
-      render(wrap(<GmailApp />, fakeApi({ listInbox })));
+      render(wrap(<GmailApp />, fakeApi({ listInbox, counts: okCounts() })));
       await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(1));
       await act(async () => {
         window.dispatchEvent(new Event("blur"));
@@ -332,7 +339,7 @@ describe("GmailApp (hydrates from the gateway)", () => {
     }
   });
 
-  it("a background sync takes the view total from counts() instead of the list's COUNT", async () => {
+  it("every sync takes the view total from counts() instead of the list's COUNT", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const view = { total: 0, unread: 0 };
@@ -340,7 +347,7 @@ describe("GmailApp (hydrates from the gateway)", () => {
       const listInbox = vi.fn().mockResolvedValue({ items: [], nextCursor: null, total: 0 });
       render(wrap(<GmailApp />, fakeApi({ listInbox, counts })));
       await waitFor(() => expect(counts).toHaveBeenCalledTimes(1));
-      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox" }); // first load keeps its total
+      expect(listInbox).toHaveBeenLastCalledWith({ limit: 50, folder: "inbox", withTotal: false }); // first load too
       await act(async () => {
         vi.advanceTimersByTime(MAIL_POLL_MS);
       });
@@ -1007,7 +1014,7 @@ describe("Gmail-style pagination (cursor-paged folder list)", () => {
     const listInbox = vi.fn().mockImplementation((q?: { cursor?: string }) =>
       q?.cursor === "c2" ? new Promise((r) => (release = r)) : Promise.resolve({ items: pageItems(1, 50), nextCursor: "c2" }),
     );
-    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent() })));
+    render(wrap(<GmailApp />, fakeApi({ listInbox, listSent: noSent(), counts: okCounts() })));
     await waitFor(() => expect(screen.getByTestId("fe2-mail-page-next")).toBeEnabled());
     await userEvent.click(screen.getByTestId("fe2-mail-page-next"));
     expect(screen.getByTestId("fe2-mail-list-loading")).toBeInTheDocument();
