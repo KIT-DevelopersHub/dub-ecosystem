@@ -163,10 +163,27 @@ describe("フォームの編集", () => {
     expect(body.questions.at(-1)).toMatchObject({ label: "所属サークル", type: "dropdown", options: ["軽音"] });
   });
 
+  it("long text fields wrap inside the box and grow instead of overflowing (#840)", async () => {
+    renderWith(<HrInterviewFormScreen />, fakeFormApi());
+    await screen.findByTestId("fe2-hr-form-editor");
+    const long = "とても長い質問文です。".repeat(30);
+    for (const testId of ["fe2-hr-form-title", "fe2-hr-form-description", "fe2-hr-form-q-interests-label", "fe2-hr-form-q-interests-desc"]) {
+      const el = screen.getByTestId(testId);
+      expect(el.tagName).toBe("TEXTAREA");
+      expect(el).toHaveAttribute("data-autogrow", "true");
+    }
+    const label = screen.getByTestId("fe2-hr-form-q-interests-label");
+    fireEvent.change(label, { target: { value: long } });
+    expect((label as HTMLTextAreaElement).value).toBe(long);
+    // 質問文は 1 行の値のまま (貼り付けた改行は空白に)。
+    fireEvent.change(label, { target: { value: "一行目\n二行目" } });
+    expect((label as HTMLTextAreaElement).value).toBe("一行目 二行目");
+  });
+
   it("a viewer sees the editor but every control is disabled", async () => {
     renderWith(<HrInterviewFormScreen />, fakeFormApi(), { permissions: VIEWER });
     await screen.findByTestId("fe2-hr-form-editor");
-    expect((screen.getByTestId("fe2-hr-form-title") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByTestId("fe2-hr-form-title") as HTMLTextAreaElement).disabled).toBe(true);
     expect((screen.getByTestId("fe2-hr-form-add-question") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId("fe2-hr-form-enter") as HTMLButtonElement).disabled).toBe(true);
   });

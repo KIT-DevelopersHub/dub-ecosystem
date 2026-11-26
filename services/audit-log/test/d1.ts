@@ -12,7 +12,9 @@ import type { D1Database } from "@cloudflare/workers-types";
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
 
-const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), "../db/0001_audit_logs.sql");
+const DB_DIR = join(dirname(fileURLToPath(import.meta.url)), "../db");
+// Applied in order, mirroring infra/d1/migrations/audit/ (0002 drops unused indexes, #841).
+const SCHEMA_PATHS = ["0001_audit_logs.sql", "0002_drop_unused_indexes.sql"].map((f) => join(DB_DIR, f));
 
 function norm(v: unknown): unknown {
   if (v === undefined) return null;
@@ -22,7 +24,7 @@ function norm(v: unknown): unknown {
 
 export function makeD1(): { d1: D1Database; raw: InstanceType<typeof DatabaseSync> } {
   const raw = new DatabaseSync(":memory:");
-  raw.exec(readFileSync(SCHEMA_PATH, "utf8"));
+  for (const p of SCHEMA_PATHS) raw.exec(readFileSync(p, "utf8"));
 
   const adapter = {
     prepare(sql: string) {

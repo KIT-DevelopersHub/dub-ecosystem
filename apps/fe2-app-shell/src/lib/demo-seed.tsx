@@ -86,6 +86,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // LP管理: チケットの当日受付（受付タブを demo で出すため）。
+  "lp:checkin",
   // カレンダー: 予定の登録（予定を作成ボタン）。
   "calendar:schedule_edit",
   // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
@@ -5650,6 +5652,25 @@ function createLpTicketsStore() {
     cp("cpn_press", "PRESS5YTN2", "メディア招待", 5, true, "2026-10-10T14:59:59.000Z", "2026-10-02T01:00:00.000Z"),
   ];
   const couponOf: Record<string, string> = { ord_011: "cpn_speakers", ord_005: "cpn_sponsor_a" };
+  // 当日受付の記録（demo はメモリだけ）。券は支払い済み/返金済みの注文から 1 席 1 枚で導く。
+  let checkins: { ticketId: string; eventDay: string; checkedInAt: string; checkedInBy: string }[] = [];
+  const demoTodayJst = (): string =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const demoTickets = () =>
+    orders
+      .filter((o) => o.status === "paid" || o.status === "refunded")
+      .flatMap((o) =>
+        o.items
+          .flatMap((it) => Array.from({ length: it.quantity }, () => it))
+          .map((it, n) => ({
+            ticketId: `${o.id}-${n + 1}`,
+            orderRef: o.id.slice(-8).toUpperCase(),
+            ticketTypeName: it.ticketTypeName,
+            dayLabel: it.dayLabel,
+            buyerName: o.buyerName,
+            valid: o.status === "paid",
+          })),
+      );
   const orders: DemoTicketOrder[] = seedOrders.map(([id, lines, buyerName, status, createdAt, aff, att], i) => {
     const couponId = couponOf[id] ?? null;
     const items = lines.map(([typeId, quantity]) => {
@@ -5886,6 +5907,55 @@ function createLpTicketsStore() {
       }
       o.status = "refunded";
       return json({ result: o.amountJpy === 0 ? "cancelled" : "refunded", order: o });
+    }
+
+    // 当日受付（lp:checkin）。実サーバー（services/lp-tickets/src/checkin.ts）と同じ判定を簡略に。
+    //   券 ID = `<注文 ID>-<枚目>`（demo の手入力はこれ。例 ord_002-1）。QR の URL（…/t/<id>.<sig>）も読む。
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/checkin") {
+      const day = typeof req.eventDay === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.eventDay) ? req.eventDay : demoTodayJst();
+      let code = typeof req.code === "string" ? req.code.normalize("NFKC").trim() : "";
+      const at = code.lastIndexOf("/t/");
+      if (at >= 0) code = code.slice(at + 3).split(/[/?#]/)[0] ?? "";
+      code = code.split(".")[0] ?? "";
+      const none = { checkedInAt: null, checkedInBy: null, dayCheck: null };
+      const t = demoTickets().find((x) => x.ticketId.toLowerCase() === code.toLowerCase());
+      if (!t) return json({ result: "unknown", eventDay: day, ticket: null, ...none });
+      const ticket = { ticketId: t.ticketId, orderRef: t.orderRef, ticketTypeName: t.ticketTypeName, dayLabel: t.dayLabel, holderName: null, buyerName: t.buyerName };
+      if (!t.valid) return json({ result: "void", eventDay: day, ticket, ...none });
+      const md = `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+      const dated = /\d{1,2}\/\d{1,2}/.exec(t.dayLabel)?.[0];
+      const dayCheck = !t.dayLabel ? "all_days" : !dated ? "unverified" : dated === md ? "match" : null;
+      if (!dayCheck) return json({ result: "wrong_day", eventDay: day, ticket, ...none });
+      const prior = checkins.find((c) => c.ticketId === t.ticketId && c.eventDay === day);
+      if (prior) return json({ result: "already", eventDay: day, ticket, checkedInAt: prior.checkedInAt, checkedInBy: prior.checkedInBy, dayCheck });
+      const now = new Date().toISOString();
+      checkins.push({ ticketId: t.ticketId, eventDay: day, checkedInAt: now, checkedInBy: "usr_demo_admin" });
+      return json({ result: "ok", eventDay: day, ticket, checkedInAt: now, checkedInBy: "usr_demo_admin", dayCheck });
+    }
+
+    const undoMatch = method === "DELETE" ? /^\/api\/v1\/lp\/tickets\/checkin\/([^/]+)$/.exec(pathname) : null;
+    if (undoMatch) {
+      const ticketId = decodeURIComponent(undoMatch[1]!);
+      const day = url.searchParams.get("day") || demoTodayJst();
+      const before = checkins.length;
+      checkins = checkins.filter((c) => !(c.ticketId === ticketId && c.eventDay === day));
+      return json({ ticketId, eventDay: day, removed: checkins.length < before });
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/checkins") {
+      const day = url.searchParams.get("day") || demoTodayJst();
+      const byId = new Map(demoTickets().map((t) => [t.ticketId, t]));
+      const items = checkins
+        .filter((c) => c.eventDay === day)
+        .sort((a, b) => (a.checkedInAt < b.checkedInAt ? 1 : -1))
+        .map((c) => {
+          const t = byId.get(c.ticketId)!;
+          return { ...c, orderRef: t.orderRef, ticketTypeName: t.ticketTypeName, dayLabel: t.dayLabel, holderName: null, buyerName: t.buyerName };
+        });
+      const counts = new Map<string, number>();
+      for (const c of checkins) counts.set(c.eventDay, (counts.get(c.eventDay) ?? 0) + 1);
+      const days = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([eventDay, count]) => ({ eventDay, count }));
+      return json({ eventDay: day, count: items.length, days, items, nextCursor: null });
     }
 
     return null;

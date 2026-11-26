@@ -121,6 +121,9 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
     saveSiteConfigDraft: unused,
     resetSiteConfigDraft: unused,
     publishSiteConfig: unused,
+    checkinTicket: unused,
+    undoTicketCheckin: unused,
+    listTicketCheckins: unused,
     ...overrides,
   };
 }

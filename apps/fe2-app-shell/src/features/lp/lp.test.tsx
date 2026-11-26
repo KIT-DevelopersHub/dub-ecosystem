@@ -77,6 +77,9 @@ const linksStubs = {
   saveSiteConfigDraft: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   resetSiteConfigDraft: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
   publishSiteConfig: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  checkinTicket: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  undoTicketCheckin: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
+  listTicketCheckins: () => Promise.reject(new Error("not used by LpVisitLogScreen")),
 };
 
 const UNCONFIGURED_SITE = {

@@ -13,7 +13,8 @@
 // alarms are supported on SQLite-backed DOs.
 import type { DurableObjectState } from "@cloudflare/workers-types";
 import { consoleSink } from "@dub/observability";
-import { drainAll, pruneAll, type PruneAllResult } from "./drain-all";
+import { DAILY_USAGE_KEY, parseDailyRowCap, recordUsage, remainingToday } from "./daily-cap";
+import { claimedRows, drainAll, pruneAll, type PruneAllResult } from "./drain-all";
 import type { Env } from "./env";
 
 // 60 seconds — the drain safety-net cadence. A DO alarm does NOT count against the
@@ -82,14 +83,20 @@ export class FreeqDrainDO {
       this.logError("freeq-drain: setAlarm failed before drain", err);
     }
     try {
-      const results = await drainAll(this.env);
+      // Daily write guard (#841): claim at most FREEQ_DAILY_ROW_CAP rows per UTC day so a
+      // backlog drains over several days instead of exhausting the D1 free tier in one.
+      const cap = parseDailyRowCap(this.env.FREEQ_DAILY_ROW_CAP);
+      const startedAt = Date.now();
+      const budget = await remainingToday(this.state.storage, cap, startedAt);
+      const results = await drainAll(this.env, { maxRows: budget });
+      const usedToday = await recordUsage(this.state.storage, claimedRows(results), startedAt);
       const prune = await this.maybePrune();
       await this.state.storage.put(LAST_TICK_KEY, Date.now());
       consoleSink({
-        level: "info",
-        message: "freeq aggregated drain (DO alarm)",
+        level: budget === 0 ? "warn" : "info",
+        message: budget === 0 ? "freeq drain skipped: daily row cap reached" : "freeq aggregated drain (DO alarm)",
         service: "freeq-drain",
-        fields: { ...results, ...(prune ? { prune } : {}) },
+        fields: { ...results, ...(prune ? { prune } : {}), dailyCap: { cap, usedToday, key: DAILY_USAGE_KEY } },
       });
     } catch (err) {
       this.logError("freeq-drain: alarm body failed (loop kept alive)", err);

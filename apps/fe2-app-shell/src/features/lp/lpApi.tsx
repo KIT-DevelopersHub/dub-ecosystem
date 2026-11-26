@@ -162,6 +162,14 @@ export type LpTicketCouponInput = lpTickets.LpTicketCouponInput;
 export type LpTicketRefundResult = lpTickets.LpTicketRefundResult;
 export type LpTicketRefundResponse = lpTickets.LpTicketRefundResponse;
 export type LpTicketRefundErrorReason = lpTickets.LpTicketRefundErrorReason;
+export type LpTicketCheckinResult = lpTickets.LpTicketCheckinResult;
+export type LpTicketCheckinDayCheck = lpTickets.LpTicketCheckinDayCheck;
+export type LpTicketCheckinInput = lpTickets.LpTicketCheckinInput;
+export type LpTicketCheckinTicket = lpTickets.LpTicketCheckinTicket;
+export type LpTicketCheckinResponse = lpTickets.LpTicketCheckinResponse;
+export type LpTicketCheckin = lpTickets.LpTicketCheckin;
+export type LpTicketCheckinsPage = lpTickets.LpTicketCheckinsPage;
+export type LpTicketCheckinUndoResponse = lpTickets.LpTicketCheckinUndoResponse;
 
 // ── 登壇者募集（/proposals）。lp-analytics services/lp-analytics の types.ts と完全一致させる ──
 /** submitted = 未対応 / accepted = 採択 / rejected = 見送り。 */
@@ -242,6 +250,12 @@ export interface LpApi {
   setTicketCouponActive(id: string, input: { active: boolean }): Promise<LpTicketCoupon>;
   /** プレビュー（販売あり）のテスト購入トークン (app:lp:edit・Stripe テストキーの時だけ。それ以外は 409)。 */
   createTicketPreviewToken(): Promise<{ token: string; expiresAt: string }>;
+  /** 当日受付 (app:lp:view + lp:checkin)。受付できなくても 200 で result に理由。 */
+  checkinTicket(input: LpTicketCheckinInput): Promise<LpTicketCheckinResponse>;
+  /** 受付の取り消し (app:lp:view + lp:checkin)。 */
+  undoTicketCheckin(ticketId: string, eventDay: string): Promise<LpTicketCheckinUndoResponse>;
+  /** その日の受付一覧・新しい順と日ごとの件数 (app:lp:view + lp:checkin)。 */
+  listTicketCheckins(query: { day: string; cursor?: string; limit?: number }): Promise<LpTicketCheckinsPage>;
   /** 登壇者募集の設定・応募数 (app:lp:view)。 */
   getProposals(): Promise<LpProposalsState>;
   /** 募集の公開/停止 (app:lp:edit + lp:publish)。 */
@@ -346,6 +360,20 @@ export function createLpApi(api: ApiClient): LpApi {
       }),
     createTicketPreviewToken: () =>
       api.request<{ token: string; expiresAt: string }>({ method: "POST", path: `${BASE}/tickets/preview-token`, body: {} }),
+    checkinTicket: (input) =>
+      api.request<LpTicketCheckinResponse, LpTicketCheckinInput>({ method: "POST", path: `${BASE}/tickets/checkin`, body: input }),
+    undoTicketCheckin: (ticketId, eventDay) =>
+      api.request<LpTicketCheckinUndoResponse>({
+        method: "DELETE",
+        path: `${BASE}/tickets/checkin/${encodeURIComponent(ticketId)}`,
+        query: { day: eventDay },
+      }),
+    listTicketCheckins: (q) =>
+      api.request<LpTicketCheckinsPage>({
+        method: "GET",
+        path: `${BASE}/tickets/checkins`,
+        query: { day: q.day, cursor: q.cursor, limit: q.limit },
+      }),
     getProposals: () => api.request<LpProposalsState>({ method: "GET", path: `${BASE}/proposals` }),
     setProposalsEnabled: (input) =>
       api.request<LpProposalsState, { enabled: boolean }>({ method: "POST", path: `${BASE}/proposals/enabled`, body: input }),
