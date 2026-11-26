@@ -13,17 +13,25 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
     .sort();
 }
 
-const VIEW = ["GET /lp/links", "GET /lp/proposals", "GET /lp/publish", "GET /lp/site-config", "GET /lp/site-traffic", "GET /lp/stats", "GET /lp/visits"];
+const VIEW = ["GET /lp/links", "GET /lp/proposals", "GET /lp/publish", "GET /lp/site-config", "GET /lp/site-traffic", "GET /lp/sponsor-inquiries", "GET /lp/stats", "GET /lp/visits"];
 const EDIT = [
   "GET /lp/proposals/submissions",
+  "GET /lp/sponsor-inquiries/items",
   "PATCH /lp/links/:id",
   "PATCH /lp/proposals/submissions/:id",
+  "PATCH /lp/sponsor-inquiries/items/:id",
   "POST /lp/links",
   "POST /lp/proposals/fields",
   "POST /lp/site-config/draft/reset",
   "PUT /lp/site-config/draft",
 ];
-const PUBLISH = ["POST /lp/proposals/enabled", "POST /lp/publish", "POST /lp/site-config/publish"];
+const PUBLISH = [
+  "POST /lp/proposals/enabled",
+  "POST /lp/publish",
+  "POST /lp/site-config/publish",
+  "POST /lp/sponsor-inquiries/enabled",
+  "POST /lp/sponsor-inquiries/notify",
+];
 
 describe("route coverage (POLICY_TABLE <-> router)", () => {
   it("every registered endpoint has exactly one rule, and no rule is orphaned", async () => {
@@ -43,7 +51,7 @@ describe("role x endpoint matrix (frozen)", () => {
 
   it("every internal route is INTERNAL (no key opens them)", () => {
     const internal = Object.entries(POLICY_TABLE).filter(([route]) => route.includes("/internal/"));
-    expect(internal.length).toBe(7);
+    expect(internal.length).toBe(9);
     for (const [, rule] of internal) expect(rule).toBe("internal");
   });
 });

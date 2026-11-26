@@ -1,11 +1,11 @@
-// LP管理 のタブ帯（公開設定 ⇄ 流入URL ⇄ ログ管理 ⇄ チケット ⇄ 受付 ⇄ 登壇者募集）。受付は lp:checkin がある時だけ出す。MailFolderTabs と同じ流儀で、@dub/ui の
+// LP管理 のタブ帯（公開設定 ⇄ 流入URL ⇄ ログ管理 ⇄ チケット ⇄ 受付 ⇄ 登壇者募集 ⇄ スポンサー募集）。受付は lp:checkin がある時だけ出す。MailFolderTabs と同じ流儀で、@dub/ui の
 // Tabs をシェルのルーター navigate に繋ぐ薄いラッパ。タブは URL（/lp・/lp/links・/lp/visits）に
 // 紐づくので deep link / リロード / 戻る が成立する（ローカル state のタブにしない）。
 import { useNavigate } from "@tanstack/react-router";
 import { Tabs } from "@dub/ui";
 import { useOptionalCan } from "../../auth/AuthProvider.tsx";
 
-export type LpTabId = "config" | "links" | "visits" | "tickets" | "checkin" | "proposals";
+export type LpTabId = "config" | "links" | "visits" | "tickets" | "checkin" | "proposals" | "sponsors";
 
 const TABS = [
   { id: "config", label: "公開設定", path: "/lp" },
@@ -14,6 +14,7 @@ const TABS = [
   { id: "tickets", label: "チケット", path: "/lp/tickets" },
   { id: "checkin", label: "受付", path: "/lp/checkin" },
   { id: "proposals", label: "登壇者募集", path: "/lp/proposals" },
+  { id: "sponsors", label: "スポンサー募集", path: "/lp/sponsors" },
 ] as const;
 
 export function LpTabs({ active }: { active: LpTabId }): JSX.Element {

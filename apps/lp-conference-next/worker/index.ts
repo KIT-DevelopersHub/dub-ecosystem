@@ -35,6 +35,14 @@ import {
   proposalsInjection,
   type ProposalConfig,
 } from "./proposals.ts";
+import {
+  DEMO_SPONSOR_CONFIG,
+  handleSponsors,
+  isSponsorsPath,
+  parseSponsorConfig,
+  sponsorsInjection,
+  type SponsorConfig,
+} from "./sponsors.ts";
 import { handlePass, matchPassRoute } from "./ticket-pass.ts";
 import { handleReceipt, matchReceiptRoute } from "./ticket-receipt.ts";
 import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supportsSiteConfig } from "./site-config.ts";
@@ -149,6 +157,29 @@ async function proposalConfig(env: Env): Promise<ProposalConfig | null> {
   return value;
 }
 
+let sponsorsCache: { value: SponsorConfig | null; at: number } | null = null;
+
+/** スポンサー募集の公開状態 (30s cache, lp-analytics)。null = unavailable; never throws. */
+async function sponsorConfig(env: Env): Promise<SponsorConfig | null> {
+  if (env.TICKETS_DEMO === "1") return DEMO_SPONSOR_CONFIG;
+  const now = Date.now();
+  if (sponsorsCache && now - sponsorsCache.at < FLAG_TTL_MS) return sponsorsCache.value;
+  let value: SponsorConfig | null = null;
+  try {
+    if (env.LP_FLAG) {
+      const res = await env.LP_FLAG.fetch("https://lp-analytics/lp/internal/sponsor-inquiries", {
+        headers: { "x-dub-internal": "1" },
+        signal: AbortSignal.timeout(FLAG_TIMEOUT_MS),
+      });
+      if (res.ok) value = parseSponsorConfig(await res.json());
+    }
+  } catch {
+    // Never fail the page because of the sponsor config.
+  }
+  sponsorsCache = { value, at: now };
+  return value;
+}
+
 // 公開設定（セクション切り替え）。isolate ごとに 1 つ・service binding が無い環境（demo など）は常に既定値。
 let siteConfigSource: ReturnType<typeof createSiteConfigSource> | null = null;
 function siteLayout(env: Env, draft: boolean) {
@@ -209,6 +240,16 @@ export default {
       });
       if (handled) return handled;
     }
+    // スポンサー募集（/sponsors の資料請求）。公開中だけ応答し、それ以外は通常の 404。
+    const sponsorsPath = isSponsorsPath(url.pathname);
+    if (sponsorsPath) {
+      const handled = await handleSponsors(req, {
+        demo: env.TICKETS_DEMO === "1",
+        getConfig: () => sponsorConfig(env),
+        internal: proposalsInternal(env),
+      });
+      if (handled) return handled;
+    }
     if (ticketsPath) {
       const handled = await handleTickets(req, {
         demo: env.TICKETS_DEMO === "1",
@@ -229,6 +270,7 @@ export default {
     // Started in parallel; only awaited for HTML pages (CTA injection).
     const tickets = ticketsPath ? null : getConfig();
     const proposals = proposalsPath ? null : getProposals();
+    const sponsors = sponsorsPath ? null : sponsorConfig(env);
     const layout = ticketsPath || proposalsPath ? null : siteLayout(env, cfgDraft);
     const published = await publishedVersion(env);
     const r = resolveRequest(url, req.headers.get("cookie"), published, BUNDLED, req.headers.get("referer"));
@@ -261,6 +303,7 @@ export default {
     const page = isHtml && res.status === 200;
     const cfg = page && tickets ? await tickets : null;
     const spCfg = page && proposals ? await proposals : null;
+    const soCfg = page && sponsors ? await sponsors : null;
     // 公開設定は v3.6 以降の版だけ（古い版は属性を知らないので付けない）。
     const siteConfig = page && layout !== null && supportsSiteConfig(r.version);
     const siteLayoutValue = siteConfig ? await layout : null;
@@ -289,7 +332,8 @@ export default {
       (r.preview ? previewBanner(r.version, published) : "") +
       previewBar(previewing, hidden) +
       ticketsInjection(cfg, false) +
-      proposalsInjection(spCfg);
+      proposalsInjection(spCfg) +
+      sponsorsInjection(soCfg);
     const attrEntries = Object.entries(attrs);
     const changed = !!inject || attrEntries.length > 0 || content.length > 0;
     if (changed) headers.delete("etag");
