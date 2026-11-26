@@ -207,6 +207,12 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
     const o = this.orders.find((x) => x.id === id);
     if (o) o.preview = true;
   }
+  async setReceiptName(id: string, receiptName: string) {
+    const o = this.orders.find((x) => x.id === id && (x.receiptName ?? null) === null);
+    if (!o) return false;
+    o.receiptName = receiptName;
+    return true;
+  }
   async setOrderPaymentMethod(id: string, method: string) {
     const o = this.orders.find((x) => x.id === id);
     if (o) o.paymentMethod = method;

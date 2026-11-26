@@ -55,6 +55,8 @@ interface TicketOrderDbRow {
   /** 0006 migration. 1 = created from an LP管理 preview. */
   preview?: number | null;
   coupon_id: string | null;
+  /** 0003 (dub-tickets) migration. */
+  receipt_name?: string | null;
 }
 interface TicketCouponDbRow {
   id: string;
@@ -185,6 +187,7 @@ const toTicketOrder = (r: TicketOrderDbRow, items: LpTicketOrderItem[]): TicketO
   paymentMethod: r.payment_method ?? null,
   preview: r.preview === 1,
   couponId: r.coupon_id ?? null,
+  receiptName: r.receipt_name ?? null,
 });
 
 const toCoupon = (r: TicketCouponDbRow): TicketCouponRow => ({
@@ -392,8 +395,8 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
           // A coupon order is only written while the coupon still has room (same transaction as the
           // seat checks, so two buyers racing for the last use serialize and one gets coupon_used_up).
           sql: `INSERT INTO lp_ticket_orders (id, site, quantity, amount_jpy, status, buyer_name, buyer_email, answers_json,
-                                             stripe_session_id, created_at, paid_at, client_key, coupon_id)
-                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                                             stripe_session_id, created_at, paid_at, client_key, coupon_id, receipt_name)
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 WHERE ? IS NULL OR EXISTS (
                   SELECT 1 FROM lp_ticket_coupons c
                   WHERE c.id = ? AND c.site = ? AND c.active = 1 AND (c.expires_at IS NULL OR c.expires_at > ?)
@@ -414,6 +417,7 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
             o.paidAt,
             o.clientKey,
             o.couponId,
+            o.receiptName ?? null,
             o.couponId,
             o.couponId,
             o.site,
@@ -559,6 +563,10 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
     },
     async markOrderPreview(id) {
       await db.run("UPDATE lp_ticket_orders SET preview = 1 WHERE id = ?", id);
+    },
+    async setReceiptName(id, receiptName) {
+      const r = await db.run("UPDATE lp_ticket_orders SET receipt_name = ? WHERE id = ? AND receipt_name IS NULL", receiptName, id);
+      return r.meta.changes > 0;
     },
     async setOrderPaymentMethod(id, method) {
       await db.run("UPDATE lp_ticket_orders SET payment_method = ? WHERE id = ?", method, id);
