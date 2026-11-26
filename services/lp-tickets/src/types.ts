@@ -104,7 +104,8 @@ export interface CheckinListRow extends CheckinRow {
   holderName: string | null;
   buyerName: string;
 }
-export type OutboxKind = "buyer_confirmation" | "ops_copy";
+/** buyer_refund = 返金・取消のお知らせ（db/0004 で追加）。 */
+export type OutboxKind = "buyer_confirmation" | "buyer_refund" | "ops_copy";
 export interface OutboxRow {
   id: string;
   orderId: string;
@@ -191,8 +192,11 @@ export interface LpTicketRepo {
   markOrderExpired(id: string): Promise<boolean>;
   /** pending|expired|paid -> needs_review. */
   markOrderNeedsReview(id: string, reason: string, paymentIntentId?: string | null): Promise<boolean>;
-  /** paid|needs_review -> refunded (releases the seat) and, in the same transaction, voids the order's tickets. */
-  markOrderRefunded(id: string, refundedAt: string): Promise<boolean>;
+  /**
+   * paid|needs_review -> refunded (releases the seat) and, in the same transaction, voids the order's tickets.
+   * `mail` (the buyer_refund row) is queued in that same transaction, and only when this call made the change.
+   */
+  markOrderRefunded(id: string, refundedAt: string, mail?: OutboxRow): Promise<boolean>;
   /** needs_review -> paid (paid_at kept if set). `onlyReason` restricts it to that review_reason. */
   approveOrder(id: string, resolvedBy: string, resolvedAt: string, onlyReason?: string): Promise<boolean>;
   /** Fills payment_intent_id only where it is still NULL. */

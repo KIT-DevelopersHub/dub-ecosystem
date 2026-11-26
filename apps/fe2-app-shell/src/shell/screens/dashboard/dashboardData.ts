@@ -83,24 +83,33 @@ export const CONFERENCE = {
 export interface FreeTierMetric {
   key: string;
   label: string;
-  pct: number;
+  /** null = usage-meter could not measure it (status "unknown"). Never coerce to 0:
+   *  a fake 0% hides how close the org is to a free-tier cap. */
+  pct: number | null;
 }
 
-/** Reshape the BFF usage projection (pct may be null when unmeasured → 0) into the
- *  meter/KPI props, sorted most-stressed first so the card reads top-down. */
+/** Shown wherever a free-tier value could not be measured (instead of 0%). */
+export const FREE_TIER_UNAVAILABLE_LABEL = "取得できません";
+
+/** Reshape the BFF usage projection into the meter/KPI props, sorted most-stressed
+ *  first so the card reads top-down; unmeasured (null) metrics sink to the bottom. */
 export function freeTierFromMetrics(
   metrics: ReadonlyArray<{ key: string; label: string; pct: number | null }>,
 ): FreeTierMetric[] {
   return metrics
-    .map((m) => ({ key: m.key, label: m.label, pct: m.pct ?? 0 }))
-    .sort((a, b) => b.pct - a.pct);
+    .map((m) => ({ key: m.key, label: m.label, pct: m.pct ?? null }))
+    .sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));
 }
 
-/** The most-stressed free-tier metric (drives the headline 無料枠 KPI); null when
- *  there are no metrics. */
-export function worstFreeTier(metrics: FreeTierMetric[]): FreeTierMetric | null {
-  if (metrics.length === 0) return null;
-  return metrics.reduce((worst, m) => (m.pct > worst.pct ? m : worst), metrics[0]!);
+/** The most-stressed MEASURED free-tier metric (drives the headline 無料枠 KPI); null
+ *  when there are no metrics or none of them could be measured. */
+export function worstFreeTier(metrics: FreeTierMetric[]): (FreeTierMetric & { pct: number }) | null {
+  let worst: (FreeTierMetric & { pct: number }) | null = null;
+  for (const m of metrics) {
+    if (m.pct === null) continue;
+    if (worst === null || m.pct > worst.pct) worst = { ...m, pct: m.pct };
+  }
+  return worst;
 }
 
 // ── task completion breakdown, live from task-service via /bff/home ─────────────

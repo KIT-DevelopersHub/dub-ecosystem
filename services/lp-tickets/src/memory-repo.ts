@@ -228,11 +228,14 @@ export class InMemoryLpTicketRepo implements LpTicketRepo {
       paymentIntentId: o?.paymentIntentId ?? paymentIntentId,
     });
   }
-  async markOrderRefunded(id: string, refundedAt: string) {
+  async markOrderRefunded(id: string, refundedAt: string, mail?: OutboxRow) {
     const ok = this.transition(id, ["paid", "needs_review"], { status: "refunded", refundedAt });
     if (ok) {
       for (const t of this.tickets) {
         if (t.orderId === id && t.status === "valid") Object.assign(t, { status: "void", voidedAt: refundedAt });
+      }
+      if (mail && !this.outbox.some((x) => x.id === mail.id || (x.orderId === mail.orderId && x.kind === mail.kind))) {
+        this.outbox.push(clone(mail));
       }
     }
     return ok;
