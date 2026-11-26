@@ -2,6 +2,8 @@
 // namespace `lp_*` (enforced by @dub/db strict client) still fits.
 import type { DbClient } from "@dub/db";
 import type {
+  CheckinListRow,
+  CheckinRow,
   LpTicketAnswer,
   LpTicketField,
   LpTicketOrderItem,
@@ -85,6 +87,26 @@ interface TicketDbRow {
   created_at: string;
   voided_at: string | null;
 }
+interface CheckinDbRow {
+  ticket_id: string;
+  event_day: string;
+  checked_in_at: string;
+  checked_in_by: string;
+}
+interface CheckinListDbRow extends CheckinDbRow {
+  order_id: string;
+  ticket_type_name: string;
+  day_label: string;
+  holder_name: string | null;
+  buyer_name: string | null;
+}
+const toCheckin = (r: CheckinDbRow): CheckinRow => ({
+  ticketId: r.ticket_id,
+  eventDay: r.event_day,
+  checkedInAt: r.checked_in_at,
+  checkedInBy: r.checked_in_by,
+});
+
 interface OutboxDbRow {
   id: string;
   order_id: string;
@@ -95,6 +117,12 @@ interface OutboxDbRow {
   last_error: string | null;
   sent_at: string | null;
   created_at: string;
+}
+
+/** "a~b" の keyset カーソル。区切りが無ければ a だけ（b は空）。 */
+function parseKeyset(raw: string): { a: string; b: string } {
+  const i = raw.indexOf("~");
+  return i < 0 ? { a: raw, b: "" } : { a: raw.slice(0, i), b: raw.slice(i + 1) };
 }
 
 function parseJsonArray<T>(raw: string | null | undefined): T[] {
@@ -775,6 +803,102 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
         value,
         updatedAt,
       );
+    },
+
+    // ---- 当日受付 ----
+    async getCheckinTicket(ticketId) {
+      const r = await db.first<TicketDbRow & { holder_name: string | null; o_status: string | null; o_buyer: string | null }>(
+        `SELECT t.*, o.status AS o_status, o.buyer_name AS o_buyer
+         FROM lp_tickets t LEFT JOIN lp_ticket_orders o ON o.id = t.order_id WHERE t.id = ?`,
+        ticketId,
+      );
+      if (!r) return null;
+      return {
+        ticket: toTicket(r),
+        holderName: r.holder_name ?? null,
+        orderStatus: (r.o_status as LpTicketOrderStatus | null) ?? null,
+        buyerName: r.o_buyer ?? "",
+      };
+    },
+    async ticketIdsByOrderRef(orderRef) {
+      const rows = await db.all<{ id: string }>(
+        "SELECT id FROM lp_tickets WHERE upper(substr(order_id, -8)) = ? ORDER BY order_id, rowid",
+        orderRef.toUpperCase(),
+      );
+      return rows.map((r) => r.id);
+    },
+    async insertCheckin(c) {
+      // WHERE があるので SELECT と ON CONFLICT の構文は曖昧にならない（SQLite の upsert の注意点）。
+      const r = await db.run(
+        `INSERT INTO lp_ticket_checkins (ticket_id, event_day, checked_in_at, checked_in_by)
+         SELECT id, ?, ?, ? FROM lp_tickets WHERE id = ? AND status = 'valid'
+         ON CONFLICT DO NOTHING`,
+        c.eventDay,
+        c.checkedInAt,
+        c.checkedInBy,
+        c.ticketId,
+      );
+      return r.meta.changes > 0;
+    },
+    async getCheckin(ticketId, eventDay) {
+      const r = await db.first<CheckinDbRow>(
+        "SELECT * FROM lp_ticket_checkins WHERE ticket_id = ? AND event_day = ?",
+        ticketId,
+        eventDay,
+      );
+      return r ? toCheckin(r) : null;
+    },
+    async deleteCheckin(ticketId, eventDay) {
+      const r = await db.run("DELETE FROM lp_ticket_checkins WHERE ticket_id = ? AND event_day = ?", ticketId, eventDay);
+      return r.meta.changes > 0;
+    },
+    async listCheckins(eventDay, cursor, limit) {
+      const c = cursor ? parseKeyset(cursor) : null;
+      const rows = await db.all<CheckinListDbRow>(
+        `SELECT c.*, t.order_id, t.ticket_type_name, t.day_label, t.holder_name, o.buyer_name
+         FROM lp_ticket_checkins c
+         JOIN lp_tickets t ON t.id = c.ticket_id
+         LEFT JOIN lp_ticket_orders o ON o.id = t.order_id
+         WHERE c.event_day = ? AND (? IS NULL OR c.checked_in_at < ? OR (c.checked_in_at = ? AND c.ticket_id < ?))
+         ORDER BY c.checked_in_at DESC, c.ticket_id DESC LIMIT ?`,
+        eventDay,
+        c ? c.a : null,
+        c ? c.a : null,
+        c ? c.a : null,
+        c ? c.b : null,
+        limit,
+      );
+      return rows.map(
+        (r): CheckinListRow => ({
+          ...toCheckin(r),
+          orderId: r.order_id,
+          ticketTypeName: r.ticket_type_name,
+          dayLabel: r.day_label,
+          holderName: r.holder_name ?? null,
+          buyerName: r.buyer_name ?? "",
+        }),
+      );
+    },
+    async checkinCounts() {
+      const rows = await db.all<{ event_day: string; n: number }>(
+        "SELECT event_day, COUNT(*) AS n FROM lp_ticket_checkins GROUP BY event_day ORDER BY event_day",
+      );
+      return rows.map((r) => ({ eventDay: r.event_day, count: r.n }));
+    },
+    async listCheckinsForBackup(cursor, limit) {
+      const c = cursor ? parseKeyset(cursor) : null;
+      return (
+        await db.all<CheckinDbRow>(
+          `SELECT * FROM lp_ticket_checkins
+           WHERE (? IS NULL OR event_day > ? OR (event_day = ? AND ticket_id > ?))
+           ORDER BY event_day, ticket_id LIMIT ?`,
+          c ? c.a : null,
+          c ? c.a : null,
+          c ? c.a : null,
+          c ? c.b : null,
+          limit,
+        )
+      ).map(toCheckin);
     },
   };
 }
