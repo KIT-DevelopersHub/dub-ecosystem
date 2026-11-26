@@ -119,6 +119,7 @@ const READS = [
   "GET /mail/messages/:id/attachments/:attId",
   "GET /mail/scheduled",
   "GET /mail/scheduled/:id",
+  "GET /mail/send-as",
   "GET /mail/sent",
   "GET /mail/sent/:id",
   "GET /mail/sent/:id/attachments/:attId",
@@ -172,6 +173,10 @@ const ADMIN = [
   "GET /mail/admin/lists",
   "POST /mail/admin/lists",
   "DELETE /mail/admin/lists/:id",
+  "GET /mail/admin/shared-mailboxes",
+  "POST /mail/admin/shared-mailboxes",
+  "PATCH /mail/admin/shared-mailboxes/:id",
+  "DELETE /mail/admin/shared-mailboxes/:id",
 ].sort();
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /internal/email-routing/issued-addresses", "POST /internal/email-routing/issued-addresses/lookup", "POST /internal/email-routing/issued-addresses/revoke", "POST /internal/sponsor/contacts", "POST /internal/webhooks/resend", "POST /send"];
@@ -209,7 +214,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(65);
+    expect(everyRoute).toHaveLength(70);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing
@@ -229,6 +234,8 @@ describe("role x endpoint matrix (frozen)", () => {
       expect(reachable).not.toContain("GET /mail/admin/canary/probes");
       // A list decides who receives mail, so it sits behind the same key.
       expect(reachable).not.toContain("POST /mail/admin/lists");
+      // So does deciding who may send as a shared address.
+      expect(reachable).not.toContain("PATCH /mail/admin/shared-mailboxes/:id");
     }
     // ...and the holder does reach all of them, so the assertion above is not vacuous.
     expect(allowedRoutes(["mail:admin"])).toEqual(ADMIN_ONLY);

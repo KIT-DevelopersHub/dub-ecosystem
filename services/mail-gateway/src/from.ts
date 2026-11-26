@@ -6,12 +6,14 @@
 // email when it is a verified @developershub.jp address. Anything else — user not in
 // the roster, a non-company domain, or an identity lookup failure — safely falls back
 // to the system default so a send never fails just because the From could not resolve.
+import { errors } from "@dub/errors";
 import { createServiceClient } from "@dub/http";
 import type { RequestContext } from "@dub/http";
 import type { DbClient } from "@dub/db";
 import type { identity, mail } from "@dub/types";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS, SERVICE_NAME } from "./config";
+import { findActiveSharedMailbox, memberMaySend } from "./shared-mailbox";
 import { findDeliveryEnvelope, findInboundByMessageId, findSendLogById, LIST_ENVELOPE_PREFIX, wasDeliveredByList } from "./repo";
 
 /** Verified sending domain (Resend). Only addresses on this domain may be a From. */
@@ -95,4 +97,65 @@ export async function resolveReplyFromAddress(
     /* fall through to the per-user resolution */
   }
   return resolveUserFromAddress(env, ctx, userId);
+}
+
+/** The From of one user-facing send, plus what the send log and the header need about it. */
+export interface SendIdentity {
+  fromAddress: string;
+  /** Display name for the From header (a shared mailbox's), null = the bare address. */
+  fromName: string | null;
+  /** Shared address the send goes out as, recorded on the send log so the recipient's reply
+   *  also reaches the sender. null for a person's own address or a system send. */
+  sharedMailbox: string | null;
+  /** The shared address the composer explicitly picked (re-checked by the scheduled drain). */
+  picked: string | null;
+}
+
+/**
+ * Resolve the From of a user-facing send (/outbox, /scheduled).
+ *  - `fromAddress` picked: the caller's own address is always fine; a shared mailbox only when
+ *    member-service says the caller may send as it; anything else is 403.
+ *  - not picked: the rules above (own address / the shared mailbox a reply answers / the
+ *    info@ fallback), unchanged.
+ * Either way, a From that is a shared mailbox gets its display name and is recorded as one.
+ */
+export async function resolveSendIdentity(
+  env: Env,
+  ctx: RequestContext,
+  db: DbClient,
+  userId: string | null,
+  req: { fromAddress?: string; inReplyTo?: string },
+): Promise<SendIdentity> {
+  const picked = req.fromAddress?.trim().toLowerCase();
+  let fromAddress: string;
+  let chosen: string | null = null;
+  if (picked) {
+    const own = await resolveUserFromAddress(env, ctx, userId);
+    if (own.trim().toLowerCase() === picked) {
+      fromAddress = own;
+    } else {
+      const shared = await findActiveSharedMailbox(db, picked);
+      if (!shared || !userId) throw errors.forbidden(`not allowed to send as ${picked}`);
+      let allowed: boolean;
+      try {
+        allowed = await memberMaySend(env.SVC_MEMBER, ctx, shared, userId);
+      } catch (err) {
+        throw errors.upstreamUnavailable("member-service", err);
+      }
+      if (!allowed) throw errors.forbidden(`not allowed to send as ${picked}`);
+      fromAddress = shared.address;
+      chosen = shared.address;
+    }
+  } else {
+    fromAddress = req.inReplyTo
+      ? await resolveReplyFromAddress(env, ctx, db, req.inReplyTo, userId)
+      : await resolveUserFromAddress(env, ctx, userId);
+  }
+  const shared = await findActiveSharedMailbox(db, fromAddress);
+  return {
+    fromAddress,
+    fromName: shared?.display_name ?? null,
+    sharedMailbox: shared && userId ? shared.address : null,
+    picked: chosen,
+  };
 }

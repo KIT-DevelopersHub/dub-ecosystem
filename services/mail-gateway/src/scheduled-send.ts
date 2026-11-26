@@ -17,6 +17,9 @@ import { loadScheduledAttachments, releaseScheduledAttachments } from "./attachm
 import { buildBlobs, buildDb, buildSendDeps } from "./deps";
 import { buildProvider, type MailProvider } from "./provider";
 import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
+import { findActiveSharedMailbox, memberMaySend } from "./shared-mailbox";
+import { errors } from "@dub/errors";
+import type { DbClient } from "@dub/db";
 import {
   claimDueScheduled,
   markScheduledAttemptFailed,
@@ -55,6 +58,24 @@ export function toSendRequest(row: ScheduledRow, attachments: mail.MailAttachmen
   return req;
 }
 
+/** Display name + shared marker for a scheduled send (共用アドレス, 0027). A shared mailbox the
+ *  composer picked is checked again here: leaving the team before the time stops the send. */
+async function scheduledIdentity(
+  env: Env,
+  ctx: RequestContext,
+  db: DbClient,
+  row: ScheduledRow,
+  fromAddress: string,
+): Promise<{ fromName: string | null; sharedMailbox: string | null }> {
+  const shared = await findActiveSharedMailbox(db, fromAddress);
+  if (row.shared_mailbox) {
+    const owner = row.owner_user_id;
+    const allowed = !!shared && !!owner && shared.address === row.shared_mailbox && (await memberMaySend(env.SVC_MEMBER, ctx, shared, owner));
+    if (!allowed) throw errors.forbidden(`not allowed to send as ${row.shared_mailbox}`);
+  }
+  return { fromName: shared?.display_name ?? null, sharedMailbox: shared && row.owner_user_id ? shared.address : null };
+}
+
 /** One drain pass over the due scheduled sends. Never throws — a per-row failure is
  *  captured on the row (retried or terminal) so one bad schedule can't stall the rest. */
 export async function runScheduledSendDrain(
@@ -79,7 +100,8 @@ export async function runScheduledSendDrain(
         (row.in_reply_to
           ? await resolveReplyFromAddress(env, ctx, db, row.in_reply_to, row.owner_user_id)
           : await resolveUserFromAddress(env, ctx, row.owner_user_id));
-      const deps = buildSendDeps(env, ctx, provider, fromAddress, row.owner_user_id);
+      const identity = await scheduledIdentity(env, ctx, db, row, fromAddress);
+      const deps = buildSendDeps(env, ctx, provider, fromAddress, row.owner_user_id, identity);
       const { response } = await sendMail(deps, req, `sched:${row.id}`, row.owner_user_id ?? SERVICE_NAME);
       await markScheduledSent(db, row.id, response.messageId, attempts);
       // The send core already stored the Sent copy of each file; the parked bytes can go.

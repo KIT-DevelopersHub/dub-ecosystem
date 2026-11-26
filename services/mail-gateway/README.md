@@ -285,6 +285,26 @@ personal address (typically Gmail) — メール → 右上の歯車 → 「Gmai
 - **Rollout**: apply `0024_team_list.sql` before creating a list. Until then the admin
   routes fail, while ordinary mail and the inbox are unaffected.
 
+## 3.4d Shared sending addresses (共用アドレス, `src/shared-mailbox.ts`, migration 0027)
+
+- **What it does**: compose offers a 差出人 picker (`GET /mail/send-as`). Picking `info@` sends
+  `SendMailRequest.fromAddress`; the From becomes `表示名 <info@…>` and the send log keeps the
+  member who sent it (`owner_user_id` / `requester`) plus `shared_mailbox`.
+- **Who may pick it**: checked on every send (and again by the scheduled drain) against
+  member-service: `allow = all_members` (every linked 運営メンバー, `?all=1`) or `team`
+  (`?teamIds=`), declined left out. Anything else is 403; member-service down is 502.
+- **Replies**: a mail to the shared address whose In-Reply-To / References names one of these
+  sends also gets a delivery for the sender (envelope = the shared address, so answering goes
+  out as it again). Unmatched mail stays with the shared mailbox only. A provider that rewrites
+  our Message-ID (Resend may) makes the match miss.
+- **Display name**: any user-facing send whose From is a shared mailbox gets its display name,
+  including the existing "reply to info@ goes out as info@". System sends (`POST /send`) do not.
+- **Signature**: added in compose (client side) when the address is picked, editable.
+- **Admin**: `GET|POST /mail/admin/shared-mailboxes`, `PATCH|DELETE …/:id` (`mail:admin`), API
+  only for now. 0027 seeds info@ (all_members, 北陸ITカンファレンス 実行委員会).
+- **Rollout**: apply `0027_shared_mailbox.sql` first. Before that the picker is empty and every
+  other send works as before (the new columns are written only for shared sends).
+
 ## 3.5 Archive forward (`MAIL_ARCHIVE_FORWARD_TO`)
 
 Independent of §3.4: when `MAIL_ARCHIVE_FORWARD_TO` is set (prod: `dub.developershub@gmail.com`
