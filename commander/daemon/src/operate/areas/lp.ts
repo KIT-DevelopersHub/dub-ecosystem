@@ -162,6 +162,11 @@ export const LP: AreaSpec = {
       route: "POST /lp/site-config/publish",
       reason: "本番 LP のセクション構成（表示/非表示・並び順）を即座に切り替える操作（lp:publish 詳細キー）。本番反映はオーナーが LP管理 で手で行う",
     },
+    {
+      service: S,
+      route: "POST /lp/sponsor-inquiries/enabled",
+      reason: "本番 LP のスポンサー資料請求フォームを即座に公開/停止する操作（lp:publish 詳細キー）。切り替えはオーナーが手で行う",
+    },
   ],
   // チケットの設定・購入者一覧は未開放。
   pending: [
@@ -182,6 +187,11 @@ export const LP: AreaSpec = {
     { service: S, route: "GET /lp/site-config" },
     { service: S, route: "PUT /lp/site-config/draft" },
     { service: S, route: "POST /lp/site-config/draft/reset" },
+    // スポンサー資料請求の設定・一覧も未開放。
+    { service: S, route: "GET /lp/sponsor-inquiries" },
+    { service: S, route: "POST /lp/sponsor-inquiries/notify" },
+    { service: S, route: "GET /lp/sponsor-inquiries/items" },
+    { service: S, route: "PATCH /lp/sponsor-inquiries/items/:id" },
   ],
   ownerOpenedIrreversible: {
     "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",

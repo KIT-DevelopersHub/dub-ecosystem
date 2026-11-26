@@ -85,6 +85,9 @@ export interface NotifyRequest {
   /** Audiences expanded to the users whose roles hold the audience key (ロール管理 > 通知).
    *  Preferred over recipientRoles for 管理者向け alerts so ロール管理 decides who gets them. */
   recipientAudiences?: ReceiveAudience[];
+  /** Permission keys expanded to their org-wide holders (ロール管理 decides who), e.g.
+   *  "app:sponsor:edit" = スポンサーアプリを編集できる人。Unions with the other sources. */
+  recipientPermissions?: PermissionKey[];
   title: string;
   body: string;
   channels?: NotificationChannel[]; // P0 delivers in_app only; others are adapter stubs

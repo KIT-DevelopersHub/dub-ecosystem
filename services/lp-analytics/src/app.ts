@@ -13,6 +13,7 @@ import { POLICY_TABLE } from "./policy-table";
 import { LpService } from "./service";
 import { ProposalService } from "./proposals";
 import { SiteConfigService } from "./site-config";
+import { SponsorInquiryService } from "./sponsor-inquiries";
 import type { AppDeps, IngestVisitRequest, LpDevice, ReqCtx } from "./types";
 
 const DEVICES: ReadonlySet<LpDevice> = new Set(["mobile", "desktop", "bot", "unknown"]);
@@ -71,6 +72,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: PolicyGateVars }> {
   const svc = new LpService(deps);
   const proposals = new ProposalService(deps);
   const siteConfig = new SiteConfigService(deps);
+  const sponsors = new SponsorInquiryService(deps.sponsor);
   const app = new Hono<{ Variables: PolicyGateVars }>();
 
   app.onError(dubErrorHandler({ service: "lp-analytics" }));
@@ -100,6 +102,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: PolicyGateVars }> {
   // 公開設定の layout（public LP Worker → service binding）。下書きと本番の両方を返す。
   app.get("/lp/internal/site-config", async (c) => c.json(await siteConfig.getInternal()));
   app.post("/lp/internal/proposals/submit", async (c) => c.json(await proposals.submit(await readJson(c)), 201));
+  app.get("/lp/internal/sponsor-inquiries", async (c) => c.json(await sponsors.getPublic()));
+  app.post("/lp/internal/sponsor-inquiries/submit", async (c) => {
+    const requestId = (c.get("dubCtx" as never) as RequestContext | undefined)?.requestId ?? "";
+    return c.json(await sponsors.submit(requestId, await readJson(c)), 201);
+  });
 
   // ---- user routes ----
   app.get("/lp/stats", async (c) => c.json(await svc.getStats(c.req.query())));
@@ -126,6 +133,14 @@ export function createApp(deps: AppDeps): Hono<{ Variables: PolicyGateVars }> {
   app.get("/lp/proposals/submissions", async (c) => c.json(await proposals.list(c.req.query())));
   app.patch("/lp/proposals/submissions/:id", async (c) =>
     c.json(await proposals.setStatus(reqCtx(c), c.req.param("id"), await readJson(c))),
+  );
+
+  app.get("/lp/sponsor-inquiries", async (c) => c.json(await sponsors.getState()));
+  app.post("/lp/sponsor-inquiries/enabled", async (c) => c.json(await sponsors.setEnabled(reqCtx(c), await readJson(c))));
+  app.post("/lp/sponsor-inquiries/notify", async (c) => c.json(await sponsors.setNotify(reqCtx(c), await readJson(c))));
+  app.get("/lp/sponsor-inquiries/items", async (c) => c.json(await sponsors.list(c.req.query())));
+  app.patch("/lp/sponsor-inquiries/items/:id", async (c) =>
+    c.json(await sponsors.setStatus(reqCtx(c), c.req.param("id"), await readJson(c))),
   );
 
   return app;

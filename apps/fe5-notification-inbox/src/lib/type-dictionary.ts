@@ -41,6 +41,9 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   { pattern: "chat.*", label: "チャット", icon: "message-square", group: "system" },
   { pattern: "chat.mention", label: "チャットでメンションされました", icon: "message-square", group: "system" },
   { pattern: "chat.dm", label: "ダイレクトメッセージ", icon: "message-square", group: "system" },
+  // LP管理 (lp-analytics). スポンサー資料請求 → app:sponsor:edit holders (lpSponsor.LP_SPONSOR_NOTIFY_TYPE).
+  { pattern: "lp.*", label: "LP管理", icon: "megaphone", group: "system" },
+  { pattern: "lp.sponsor_inquiry", label: "スポンサーの資料請求", icon: "megaphone", group: "system" },
   // Release notes (new-feature announcements). Its own group so it gets a dedicated
   // "新機能" filter chip and a distinct 🎉 badge in the inbox.
   { pattern: "release", label: "🎉 新機能", icon: "megaphone", group: "release" },
@@ -110,11 +113,12 @@ export const NOTIFICATION_GROUP_META: Record<NotificationGroup, { label: string;
 //   - フィードバック (feedback)  = feedback/feedback.*     (in-app feedback → admin notification, config.FEEDBACK_NOTIFY_TYPE)
 //   - メール (mail)              = mail.*                  (mail-gateway / mail-automation)
 //   - チャット (chat)            = chat.*                  (fe6-chat @mention / DM, via chat.message.created)
+//   - スポンサー (sponsor)       = lp.sponsor_inquiry      (LP の資料請求 → lp-analytics)
 //   - その他 (other)             = everything else (tasks/events/system/…): shown only under "All"
 // The taxonomy is intentionally separate from NotificationGroup above (which stays the
 // per-app display grouping used by preferences + the type dictionary). Categories are what the
 // user asked the tabs to reflect.
-export type NotificationCategory = "app_update" | "mail" | "participation" | "feedback" | "chat" | "other";
+export type NotificationCategory = "app_update" | "mail" | "participation" | "sponsor" | "feedback" | "chat" | "other";
 
 // The tab selector value: a concrete category or "all" (no filtering).
 export type CategoryFilter = NotificationCategory | "all";
@@ -124,6 +128,7 @@ export type CategoryFilter = NotificationCategory | "all";
 // First match wins; order the more specific prefixes first if they ever overlap.
 const CATEGORY_RULES: { match: string; category: NotificationCategory }[] = [
   { match: "member.participation", category: "participation" },
+  { match: "lp.sponsor_inquiry", category: "sponsor" },
   { match: "feedback", category: "feedback" },
   { match: "mail", category: "mail" },
   { match: "deploy", category: "app_update" },
@@ -153,6 +158,7 @@ export interface NotificationCategoryMeta {
 export const NOTIFICATION_CATEGORY_META: Record<NotificationCategory, NotificationCategoryMeta> = {
   app_update: { label: "アプリアップデート", icon: "megaphone", tone: "brand" },
   participation: { label: "参加届", icon: "user", tone: "success" },
+  sponsor: { label: "スポンサー", icon: "megaphone", tone: "warning" },
   feedback: { label: "フィードバック", icon: "message-square", tone: "warning" },
   mail: { label: "メール", icon: "at-sign", tone: "info" },
   chat: { label: "チャット", icon: "message-square", tone: "info" },
@@ -163,6 +169,7 @@ export const NOTIFICATION_CATEGORY_META: Record<NotificationCategory, Notificati
 export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
   "app_update",
   "participation",
+  "sponsor",
   "feedback",
   "mail",
   "chat",
@@ -174,6 +181,7 @@ export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
 export const NOTIFICATION_CATEGORY_TABS: { id: CategoryFilter; label: string }[] = [
   { id: "all", label: "すべて" },
   { id: "participation", label: NOTIFICATION_CATEGORY_META.participation.label },
+  { id: "sponsor", label: NOTIFICATION_CATEGORY_META.sponsor.label },
   { id: "app_update", label: NOTIFICATION_CATEGORY_META.app_update.label },
   { id: "feedback", label: NOTIFICATION_CATEGORY_META.feedback.label },
   { id: "mail", label: NOTIFICATION_CATEGORY_META.mail.label },

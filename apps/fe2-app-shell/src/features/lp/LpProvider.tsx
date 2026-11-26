@@ -5,12 +5,18 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import { createLpApi, type LpApi } from "./lpApi.tsx";
+import { LpSponsorApiCtx, createLpSponsorApi } from "./lpSponsorApi.tsx";
 
 const LpApiCtx = createContext<LpApi | null>(null);
 
 export function LpProvider({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const lpApi = useMemo(() => createLpApi(api), [api]);
-  return <LpApiCtx.Provider value={lpApi}>{children}</LpApiCtx.Provider>;
+  const sponsorApi = useMemo(() => createLpSponsorApi(api), [api]);
+  return (
+    <LpApiCtx.Provider value={lpApi}>
+      <LpSponsorApiCtx.Provider value={sponsorApi}>{children}</LpSponsorApiCtx.Provider>
+    </LpApiCtx.Provider>
+  );
 }
 
 /** Test-friendly provider that injects an LpApi directly (no ApiClient needed). */
