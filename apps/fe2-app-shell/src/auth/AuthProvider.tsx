@@ -6,7 +6,8 @@ import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { appRegistry, policy } from "@dub/types";
 import type { gateway, identity } from "@dub/types";
-import type { ApiClient } from "../lib/api-client.tsx";
+import { ApiError, type ApiClient } from "../lib/api-client.tsx";
+import { LoadErrorState } from "../shell/LoadErrorState.tsx";
 import { queryKeys } from "../lib/queryKeys.tsx";
 
 type MeResponse = gateway.MeResponse;
@@ -15,6 +16,9 @@ type PermissionKey = identity.PermissionKey;
 export type AuthState =
   | { status: "loading" }
   | { status: "unauthenticated" }
+  /** /me failed for a reason other than 401 (429/5xx/network): the session may be fine,
+   *  so show an error + 再試行 instead of logging out or rendering a blank body (#855). */
+  | { status: "error"; error: unknown; retry(): void }
   | { status: "authenticated"; me: MeResponse };
 
 interface AuthContextValue {
@@ -61,11 +65,19 @@ export function AuthProvider({
     staleTime: 5 * 60 * 1000,
   });
 
+  // Only a transport-level failure (429 / 5xx / network=0) is "error"; a 401 or anything
+  // else keeps the old unauthenticated path (→ login).
+  const transientFailure =
+    query.isError &&
+    ApiError.isApiError(query.error) &&
+    (query.error.status === 0 || query.error.status === 429 || query.error.status >= 500);
   const state: AuthState = query.isPending
     ? { status: "loading" }
     : query.data
       ? { status: "authenticated", me: query.data }
-      : { status: "unauthenticated" };
+      : transientFailure
+        ? { status: "error", error: query.error, retry: () => void query.refetch() }
+        : { status: "unauthenticated" };
 
   const queryClient = useQueryClient();
   // `api` is read through a ref so the rotation effect depends ONLY on the expiry. A caller
@@ -246,6 +258,9 @@ export function RequireAuth({
   }, [state.status, onUnauthenticated]);
 
   if (state.status === "loading") return <>{loadingFallback}</>;
+  if (state.status === "error") {
+    return <LoadErrorState error={state.error} onRetry={state.retry} subject="アカウント情報" testId="fe2-auth-error" />;
+  }
   if (state.status === "unauthenticated") return <></>;
   return <>{children}</>;
 }
