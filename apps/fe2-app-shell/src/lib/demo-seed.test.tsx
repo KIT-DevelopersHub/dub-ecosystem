@@ -906,20 +906,20 @@ describe("参加届からのアカウント発行 (人事・members:onboard_mail
   });
 });
 
-describe("event AI digest (#879, demo = fake provider)", () => {
-  it("GET returns a cited digest with a 食い違い; run refreshes it; ask answers 停止中 (offline)", async () => {
-    const st = await api().request<{ enabled: boolean; provider: { status: string }; digest: { lines: { link: string }[]; discrepancies: unknown[] } }>({
+describe("event AI digest (#879, demo = production default: flag OFF)", () => {
+  it("GET returns the no-LLM preview with a 食い違い; run is 409; ask answers disabled", async () => {
+    const st = await api().request<{ enabled: boolean; digest: unknown; preview: { lines: { link: string }[]; discrepancies: unknown[] } }>({
       method: "GET",
       path: "/api/v1/events/evt_1/digest",
     });
-    expect(st.enabled).toBe(true);
-    expect(st.digest.lines.length).toBeGreaterThan(0);
-    expect(st.digest.lines.every((l) => l.link !== "")).toBe(true);
-    expect(st.digest.discrepancies.length).toBe(1);
-    const run = await api().request<{ ran: boolean }>({ method: "POST", path: "/api/v1/events/evt_1/digest/run" });
-    expect(run.ran).toBe(true);
+    expect(st.enabled).toBe(false);
+    expect(st.digest).toBeNull();
+    expect(st.preview.lines.length).toBeGreaterThan(0);
+    expect(st.preview.lines.every((l) => l.link !== "")).toBe(true);
+    expect(st.preview.discrepancies.length).toBe(1);
+    await expect(api().request({ method: "POST", path: "/api/v1/events/evt_1/digest/run" })).rejects.toBeTruthy();
     const ask = await api().request<{ status: string }>({ method: "POST", path: "/api/v1/events/evt_1/ask", body: { question: "会場は？" } });
-    expect(ask.status).toBe("offline");
+    expect(ask.status).toBe("disabled");
   });
 
   it("the demo conference event carries structured venue / capacity", async () => {

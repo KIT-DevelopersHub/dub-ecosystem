@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createDbClient } from "@dub/db";
-import { makeDeps, call, createApp, EDITOR } from "./harness";
+import { makeDeps, call, createApp, EDITOR, VIEWER } from "./harness";
 import { fakeAuthz } from "./harness";
 import { makeD1 } from "./d1";
 import { redactPii, safeText, REDACTED } from "../src/digest/pii";
@@ -20,6 +20,7 @@ import { agentUpgradeAllowed } from "../src/index";
 import { secretEquals } from "../src/digest/secret";
 import type { Collector, DigestDeps, LlmProvider, SourceSnapshot } from "../src/digest/types";
 import type { EventRow } from "../src/types";
+import { EMPTY_EVENT_DETAILS } from "../src/domain";
 
 const NOW = "2026-08-09T00:00:00.000Z";
 
@@ -200,6 +201,31 @@ describe("HTTP: flag OFF (the production default)", () => {
       expect(deps.audit.records).toHaveLength(0);
     });
   }
+});
+
+describe("HTTP: flag OFF preview (no LLM, members can read)", () => {
+  it("a viewer gets the event's own lines + 食い違い; nothing remote is called, nothing stored", async () => {
+    const remote = staticCollector({ source: "tasks", items: [] });
+    const collect = vi.spyOn(remote, "collect");
+    const digest = digestDeps({ enabled: false, collectors: [remote] });
+    const deps = makeDeps({ digest, ...fakeAuthz(VIEWER) });
+    deps.repo.seedEvent(row());
+    deps.repo.seedAction({ id: "act_1", eventId: "event_1", kind: "task", title: "会場予約", sortOrder: 1, archivedAt: null, version: 1, createdBy: "user_a", createdAt: NOW, updatedAt: NOW });
+    await deps.repo.upsertEventDetails({ eventId: "event_1", data: { ...EMPTY_EVENT_DETAILS, venue: "金沢工業大学", capacity: "250名" }, version: 1, updatedBy: "user_a", updatedAt: NOW }, 0);
+    const app = createApp(deps);
+    const get = await call(app, "GET", "/events/event_1/digest");
+    expect(get.status).toBe(200);
+    expect(get.json.digest).toBeNull();
+    expect(get.json.preview.lines.map((l: { source: string }) => l.source)).toEqual(["event", "actions"]);
+    expect(get.json.preview.lines[1]).toEqual({ text: "アクション「会場予約」", source: "actions", link: "/events/event_1" });
+    expect(get.json.preview.discrepancies).toEqual([
+      { field: "capacity", eventValue: "300", sourceValue: "250", source: "event", link: "/events?eventId=event_1" },
+    ]);
+    expect(collect).not.toHaveBeenCalled();
+    expect(await digest.repo.getDigest("event_1")).toBeNull();
+    // 変更系は管理者のまま
+    expect((await call(app, "POST", "/events/event_1/digest/run")).status).toBe(403);
+  });
 });
 
 describe("HTTP: enabled but the Mac mini is offline (「停止中」, no fallback)", () => {

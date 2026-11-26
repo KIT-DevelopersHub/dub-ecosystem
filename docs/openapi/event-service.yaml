@@ -212,7 +212,8 @@ paths:
         - events
       description: >-
         Requires app:events:view + event:read. Shape = @dub/types event.GetEventDigestResponse.
-        enabled=false while the feature flag is OFF (digest is then null).
+        enabled=false while the feature flag is OFF (digest is then null, and preview carries
+        the event's own facts/actions + deterministic discrepancies; no LLM, no remote collectors).
       parameters:
         - name: id
           in: path
