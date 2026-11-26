@@ -1,6 +1,7 @@
 import { Reveal } from "@/components/Reveal";
 import { SectionHead } from "@/components/SectionHead";
 import type { ApplyConfig } from "@/config/types";
+import { JOIN_TICKETS_HREF, JOIN_TICKETS_LABEL } from "@/lib/join-tickets";
 
 // Apply — reproduces goodpatch's "dual service cards" skeleton: equal-width
 // cards side-by-side (参加者 / 登壇 / スポンサー), each with an icon (top), a heading, description, and a
@@ -12,8 +13,8 @@ export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
       <div className="container">
         <SectionHead eyebrow="JOIN" index={index} title={data.heading} />
         <div className={`svc-grid${data.sponsor ? " svc-grid--3" : ""}`}>
-          {/* 受付未開始 — 参加登録 / 登壇応募 / スポンサー申込のフォームはまだ公開していないため、
-              全カードとも押せない disabled 状態で「準備中」を明示する。 */}
+          {/* 受付未開始のカードは押せない disabled 状態で「準備中」を明示する。
+              参加者だけはチケット販売の設定で購入リンクに切り替わる（lib/join-tickets.ts）。 */}
           <ServiceCard
             variant="participant"
             icon={<IconTicket />}
@@ -21,6 +22,7 @@ export function Apply({ data, index }: { data: ApplyConfig; index?: string }) {
             body={data.participant.body}
             cta={{ label: data.participant.cta.label, href: data.participant.cta.href }}
             disabled
+            ticketsCta={{ label: JOIN_TICKETS_LABEL, href: JOIN_TICKETS_HREF }}
             delay={0}
           />
           <ServiceCard
@@ -56,6 +58,7 @@ function ServiceCard({
   body,
   cta,
   disabled = false,
+  ticketsCta,
   delay,
 }: {
   variant: "participant" | "speaker" | "sponsor";
@@ -64,24 +67,26 @@ function ServiceCard({
   body: string;
   cta: { label: string; href: string };
   disabled?: boolean;
+  /** 販売 on のとき disabled の代わりに見せるリンク（html[data-lp-join-tickets="on"] で CSS が切り替え）。 */
+  ticketsCta?: { label: string; href: string };
   delay: number;
 }) {
   const label = cta.label.replace(/\n/g, "");
-  const inner = (
+  const inner = (off: boolean, ctaLabel: string) => (
     <>
       <span className={`svc-icon svc-icon--${variant}`} aria-hidden="true">
         {icon}
       </span>
       <h3 className="svc-card-title">{title}</h3>
       <p className="svc-card-body">{body}</p>
-      {disabled ? (
+      {off ? (
         <span className="svc-card-cta svc-card-cta--disabled">
           <span className="svc-card-badge">準備中</span>
           <span className="svc-card-soon">受付開始までお待ちください</span>
         </span>
       ) : (
         <span className="svc-card-cta">
-          {label}
+          {ctaLabel}
           <span className="arrow" aria-hidden="true">→</span>
         </span>
       )}
@@ -90,12 +95,21 @@ function ServiceCard({
   return (
     <Reveal className={`svc-card svc-card--${variant}`} variant="up" delay={delay}>
       {disabled ? (
-        <div className="svc-card-link is-disabled" aria-disabled="true" aria-label={`${label}（準備中）`}>
-          {inner}
+        <div
+          className={`svc-card-link is-disabled${ticketsCta ? " svc-card-alt--off" : ""}`}
+          aria-disabled="true"
+          aria-label={`${label}（準備中）`}
+        >
+          {inner(true, label)}
         </div>
       ) : (
         <a className="svc-card-link" href={cta.href} aria-label={label}>
-          {inner}
+          {inner(false, label)}
+        </a>
+      )}
+      {disabled && ticketsCta && (
+        <a className="svc-card-link svc-card-alt--on" href={ticketsCta.href} aria-label={ticketsCta.label}>
+          {inner(false, ticketsCta.label)}
         </a>
       )}
     </Reveal>
