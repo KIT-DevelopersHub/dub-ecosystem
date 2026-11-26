@@ -71,6 +71,7 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0025_drafts_inline_cid.sql"),
     sqlFile("../../../services/mail-gateway/db/0026_mail_templates.sql"),
     sqlFile("../../../services/mail-gateway/db/0028_send_log_status_created_idx.sql"),
+    sqlFile("../../../services/mail-gateway/db/0029_mail_monitor_state.sql"),
   ];
 }
 

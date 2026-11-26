@@ -73,6 +73,9 @@ export const SERVICE_TARGETS: ServiceTarget[] = [
   { id: "gantt-service", label: "ガント (gantt-service)", binding: "SVC_GANTT", path: "/health" },
   { id: "notification", label: "通知 (notification)", binding: "SVC_NOTIFICATION", path: "/internal/health" },
   { id: "mail-gateway", label: "メール (mail-gateway)", binding: "SVC_MAIL_GATEWAY", path: "/internal/health" },
+  // Dead-man's switch for mail-gateway's own cron-driven mail monitor (#898): 503 when the
+  // send / receive / API checks stopped running (cron dead or the monitor crashing).
+  { id: "mail-monitor", label: "メール監視の稼働 (mail-gateway cron)", binding: "SVC_MAIL_GATEWAY", path: "/internal/monitor/heartbeat" },
   { id: "chat-service", label: "チャット (chat-service)", binding: "SVC_CHAT", path: "/health" },
   { id: "member-service", label: "メンバー (member-service)", binding: "SVC_MEMBER", path: "/health" },
   { id: "usage-meter", label: "無料枠 (usage-meter)", binding: "SVC_USAGE", path: "/internal/health" },

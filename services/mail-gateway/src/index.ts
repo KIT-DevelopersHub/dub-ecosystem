@@ -11,6 +11,7 @@ import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
 import { kickFreeqDrain } from "./freeq-kick";
 import { isCanaryInbound, runCanary } from "./canary";
+import { runMailMonitor } from "./monitor";
 import { runRowCountSnapshot } from "./row-count";
 import { common } from "@dub/types";
 import { buildAuditEnv, buildDb } from "./deps";
@@ -137,6 +138,8 @@ const handler = {
       controller.scheduledTime,
     );
     await runCanary(env, controller.scheduledTime);
+    // Mail monitor (#898): list/thread API + real-send failures + heartbeat. Never throws.
+    await runMailMonitor(env, app, controller.scheduledTime);
     await sweepPendingForwards(buildDb(env, ctx.requestId), env, controller.scheduledTime);
   },
 };
