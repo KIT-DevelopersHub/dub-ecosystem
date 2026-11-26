@@ -393,6 +393,22 @@ describe("LpTicketsScreen", () => {
     expect(screen.queryByTestId("fe2-lp-tickets-cta")).toBeNull();
   });
 
+  it("#905: secondary explanations sit behind the 「i」 help, not inline", async () => {
+    renderScreen(demoLpApi());
+    await screen.findByTestId("fe2-lp-ticket-types-table");
+    // 常時表示の長文は出さない
+    expect(screen.queryByTestId("fe2-lp-tickets-enabled-hint")).toBeNull();
+    expect(screen.queryByText(/販売数・残り・定員はすべて/)).toBeNull();
+    expect(screen.getByTestId("fe2-lp-tickets-payment-unset")).toHaveTextContent("有料券は購入できません");
+    // 「i」を押すと補足が開く
+    fireEvent.click(screen.getByRole("button", { name: "チケット販売の説明" }));
+    expect(await screen.findByTestId("fe2-lp-tickets-enabled-hint")).toHaveTextContent("lp:publish");
+    fireEvent.click(screen.getByRole("button", { name: "券種の説明" }));
+    expect(screen.getByTestId("fe2-lp-ticket-types-help-body")).toHaveTextContent("すべて「枚数」");
+    fireEvent.click(screen.getByRole("button", { name: "クーポンの説明" }));
+    expect(screen.getByTestId("fe2-lp-coupons-help-body")).toHaveTextContent("0 円の券種はクーポンコードでのみ");
+  });
+
   it("blocks a 30 yen type before calling the api", async () => {
     const create = vi.fn(() => Promise.reject(new Error("should not be called")));
     renderScreen(fakeApi({ createTicketType: create }));
