@@ -38,6 +38,7 @@ import { shortcutsBlocked } from "./shortcuts.ts";
 import styles from "./replyNudge.module.css";
 import inlineStyles from "./InlineReply.module.css";
 import { SchedulePicker } from "./SchedulePicker.tsx";
+import { TemplatePicker } from "./TemplatePicker.tsx";
 import { deliver } from "./sendMail.ts";
 import { AttachmentErrors, AttachmentTray } from "../AttachmentTray.tsx";
 import { AttachmentPreview } from "../AttachmentPreview.tsx";
@@ -830,6 +831,8 @@ export function ReadingPane({ thread, labels }: { thread: MailThreadModel; label
                     disabledReason="添付ファイルを処理中です…"
                     {...(att.items.length > 0 ? { hint: `添付ファイル ${att.items.length} 件も一緒に予約されます` } : {})}
                   />
+                  {/* A reply keeps its 「Re:」 subject: only the template body goes in. */}
+                  <TemplatePicker compose={{ subject: "", body: reply }} onInsert={(next) => setReply(next.body)} />
                   <button
                     type="button"
                     aria-label="ファイルを添付"

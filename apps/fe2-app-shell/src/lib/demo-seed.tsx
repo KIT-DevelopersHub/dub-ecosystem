@@ -1240,6 +1240,7 @@ function createMailStore() {
   // submit returns the first send's ack instead of appending a second Sent row.
   const idemAcks = new Map<string, mail.SendMailResponse>();
   const draftsByAccount: Record<string, mail.MailDraft[]> = {};
+  const templatesByAccount: Record<string, mail.MailTemplate[]> = {};
 
   function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
@@ -1386,6 +1387,24 @@ function createMailStore() {
         saveFlags([...flags.values()]);
       }
       return json({ updated: hit.length });
+    }
+    // 定型文 (#867): per-account, in-session; one sample so the picker is not empty in the demo.
+    {
+      const list = (templatesByAccount[me.id] ??= [
+        { id: "tpl-demo-interview", title: "加入面談のご案内", subject: "【DevelopersHub】加入面談の日程について", body: "こんにちは、DevelopersHub 運営です。\n\n加入面談の候補日をお送りします。ご都合のよい日時をご返信ください。\n\nよろしくお願いいたします。", updatedAt: "2026-08-01T00:00:00.000Z" },
+      ]);
+      if (pathname === "/api/v1/mail/templates" && method === "GET") return json({ items: [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) } satisfies mail.MailTemplateList);
+      const one = /^\/api\/v1\/mail\/templates\/([^/]+)$/.exec(pathname);
+      if (one && method === "PUT") {
+        const id = decodeURIComponent(one[1]!);
+        const saved: mail.MailTemplate = { ...(body as mail.MailTemplateInput), id, updatedAt: new Date().toISOString() };
+        templatesByAccount[me.id] = [saved, ...list.filter((t) => t.id !== id)];
+        return json(saved);
+      }
+      if (one && method === "DELETE") {
+        templatesByAccount[me.id] = list.filter((t) => t.id !== decodeURIComponent(one[1]!));
+        return json({ id: decodeURIComponent(one[1]!), deleted: true });
+      }
     }
     // 下書き: per-account, in-session (a reload resets, like Sent).
     {

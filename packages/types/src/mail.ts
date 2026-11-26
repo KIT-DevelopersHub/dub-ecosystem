@@ -370,6 +370,26 @@ export interface MailDraft extends MailDraftInput {
 }
 export const MAIL_DRAFT_LIMIT = 200;
 
+// ---- templates (定型文, 0026, #867) ----
+// Saved subject + body a member inserts into a compose. Personal to its owner. The id is
+// client-minted (like a draft) so a save can be shown before the server answers.
+export interface MailTemplateInput {
+  title: string; // 1..MAIL_TEMPLATE_TITLE_MAX, shown in the picker
+  subject: string; // may be empty (insert the body only)
+  body: string;
+}
+export interface MailTemplate extends MailTemplateInput {
+  id: string;
+  updatedAt: ISODateTime;
+}
+export const MAIL_TEMPLATE_LIMIT = 100;
+export const MAIL_TEMPLATE_TITLE_MAX = 100;
+export const MAIL_TEMPLATE_BODY_MAX = 50_000;
+/** GET /mail/templates */
+export interface MailTemplateList {
+  items: MailTemplate[];
+}
+
 // ---- new-mail notification (#869) ----
 // mail-gateway POSTs one notification per owned delivery (notification-service /notify).
 // The inbox item links back with resourceType MAIL_RECEIVED_RESOURCE_TYPE / resourceId =
