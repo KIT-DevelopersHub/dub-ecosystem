@@ -2,6 +2,7 @@
 // request context, throws DubError, returns frozen wire DTOs. The Hono app is a
 // thin adapter over this.
 import { DubError, CommonErrorCodes, errors } from "@dub/errors";
+import { event as eventNs } from "@dub/types";
 import type { common, event, auditLog } from "@dub/types";
 import type {
   AppDeps,
@@ -22,6 +23,8 @@ import type {
   SaveEventPageLayoutRequest,
   Keyset,
 } from "./types";
+import { ProviderOfflineError } from "./digest/types";
+import { collectAll, runDigest } from "./digest/runner";
 import {
   isValidPhaseTransition,
   phaseTransitionNeedsAdmin,
@@ -29,6 +32,8 @@ import {
   toDubAction,
   toEventSummary,
   toEventDetail,
+  normalizeVenue,
+  normalizeCapacity,
   encodeCursor,
   decodeCursor,
   normalizeEventDetails,
@@ -42,6 +47,11 @@ import {
   INCLUDE_ACTIONS_CAP,
   SORT_ORDER_GAP,
 } from "./domain";
+
+const errDigestDisabled = (): DubError =>
+  new DubError("EVENT_AI_DIGEST_DISABLED", "AI digest is disabled", { status: 409 });
+const errProviderOffline = (): DubError =>
+  new DubError("EVENT_AI_PROVIDER_OFFLINE", "AI provider (Mac mini) is offline", { status: 503 });
 
 export interface ReqCtx {
   requestId: string;
@@ -65,6 +75,17 @@ function requireLimit(raw?: number): number {
     throw errors.validationFailed([{ field: "limit", reason: raw > MAX_LIMIT ? "too_large" : "invalid" }]);
   }
   return raw;
+}
+
+function venueOrThrow(v: unknown): string | null {
+  const r = normalizeVenue(v);
+  if (r === "invalid") throw errors.validationFailed([{ field: "venue", reason: "invalid" }]);
+  return r;
+}
+function capacityOrThrow(v: unknown): number | null {
+  const r = normalizeCapacity(v);
+  if (r === "invalid") throw errors.validationFailed([{ field: "capacity", reason: "invalid" }]);
+  return r;
 }
 
 function nonEmptyString(value: unknown, field: string): string {
@@ -110,6 +131,8 @@ export class EventService {
       phase: "planning",
       startsAt: body.startsAt ?? null,
       endsAt: body.endsAt ?? null,
+      venue: body.venue === undefined ? null : venueOrThrow(body.venue),
+      capacity: body.capacity === undefined ? null : capacityOrThrow(body.capacity),
       archivedAt: null,
       version: 1,
       createdBy: ctx.userId,
@@ -237,6 +260,14 @@ export class EventService {
     if (body.endsAt !== undefined) {
       next.endsAt = body.endsAt;
       changed.push("endsAt");
+    }
+    if (body.venue !== undefined) {
+      next.venue = venueOrThrow(body.venue);
+      changed.push("venue");
+    }
+    if (body.capacity !== undefined) {
+      next.capacity = capacityOrThrow(body.capacity);
+      changed.push("capacity");
     }
 
     next.version = ev.version + 1;
@@ -406,6 +437,82 @@ export class EventService {
       blocks: next.data.blocks.length,
     });
     return { eventId: id, data: next.data, version: next.version, updatedAt: next.updatedAt };
+  }
+
+  // ---- AI digest + Q&A (#879; feature flag default OFF) ----
+  private digestOn() {
+    const d = this.deps.digest;
+    return d && d.enabled ? d : null;
+  }
+
+  async getEventDigest(_ctx: ReqCtx, id: common.EventId): Promise<event.GetEventDigestResponse> {
+    await this.loadEvent(id);
+    const d = this.digestOn();
+    if (!d) {
+      return { enabled: false, provider: { id: this.deps.digest?.provider.id ?? "none", status: "disabled" }, digest: null };
+    }
+    const [status, digest] = await Promise.all([d.provider.status(), d.repo.getDigest(id)]);
+    return { enabled: true, provider: { id: d.provider.id, status }, digest };
+  }
+
+  /** 「今すぐ要約」 (admin) and the DO alarm. `userId` is whose read permissions the collectors carry. */
+  async runEventDigest(
+    ctx: ReqCtx,
+    id: common.EventId,
+    trigger: "manual" | "schedule" = "manual",
+  ): Promise<event.RunEventDigestResponse> {
+    const ev = await this.loadEvent(id);
+    const d = this.digestOn();
+    if (!d) throw errDigestDisabled();
+    if (ev.archivedAt) throw errArchivedImmutable(id);
+    const actions = await this.deps.repo.actionsForEvent(id, INCLUDE_ACTIONS_CAP);
+    const details = (await this.deps.repo.getEventDetails(id))?.data ?? null;
+    try {
+      const out = await runDigest(d, {
+        ev,
+        actions,
+        details,
+        trigger,
+        ctx: { requestId: ctx.requestId, userId: ctx.userId, eventId: id, now: this.deps.now() },
+      });
+      if (out.ran) {
+        await this.auditWrite(ctx, "event.event.ai_digest_generated", "event", id, {
+          trigger,
+          model: d.provider.id,
+          changed: out.changedSources,
+        });
+      }
+      return out;
+    } catch (err) {
+      if (err instanceof ProviderOfflineError) throw errProviderOffline();
+      throw err;
+    }
+  }
+
+  async askEvent(ctx: ReqCtx, id: common.EventId, body: event.AskEventRequest): Promise<event.AskEventResponse> {
+    const ev = await this.loadEvent(id);
+    const question = typeof body?.question === "string" ? body.question.trim() : "";
+    if (question === "" || question.length > eventNs.EVENT_ASK_QUESTION_MAX) {
+      throw errors.validationFailed([{ field: "question", reason: question === "" ? "required" : "too_long" }]);
+    }
+    const d = this.digestOn();
+    if (!d) return { status: "disabled", answer: null, sources: [] };
+    if ((await d.provider.status()) !== "online") return { status: "offline", answer: null, sources: [] };
+    try {
+      const out = await d.provider.ask({
+        eventId: id,
+        question,
+        context: async () => {
+          const actions = await this.deps.repo.actionsForEvent(id, INCLUDE_ACTIONS_CAP);
+          const details = (await this.deps.repo.getEventDetails(id))?.data ?? null;
+          return collectAll(d, ev, actions, details, { requestId: ctx.requestId, userId: ctx.userId, eventId: id, now: this.deps.now() });
+        },
+      });
+      return { status: "answered", answer: out.answer, sources: out.sources.filter((s) => typeof s.link === "string" && s.link !== "") };
+    } catch (err) {
+      if (err instanceof ProviderOfflineError) return { status: "offline", answer: null, sources: [] };
+      throw err;
+    }
   }
 
   // ---- actions (hierarchy: only created under an existing, non-archived event) ----

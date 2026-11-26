@@ -1,82 +1,38 @@
 // Worker entrypoint. Wires the runtime env (D1, Service Bindings, Queues) into
-// AppDeps and serves the Hono app. A Cron Trigger drains the free-tier @dub/freeq
-// outbox (replacement for the paid EVT_* / AUDIT_QUEUE producers). This file must
-// stay import-clean for `wrangler dev`.
-import type { ExecutionContext, Queue } from "@cloudflare/workers-types";
-import { createDbClient, newId, nowIso } from "@dub/db";
-import { createAuthClient } from "@dub/auth-client";
-import { sharedAuthzGranter } from "@dub/policy-gate";
-import { createEvent, publishEvent, publishAudit, type AuditRecordEnvelopeV1, type DubEventEnvelope } from "@dub/events";
-import { common, type auditLog } from "@dub/types";
-import { consoleSink } from "@dub/observability";
+// AppDeps and serves the Hono app. This file must stay import-clean for `wrangler dev`.
+//
+// One extra non-Hono path: the Mac mini agent's outbound WebSocket for the AI digest
+// (#879), bearer-checked HERE before the EventDigestHub DO is touched, and refused
+// outright while the feature flag is OFF.
+import type { ExecutionContext } from "@cloudflare/workers-types";
 import { createApp } from "./app";
-import { createD1EventRepo } from "./d1-repo";
-import { buildTaskClient } from "./task-client";
-import { AUDIT_TOPIC, buildPublisherEnv, outboxQueue } from "./outbox";
+import { buildDeps, digestEnabled, hubStub } from "./deps";
+import { secretEquals } from "./digest/secret";
 import type { Env } from "./env";
-import type { AppDeps, EventPublisher, AuditSink } from "./types";
 
 export type { Env } from "./env";
+export { buildDeps } from "./deps";
+export { EventDigestHub } from "./digest-hub";
 
-function buildPublisher(env: Env): EventPublisher {
-  // Prefer real (paid) Queue bindings when present; otherwise fan out into the
-  // free-tier @dub/freeq D1 outbox so no subscriber's event is dropped.
-  const pubEnv = buildPublisherEnv(env.DB, env as unknown as Partial<Record<string, Queue<DubEventEnvelope>>>);
-  return {
-    async publish(name, payload, ctx) {
-      const envelope = createEvent(name, payload, ctx);
-      await publishEvent(pubEnv, envelope);
-    },
-  };
-}
+export const DIGEST_AGENT_PATH = "/agent/event-digest/ws";
 
-function buildAudit(env: Env): AuditSink {
-  // Real AUDIT_QUEUE when present, else the freeq outbox — audit is now always
-  // durably persisted (never silently dropped when the queue binding is absent).
-  const auditQueue = (env.AUDIT_QUEUE ?? outboxQueue<AuditRecordEnvelopeV1>(env.DB, AUDIT_TOPIC)) as Queue<AuditRecordEnvelopeV1>;
-  return {
-    async record(input: auditLog.AuditRecordInput) {
-      await publishAudit({ AUDIT_QUEUE: auditQueue }, input);
-    },
-  };
-}
-
-export function buildDeps(env: Env, requestId?: string): AppDeps {
-  const db = createDbClient(env.DB, {
-    namespace: "event",
-    ...(requestId ? { requestId } : {}),
-    logger: (e) => consoleSink({ level: "debug", message: "db", service: "event-service", fields: { sql: e.sql, ms: e.durationMs } }),
-  });
-  // Layer 1 — the POLICY_TABLE granter. sharedAuthzGranter (not createAuthzGranter): the app
-  // is rebuilt per request, so the identity /authz/check TTL cache has to be memoized per Env
-  // to survive between requests in the same isolate — otherwise every gated route is an
-  // unconditional identity subrequest and identity-roster becomes a hot-path SPOF (ADR 0004).
-  const authz = sharedAuthzGranter(env, env.SVC_IDENTITY, {
-    caller: "event-service",
-    ...(requestId ? { requestId } : {}),
-  });
-  // Layer 2 — the one event-scoped, body-dependent assertion (backward phase transition).
-  const scopedAuthz = createAuthClient({
-    identityBinding: env.SVC_IDENTITY,
-    serviceName: "event-service",
-    mode: "trustedHeader",
-  });
-  return {
-    repo: createD1EventRepo(db),
-    authz,
-    scopedAuthz,
-    publisher: buildPublisher(env),
-    audit: buildAudit(env),
-    taskClient: buildTaskClient(env.SVC_TASK),
-    orgId: env.DUB_DEFAULT_ORG_ID ?? common.DUB_DEFAULT_ORG_ID,
-    now: nowIso,
-    newEventId: () => newId("event"),
-    newActionId: () => newId("action"),
-  };
+export function agentUpgradeAllowed(request: Request, env: Env): boolean {
+  if (!digestEnabled(env)) return false;
+  const expected = env.DIGEST_AGENT_SECRET;
+  const header = request.headers.get("Authorization") ?? "";
+  const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
+  return Boolean(expected && presented && secretEquals(presented, expected));
 }
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === DIGEST_AGENT_PATH) {
+      const stub = hubStub(env);
+      if (!stub || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("not found", { status: 404 });
+      if (!agentUpgradeAllowed(request, env)) return new Response("unauthorized", { status: 401 });
+      return stub.fetch("https://event-digest-hub/ws/agent", request as never);
+    }
     const requestId = request.headers.get("x-dub-request-id") ?? undefined;
     const app = createApp(buildDeps(env, requestId));
     return app.fetch(request as unknown as Request) as unknown as Response;
@@ -85,6 +41,7 @@ export default {
   // NOTE: no scheduled() drain here. The freeq outbox is drained centrally by the
   // standalone freeq-drain worker (single aggregated cron). src/drain.ts is retained as
   // the topic->destination contract source (audit.record + evt.* defer) for freeq-drain.
+  // The AI digest schedule is the EventDigestHub DO ALARM (no new Cron: the cap is full).
 };
 
 export { createApp } from "./app";
@@ -96,5 +53,7 @@ export {
   EVENT_DETAILS_SCHEMA_MIGRATION,
   EVENT_SECTION_LAYOUT_SCHEMA_MIGRATION,
   EVENT_PAGE_LAYOUT_SCHEMA_MIGRATION,
+  EVENT_VENUE_CAPACITY_SCHEMA_MIGRATION,
+  EVENT_AI_DIGEST_SCHEMA_MIGRATION,
 } from "./schema";
 export type { AppDeps } from "./types";
