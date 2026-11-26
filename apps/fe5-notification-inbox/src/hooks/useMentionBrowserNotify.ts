@@ -11,7 +11,7 @@ import {
   BROWSER_NOTIFY_CHANGE_EVENT,
   createMentionNotifier,
   isBrowserNotifyActive,
-  mentionNotice,
+  browserNoticeFor,
   showBrowserNotice,
 } from "../lib/browser-notify";
 
@@ -28,7 +28,7 @@ export function useMentionBrowserNotify(): void {
         fetchUnread: async () => (await api.listInbox({ unreadOnly: true, limit: FETCH_LIMIT })).items ?? [],
         notify: (item) => {
           const link = itemLinkUrl(item);
-          showBrowserNotice({ ...mentionNotice(item), ...(link ? { onClick: () => navigate(link) } : {}) });
+          showBrowserNotice({ ...browserNoticeFor(item), ...(link ? { onClick: () => navigate(link) } : {}) });
         },
       }),
     [api, navigate],

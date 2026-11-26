@@ -54,6 +54,13 @@ describe("resolveCategory (server type -> tab category)", () => {
     expect(d.label).toBe("スポンサーの資料請求");
   });
 
+  it("labels mail.received in Japanese under メール (#869)", () => {
+    expect(resolveCategory("mail.received")).toBe("mail");
+    const d = resolveTypeDisplay("mail.received");
+    expect(d.known).toBe(true);
+    expect(d.label).toBe("新しいメールが届きました");
+  });
+
   it("maps mail.* to メール", () => {
     expect(resolveCategory("mail.message.received")).toBe("mail");
     expect(resolveCategory("mail.message.sent")).toBe("mail");

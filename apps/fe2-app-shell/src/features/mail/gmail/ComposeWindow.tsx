@@ -33,6 +33,7 @@ import { addressCandidates } from "./mailModel.ts";
 import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { deliver } from "./sendMail.ts";
 import { SchedulePicker } from "./SchedulePicker.tsx";
+import { TemplatePicker } from "./TemplatePicker.tsx";
 import { useServerDraft } from "./useServerDraft.ts";
 import { useDraggableWindow, useIsNarrowViewport } from "./useDraggableWindow.ts";
 
@@ -487,6 +488,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             >
               <MailIcon name="paperclip" size={18} />
             </button>
+            <TemplatePicker compose={{ subject: compose.subject, body: compose.body }} onInsert={(next) => patch(next)} disabled={seeding} />
             <input
               ref={fileInputRef}
               type="file"

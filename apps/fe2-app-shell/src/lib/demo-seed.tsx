@@ -482,9 +482,11 @@ function saveDemoSectionLayout(next: DemoSectionLayout): void {
 }
 
 // ── notifications ─────────────────────────────────────────────────────────────
+// 通知設定の上書き (in-session; a reload resets like the rest of the demo).
+const DEMO_NOTIF_PREFS = new Map<string, notification.PreferenceEntry>();
 const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
-  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
+  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail_message", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
   // チャット (chat.mention / chat.dm, via chat.message.created -> notification, in_app
   // default-ON exception). resourceType "channel" deep-links into fe6-chat's own route
@@ -496,13 +498,13 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_6", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「会場レイアウト確定」の期限は明日です。", readAt: null, createdAt: "2026-08-02T00:50:00Z", resourceType: "task", resourceId: "tsk_2" },
   { id: "ntf_7", type: "chat.mention", title: "メンションされました", body: "#project-alpha で受付ボランティアの集合時間についてメンションされました。", readAt: null, createdAt: "2026-08-02T00:40:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_8", type: "task.assigned", title: "タスクが割り当てられました", body: "「スポンサー資料の最終確認」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T00:30:00Z", resourceType: "task", resourceId: "tsk_3" },
-  { id: "ntf_9", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんから登壇資料についてのメールが届いています。", readAt: null, createdAt: "2026-08-02T00:20:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_9", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんから登壇資料についてのメールが届いています。", readAt: null, createdAt: "2026-08-02T00:20:00Z", resourceType: "mail_message", resourceId: "msg_2" },
   { id: "ntf_10", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」の運営ミーティングは本日 19:00 からです。", readAt: null, createdAt: "2026-08-02T00:10:00Z", resourceType: "event", resourceId: "evt_1" },
   { id: "ntf_11", type: "task.completed", title: "タスクが完了しました", body: "「受付名簿の作成」が完了になりました。", readAt: null, createdAt: "2026-08-02T00:00:00Z", resourceType: "task", resourceId: "tsk_4" },
   { id: "ntf_12", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから懇親会の会場についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T23:50:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_13", type: "event.invited", title: "イベントに招待されました", body: "「運営定例ミーティング」に招待されました。", readAt: null, createdAt: "2026-08-01T23:40:00Z", resourceType: "event", resourceId: "evt_2" },
   { id: "ntf_14", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「当日タイムテーブル作成」の期限は 3 日後です。", readAt: null, createdAt: "2026-08-01T23:30:00Z", resourceType: "task", resourceId: "tsk_5" },
-  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "会場担当者から搬入時間の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T23:20:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "会場担当者から搬入時間の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T23:20:00Z", resourceType: "mail_message", resourceId: "msg_3" },
   { id: "ntf_16", type: "chat.mention", title: "メンションされました", body: "#project-alpha でノベルティの発注数についてメンションされました。", readAt: null, createdAt: "2026-08-01T23:10:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_17", type: "task.assigned", title: "タスクが割り当てられました", body: "「アンケートフォーム作成」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T23:00:00Z", resourceType: "task", resourceId: "tsk_10" },
   { id: "ntf_18", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「運営定例ミーティング」が planning になりました。", readAt: null, createdAt: "2026-08-01T22:50:00Z", resourceType: "event", resourceId: "evt_2" },
@@ -510,12 +512,12 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_20", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから当日の集合場所についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:30:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_21", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「司会台本の作成」の期限は明日です。", readAt: null, createdAt: "2026-08-01T22:20:00Z", resourceType: "task", resourceId: "tsk_6" },
   { id: "ntf_22", type: "chat.mention", title: "メンションされました", body: "#project-alpha で懇親会の参加人数についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:18:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
-  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "スポンサー企業から協賛内容の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T22:16:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "スポンサー企業から協賛内容の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T22:16:00Z", resourceType: "mail_message", resourceId: "msg_2" },
   { id: "ntf_24", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」のリハーサルは明日 10:00 からです。", readAt: null, createdAt: "2026-08-01T22:14:00Z", resourceType: "event", resourceId: "evt_1" },
   { id: "ntf_25", type: "task.assigned", title: "タスクが割り当てられました", body: "「名札の印刷」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T22:12:00Z", resourceType: "task", resourceId: "tsk_12" },
   { id: "ntf_26", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから備品リストについてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:10:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_27", type: "task.completed", title: "タスクが完了しました", body: "「会場の下見」が完了になりました。", readAt: null, createdAt: "2026-08-01T22:08:00Z", resourceType: "task", resourceId: "tsk_13" },
-  { id: "ntf_28", type: "mail.received", title: "新着メール", body: "登壇者からスライド提出のメールが届いています。", readAt: null, createdAt: "2026-08-01T22:06:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_28", type: "mail.received", title: "新着メール", body: "登壇者からスライド提出のメールが届いています。", readAt: null, createdAt: "2026-08-01T22:06:00Z", resourceType: "mail_message", resourceId: "msg_3" },
   { id: "ntf_29", type: "chat.mention", title: "メンションされました", body: "#project-alpha で配信機材の手配についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:04:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_30", type: "event.invited", title: "イベントに招待されました", body: "「スタッフ打ち上げ」に招待されました。", readAt: null, createdAt: "2026-08-01T22:02:00Z", resourceType: "event", resourceId: "evt_2" },
 ];
@@ -1238,6 +1240,7 @@ function createMailStore() {
   // submit returns the first send's ack instead of appending a second Sent row.
   const idemAcks = new Map<string, mail.SendMailResponse>();
   const draftsByAccount: Record<string, mail.MailDraft[]> = {};
+  const templatesByAccount: Record<string, mail.MailTemplate[]> = {};
 
   function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
@@ -1384,6 +1387,24 @@ function createMailStore() {
         saveFlags([...flags.values()]);
       }
       return json({ updated: hit.length });
+    }
+    // 定型文 (#867): per-account, in-session; one sample so the picker is not empty in the demo.
+    {
+      const list = (templatesByAccount[me.id] ??= [
+        { id: "tpl-demo-interview", title: "加入面談のご案内", subject: "【DevelopersHub】加入面談の日程について", body: "こんにちは、DevelopersHub 運営です。\n\n加入面談の候補日をお送りします。ご都合のよい日時をご返信ください。\n\nよろしくお願いいたします。", updatedAt: "2026-08-01T00:00:00.000Z" },
+      ]);
+      if (pathname === "/api/v1/mail/templates" && method === "GET") return json({ items: [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) } satisfies mail.MailTemplateList);
+      const one = /^\/api\/v1\/mail\/templates\/([^/]+)$/.exec(pathname);
+      if (one && method === "PUT") {
+        const id = decodeURIComponent(one[1]!);
+        const saved: mail.MailTemplate = { ...(body as mail.MailTemplateInput), id, updatedAt: new Date().toISOString() };
+        templatesByAccount[me.id] = [saved, ...list.filter((t) => t.id !== id)];
+        return json(saved);
+      }
+      if (one && method === "DELETE") {
+        templatesByAccount[me.id] = list.filter((t) => t.id !== decodeURIComponent(one[1]!));
+        return json({ id: decodeURIComponent(one[1]!), deleted: true });
+      }
     }
     // 下書き: per-account, in-session (a reload resets, like Sent).
     {
@@ -2956,6 +2977,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     if (pathname === "/api/v1/notifications/inbox/unread-count") {
       return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
     }
+    // 通知設定 (server shape: the overrides the demo user saved, e.g. 新着メール off).
+    if (pathname === "/api/v1/notifications/preferences") return json({ userId: "demo", entries: [...DEMO_NOTIF_PREFS.values()] });
     // admin: Notification管理 list (audience='admin' notifications to publish).
     if (pathname === "/api/v1/notifications/manage") {
       return json(page(ADMIN_NOTIFICATIONS.map((a) => ({ ...a }))));
@@ -3077,7 +3100,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         return json(null, 204);
       }
     }
-    if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
+    if (pathname === "/api/v1/notifications/preferences") {
+      for (const e of ((body as { entries?: notification.PreferenceEntry[] } | null)?.entries ?? [])) DEMO_NOTIF_PREFS.set(e.type, e);
+      return json({ userId: "demo", entries: [...DEMO_NOTIF_PREFS.values()] });
+    }
     // Persist a bar's window after a leaf move/resize (Notion-style edit). Mutates the task
     // columns + the gantt row so the change survives a refetch/reload (in-session). Returns
     // the updated GanttRow. Parents never reach here (the client blocks a parent resize).
