@@ -365,7 +365,7 @@ describe("MembersPage", () => {
     const teamRow = screen.getByTestId("members-orgsquads-pr");
     expect([...teamRow.children].map((e) => e.getAttribute("data-testid"))).toEqual(["members-orggroup-O"]);
     const row = screen.getByTestId("members-orgunits-O");
-    expect(row.getAttribute("data-layout")).toBe("row");
+    expect(row.getAttribute("data-layout")).toBe("column");
     const squads = [...row.children];
     expect(squads.map((e) => e.getAttribute("data-testid"))).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
     expect(squads.map((e) => e.getAttribute("aria-label"))).toEqual(["広報班", "デザイン班"]);
@@ -432,9 +432,9 @@ describe("MembersPage", () => {
     await screen.findByTestId("members-orgchart");
 
     // オーガナイザー 2 人 → 2 グループ、親の決まらないリーダー 4 人 → 班 4 つ、残り → リーダー未設定。
-    // すべてチームの下に横 1 列で並ぶ(縦に積まない)。
+    // すべてチーム名の帯の右に縦 1 列で並ぶ(木は左 → 右)。
     const row = screen.getByTestId("members-orgsquads-pr");
-    expect(row.getAttribute("data-layout")).toBe("row");
+    expect(row.getAttribute("data-layout")).toBe("column");
     expect([...row.children].map((e) => e.getAttribute("data-testid"))).toEqual([
       "members-orggroup-O1",
       "members-orggroup-O2",
@@ -479,12 +479,22 @@ describe("MembersPage", () => {
     await screen.findByTestId("members-orgchart");
 
     const kids = (id: string): Array<string | null> => [...screen.getByTestId(id).children].map((e) => e.getAttribute("data-testid"));
-    expect(screen.getByTestId("fe2-orgchart-subgroups").getAttribute("data-layout")).toBe("row");
+    // チームは縦に 1 段ずつ、チームの中は左 → 右。
+    expect(screen.getByTestId("fe2-orgchart-subgroups").getAttribute("data-layout")).toBe("column");
+    expect(screen.getByTestId("members-orgcol-pr").getAttribute("data-layout")).toBe("ltr");
     expect(kids("members-orgsquads-pr")).toEqual(["members-orggroup-O1", "members-orggroup-O2"]);
     expect(kids("members-orgunits-O1")).toEqual(["members-orgsquad-L1", "members-orgsquad-L2"]);
     expect(kids("members-orgunits-O2")).toEqual(["members-orggroup-O3", "members-orgsquad-L3"]);
     expect(kids("members-orgunits-O3")).toEqual(["members-orgsquad-L4"]);
-    for (const id of ["O1", "O2", "O3"]) expect(screen.getByTestId(`members-orgunits-${id}`).getAttribute("data-layout")).toBe("row");
+    // 各グループは「左に自分の箱、右に子の列」。子の列は縦 1 列。
+    for (const id of ["O1", "O2", "O3"]) {
+      const group = screen.getByTestId(`members-orggroup-${id}`);
+      expect(group.getAttribute("data-layout")).toBe("ltr");
+      const column = screen.getByTestId(`members-orgunits-${id}`);
+      expect(column.getAttribute("data-layout")).toBe("column");
+      expect(group.lastElementChild).toBe(column);
+      expect(within(group.firstElementChild as HTMLElement).getByTestId(`members-orgchip-${id}`)).toBeInTheDocument();
+    }
     // 配下は自分の班の中だけ。
     expect(within(screen.getByTestId("members-orgsquad-L1")).getByTestId("members-orgchip-M1")).toBeInTheDocument();
     expect(within(screen.getByTestId("members-orgsquad-L3")).getByTestId("members-orgchip-M3")).toBeInTheDocument();
@@ -493,13 +503,18 @@ describe("MembersPage", () => {
     expect(screen.getByTestId("members-orgcol-pr").textContent).toContain("4班");
   });
 
-  // 横並びの段は CSS で折り返さない(折り返すと狭い画面・多いチームで縦に積まれる)。
-  it("組織図 rows never wrap (teams row and every unit row stay horizontal)", () => {
+  // 木は左 → 右: 単位とチームは横(自分 → 子の列)、子の列とチームの並びは縦。どれも折り返さない。
+  it("組織図 flows left to right in CSS (no wrapping at any level)", () => {
     const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "members.module.css"), "utf8");
-    for (const sel of [".teamsRow", ".unitRow"]) {
-      const body = css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
-      expect(body, sel).toMatch(/flex-direction:\s*row/);
-      expect(body, sel).toMatch(/flex-wrap:\s*nowrap/);
+    const rule = (sel: string): string => css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
+    for (const [sel, dir] of [
+      [".teamsRow", "column"],
+      [".orgCol", "row"],
+      [".unit", "row"],
+      [".unitChildren", "column"],
+    ] as const) {
+      expect(rule(sel), sel).toMatch(new RegExp(`flex-direction:\\s*${dir}`));
+      expect(rule(sel), sel).toMatch(/flex-wrap:\s*nowrap/);
     }
   });
 

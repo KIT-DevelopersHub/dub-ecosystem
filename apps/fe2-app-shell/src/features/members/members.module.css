@@ -202,7 +202,7 @@
 .orgCanvas {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   width: max-content;
   min-width: 100%;
   box-sizing: border-box;
@@ -274,7 +274,7 @@
 }
 .connector .vtop {
   position: absolute;
-  left: 50%;
+  left: 48px;
   top: 0;
   width: 3px;
   height: 20px;
@@ -296,31 +296,39 @@
   transform: translateX(-50%);
 }
 
-/* チームカラム */
-/* チームは常に横 1 列。折り返すと縦に積まれるので、広い時は横スクロールに任せる。 */
+/* チーム */
+/* チームは縦に 1 段ずつ。各チームの中は左に帯(チーム名)、右へ グループ → 班 → … と深くなる。
+   広い時は .orgScroll の中で横スクロール(ページ自体は横に動かない)。 */
 .teamsRow {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   flex-wrap: nowrap;
   gap: var(--dub-space-5);
-  justify-content: center;
   align-items: flex-start;
 }
 .orgCol {
-  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: stretch;
   width: max-content;
-  min-width: 190px;
+  min-width: 320px;
   border-radius: 10px;
   overflow: hidden;
   border: 1.6px solid color-mix(in srgb, var(--team, #64748b) 45%, #fff);
-  display: flex;
-  flex-direction: column;
   box-shadow: 0 2px 6px rgba(15, 36, 54, 0.08);
   background: #fff;
 }
 .colHead {
-  padding: 8px 6px;
-  text-align: center;
+  flex: 0 0 auto;
+  width: 148px;
+  box-sizing: border-box;
+  padding: var(--dub-space-3);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--dub-space-1);
+  text-align: left;
   color: #fff;
   background: var(--team, #64748b);
 }
@@ -330,30 +338,91 @@
 }
 .colDesc {
   font-size: 9px;
-  margin-top: 4px;
   line-height: 1.4;
   opacity: 0.95;
 }
 .colBody {
-  flex: 1;
-  padding: var(--dub-space-3);
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: var(--dub-space-2);
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--dub-space-4);
+  padding: var(--dub-space-4) var(--dub-space-4) var(--dub-space-4) 0;
+}
+.colRest {
+  padding-left: var(--dub-space-4);
 }
 
 /* ── 単位(オーガナイザーのグループ / 班) ───────────────────────────────
-   子の単位は常に横 1 列(折り返さない)。どの深さでも同じ。頭 → 配下 → 子の単位。 */
-.unitRow {
+   左に自分の箱、右に子の単位を縦 1 列(.unitChildren)。どの深さでも同じ。
+   線: 親の箱 → 横の短い線 → 縦のレール → 各子への横の線。 */
+.unit {
+  --elbow: 22px;
+  --rail-x: 14px;
+  position: relative;
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
-  gap: var(--dub-space-4);
   align-items: flex-start;
 }
-.unit {
+.unitChildren {
+  --gap: var(--dub-space-3);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: var(--gap);
+  padding-left: calc(var(--rail-x, 14px) * 2);
+}
+/* 親の箱からレールへの横線 */
+.unitChildren::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--elbow, 22px);
+  width: var(--rail-x, 14px);
+  height: 2px;
+  background: color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+}
+/* レール(子と子の間もつなぐ) */
+.unitChildren > .unit::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--rail-x));
+  top: calc(-1 * var(--gap) / 2);
+  bottom: calc(-1 * var(--gap) / 2);
+  width: 2px;
+  background: color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+}
+.unitChildren > .unit:first-child::before {
+  top: var(--elbow);
+}
+.unitChildren > .unit:last-child::before {
+  bottom: auto;
+  height: calc(var(--elbow) + var(--gap) / 2);
+}
+.unitChildren > .unit:only-child::before {
+  display: none;
+}
+/* レールから各子への横線 */
+.unitChildren > .unit::after {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--rail-x));
+  top: var(--elbow);
+  width: var(--rail-x);
+  height: 2px;
+  background: color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+}
+.unitChildren > .unit:only-child::after {
+  left: calc(-2 * var(--rail-x));
+  width: calc(2 * var(--rail-x));
+}
+.unitSelf {
   flex: 0 0 auto;
   min-width: 170px;
+  max-width: 260px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -363,16 +432,13 @@
   border: 1.4px solid color-mix(in srgb, var(--team, #64748b) 32%, #fff);
   background: color-mix(in srgb, var(--team, #64748b) 4%, #fff);
 }
-/* オーガナイザーのグループ = 一段濃い枠で、中の班と区別する。 */
-.unit.unitGroup {
+/* オーガナイザーのグループ = 一段濃い枠で、右の班と区別する。 */
+.unitSelf.unitGroup {
   border-width: 2px;
   border-color: color-mix(in srgb, var(--team, #64748b) 55%, #fff);
-  background: color-mix(in srgb, var(--team, #64748b) 7%, #fff);
+  background: color-mix(in srgb, var(--team, #64748b) 10%, #fff);
 }
-.unit .unit {
-  background: #fff;
-}
-.unit.unitLoose {
+.unitSelf.unitLoose {
   border-style: dashed;
   background: #fff;
 }
@@ -522,14 +588,13 @@
 }
 .colCount {
   font-size: 10px;
-  color: #64748b;
-  text-align: center;
-  margin-top: auto;
-  padding-top: 4px;
+  font-weight: 700;
+  opacity: 0.9;
+  margin-top: var(--dub-space-1);
 }
 /* 未所属メンバー — 体制図の下部に控えめに並べる注記（チーム列ではない）。 */
 .orgUnassigned {
-  margin: 14px auto 0;
+  margin: 14px 0 0;
   max-width: 720px;
   padding: 8px 12px;
   border: 1px dashed #cbd5e1;

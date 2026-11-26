@@ -1,6 +1,6 @@
-// 組織図ビュー — 代表(横長ダークネイビー箱) → チーム色のカードを横 1 列 → カードの中は単位の木。
-//   単位 = オーガナイザーのグループ / リーダーの班。子の単位は常に横 1 列に並べ、どの深さでも
-//   同じ形で再帰する(チーム → オーガナイザーごとのグループ → 班 → …)。親子は leaderId だけで決め、
+// 組織図ビュー — 代表(横長ダークネイビー箱) → チーム色の帯を縦に 1 段ずつ → 帯の中は単位の木。
+//   単位 = オーガナイザーのグループ / リーダーの班。木は左 → 右に深くなり、子の単位は親の右に
+//   縦 1 列で並ぶ。どの深さでも同じ形で再帰する(チーム → オーガナイザーごとのグループ → 班 → …)。親子は leaderId だけで決め、
 //   リーダーの leaderId が同じチームの別リーダーを指す場合は同じ班の共同リーダーとして並べる。
 //   班名は先頭リーダーの役割(「広報リーダー」→「広報班」)、取れない・重なる時は姓(「石井班」)。
 //   どの単位にもつかない人は「リーダー未設定」の箱へ。頭が誰も居ないチームは従来の親子ツリー。
@@ -86,7 +86,7 @@ function buildTeamTree(members: OrgMember[]): TreeNode[] {
 }
 
 /**
- * 組織図の 1 単位(グループ / 班)。子の単位は横 1 列に並べ、どの深さでも同じ形で再帰する。
+ * 組織図の 1 単位(グループ / 班)。子の単位は親の右に縦 1 列で並べ、どの深さでも同じ形で再帰する。
  * - group = オーガナイザー 1 人を頭にした単位(配下の班・メンバーを持つ)。
  * - squad = 班。リーダー(＋共同リーダー)を頭にした単位。
  * - loose = 単位を持つチームで、どのオーガナイザー/リーダーにもつかない人の置き場。
@@ -255,10 +255,10 @@ function TreeList({ nodes }: { nodes: TreeNode[] }): JSX.Element | null {
 
 const UNIT_TESTID: Record<UnitKind, string> = { group: "members-orggroup", squad: "members-orgsquad", loose: "members-orgloose" };
 
-/** 子の単位を横 1 列に並べる(折り返さない)。どの深さでも同じ。 */
-function UnitRow({ units, testId }: { units: OrgUnit[]; testId: string }): JSX.Element {
+/** 子の単位を親の右側に縦 1 列で並べる(左 → 右に深くなる)。どの深さでも同じ。 */
+function UnitColumn({ units, testId }: { units: OrgUnit[]; testId: string }): JSX.Element {
   return (
-    <div className={styles.unitRow} data-layout="row" data-testid={testId}>
+    <div className={styles.unitChildren} data-layout="column" data-testid={testId}>
       {units.map((u) => (
         <UnitBox key={u.id} unit={u} />
       ))}
@@ -266,28 +266,30 @@ function UnitRow({ units, testId }: { units: OrgUnit[]; testId: string }): JSX.E
   );
 }
 
-/** 1 単位: 頭(横並び) → 配下メンバー(縦の親子ツリー) → 子の単位(横 1 列)。 */
+/** 1 単位: 左に自分(頭 → 配下メンバー)、右に子の単位の列。 */
 function UnitBox({ unit }: { unit: OrgUnit }): JSX.Element {
   const base = UNIT_TESTID[unit.kind];
-  const cls = [styles.unit, unit.kind === "group" ? styles.unitGroup : unit.kind === "loose" ? styles.unitLoose : ""]
+  const cls = [styles.unitSelf, unit.kind === "group" ? styles.unitGroup : unit.kind === "loose" ? styles.unitLoose : ""]
     .filter(Boolean)
     .join(" ");
   return (
-    <section className={cls} data-testid={`${base}-${unit.id}`} data-unit={unit.kind} aria-label={unit.name}>
-      {unit.kind !== "group" ? <div className={styles.squadName}>{unit.name}</div> : null}
-      {unit.heads.length > 0 ? (
-        <ul className={styles.squadLeaders} data-testid={`${base}-leaders-${unit.id}`}>
-          {unit.heads.map((l) => (
-            <OrgNode key={l.id} node={{ m: l, children: [] }} />
-          ))}
-        </ul>
-      ) : null}
-      {unit.members.length > 0 ? (
-        <div className={unit.kind === "loose" ? undefined : styles.squadMembers}>
-          <TreeList nodes={unit.members} />
-        </div>
-      ) : null}
-      {unit.units.length > 0 ? <UnitRow units={unit.units} testId={`members-orgunits-${unit.id}`} /> : null}
+    <section className={styles.unit} data-layout="ltr" data-testid={`${base}-${unit.id}`} data-unit={unit.kind} aria-label={unit.name}>
+      <div className={cls}>
+        {unit.kind !== "group" ? <div className={styles.squadName}>{unit.name}</div> : null}
+        {unit.heads.length > 0 ? (
+          <ul className={styles.squadLeaders} data-testid={`${base}-leaders-${unit.id}`}>
+            {unit.heads.map((l) => (
+              <OrgNode key={l.id} node={{ m: l, children: [] }} />
+            ))}
+          </ul>
+        ) : null}
+        {unit.members.length > 0 ? (
+          <div className={unit.kind === "loose" ? undefined : styles.squadMembers}>
+            <TreeList nodes={unit.members} />
+          </div>
+        ) : null}
+      </div>
+      {unit.units.length > 0 ? <UnitColumn units={unit.units} testId={`members-orgunits-${unit.id}`} /> : null}
     </section>
   );
 }
@@ -303,24 +305,33 @@ function TeamColumn({ team, members }: { team: MemberTeam; members: OrgMember[] 
   const tent = members.filter((m) => statusGroup(m.status) === "pending").length;
 
   return (
-    <div className={styles.orgCol} style={{ ["--team" as string]: color } as CSSProperties} data-testid={`members-orgcol-${team.id}`}>
+    <div
+      className={styles.orgCol}
+      style={{ ["--team" as string]: color } as CSSProperties}
+      data-layout="ltr"
+      data-testid={`members-orgcol-${team.id}`}
+    >
       <div className={styles.colHead}>
         <div className={styles.colName}>{team.name}</div>
         {team.description ? <div className={styles.colDesc}>{team.description}</div> : null}
-      </div>
-      <div className={styles.colBody}>
-        <TreeList nodes={rest} />
-        {units.length > 0 ? <UnitRow units={units} testId={`members-orgsquads-${team.id}`} /> : null}
         <div className={styles.colCount}>
           計{members.length}名{squads > 0 ? ` ／ ${squads}班` : ""}
           {tent > 0 ? `（うち打診中${tent}）` : ""}
         </div>
       </div>
+      <div className={styles.colBody}>
+        {rest.length > 0 ? (
+          <div className={styles.colRest}>
+            <TreeList nodes={rest} />
+          </div>
+        ) : null}
+        {units.length > 0 ? <UnitColumn units={units} testId={`members-orgsquads-${team.id}`} /> : null}
+      </div>
     </div>
   );
 }
 
-/** 代表箱からチームの並びへ下りる線。チームは横 1 列(広ければ横スクロール)。 */
+/** 代表箱からチームの並びへ下りる線。チームは縦に 1 段ずつ、各チームの中は左 → 右。 */
 function Connector(): JSX.Element {
   return (
     <div className={styles.connector} aria-hidden>
@@ -363,7 +374,7 @@ export function OrgChartView({ teams: allTeams, members }: { teams: MemberTeam[]
       <div className={styles.orgHead}>
         <div className={styles.orgTitle}>全体組織体制図</div>
         <div className={styles.orgSub}>
-          チーム → オーガナイザーごとのグループ → 班 の順に、下の階層を横に並べます
+          チーム → オーガナイザーごとのグループ → 班 の順に、左から右へ階層をたどります
         </div>
         <div className={styles.orgLegend}>
           <span className={styles.li}>
@@ -411,7 +422,7 @@ export function OrgChartView({ teams: allTeams, members }: { teams: MemberTeam[]
 
           {reps.length > 0 && columns.length > 0 ? <Connector /> : null}
 
-          <div className={styles.teamsRow} data-layout="row" data-testid="fe2-orgchart-subgroups">
+          <div className={styles.teamsRow} data-layout="column" data-testid="fe2-orgchart-subgroups">
             {columns.map(({ team, members: cm }) => (
               <TeamColumn key={team.id} team={team} members={cm} />
             ))}
