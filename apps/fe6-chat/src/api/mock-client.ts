@@ -42,6 +42,7 @@ import { toggleReactionLocal } from "../store/timeline";
 import { mockUnfurl } from "../lib/unfurl-mock";
 import { createSlackImportSim, type ImportedChannel, type SimResult, type SlackDemoAuthors, type SlackImportSim } from "../lib/slack-import-demo";
 import { createCustomEmojiSim, type CustomEmojiSim } from "../lib/custom-emoji-demo";
+import { createTimesSim, type TimesSim } from "../lib/times-demo";
 
 const now = (): common.ISODateTime => new Date().toISOString();
 
@@ -86,6 +87,7 @@ export class MockChatClient implements ChatApiClient {
   private readonly slackAuthors: SlackDemoAuthors;
   private slackSim: SlackImportSim | null = null;
   private emojiSim: CustomEmojiSim | null = null;
+  private timesSim: TimesSim | null = null;
   /** Workspace message-deletion policy (mock default = product default: all hard). */
   private deletionPolicy: MessageDeletionPolicy = { ...chat.DEFAULT_MESSAGE_DELETION_POLICY };
   private deletionPolicyVersion = 0;
@@ -557,5 +559,39 @@ export class MockChatClient implements ChatApiClient {
   }
   async importSlackEmojis(after: string | null): Promise<EmojiImportResult> {
     return this.settle(this.emojis().importStep(after));
+  }
+
+  // ---- times channels (#850; lib/times-demo.ts): each seed user gets one, owned by them ----
+  private times(): TimesSim {
+    this.timesSim ??= createTimesSim({
+      members: () => [...this.users.values()].map((u) => ({ id: u.id, displayName: u.displayName, email: `${u.id}@example.com` })),
+      channels: () => [...this.channels.values()].filter((c) => c.type !== "dm").map((c) => ({ id: c.id, name: c.name, archived: c.archived })),
+      createChannel: ({ ownerId, name, visibility, topic }) => {
+        const id = newChannelId();
+        this.channels.set(id, {
+          id,
+          orgId: "org_devhub",
+          type: "topic",
+          visibility,
+          name,
+          topic,
+          eventId: null,
+          archived: false,
+          memberCount: 1,
+          version: 1,
+          createdAt: now(),
+          updatedAt: now(),
+        });
+        this.members.push({ channelId: id, userId: ownerId, role: "admin", joinedAt: now() });
+        return id;
+      },
+    });
+    return this.timesSim;
+  }
+  async previewTimes(): Promise<chat.TimesPreviewResponse> {
+    return this.settle(this.times().preview());
+  }
+  async bulkCreateTimes(userIds?: string[]): Promise<chat.TimesBulkResponse> {
+    return this.settle(this.times().bulk(userIds));
   }
 }

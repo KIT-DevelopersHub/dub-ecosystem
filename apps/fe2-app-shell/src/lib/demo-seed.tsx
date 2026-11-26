@@ -33,7 +33,7 @@ if (typeof window !== "undefined") (window as unknown as { __dubDemoHrMails?: ty
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
 import { createHrInterviewsDemoStore } from "./demo-hr-interviews.ts";
 import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
-import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
+import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, createTimesSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -75,6 +75,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:delete_channel",
   "chat:slack_import",
   "chat:emoji_import",
+  "chat:times",
   "chat:manage_sections",
   "chat:change_visibility",
   "audit:read",
@@ -2206,7 +2207,11 @@ function createRosterStore() {
     return { user, address };
   }
 
-  return { handle, addUsers, findUser, onboard };
+  /** Active, real members (times channels #850; Slack-import placeholders excluded). */
+  const activeMembers = (): { id: string; displayName: string; email: string }[] =>
+    users.filter((u) => u.status === "active" && !u.email.endsWith("@slack-import.invalid")).map((u) => ({ id: u.id, displayName: u.displayName, email: u.email }));
+
+  return { handle, addUsers, findUser, onboard, activeMembers };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -2234,7 +2239,13 @@ interface DemoChatChannel {
 
 type DemoMessage = Record<string, unknown> & { id: string; channelId: string; threadRootId: string | null };
 
-function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayName: string }[]) => void }) {
+function createChatStore({
+  addUsers,
+  activeMembers,
+}: {
+  addUsers: (list: { id: string; displayName: string }[]) => void;
+  activeMembers: () => { id: string; displayName: string; email: string }[];
+}) {
   const CH_TS = "2026-08-01T00:00:00.000Z";
   // 全体: everyone. announcements is the read-mostly 全体周知 channel.
   const overall: DemoChatChannel[] = [
@@ -2439,6 +2450,26 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
   });
   // カスタム絵文字 (Slack): the shared fe6 simulator (two pre-imported, the rest on import).
   const customEmoji = createCustomEmojiSim();
+  // times チャンネル (#850): one Dub chat channel per active member, owned by them.
+  const timesSim = createTimesSim({
+    members: activeMembers,
+    channels: () => all.filter((c) => c.type !== "dm").map((c) => ({ id: c.id, name: c.name, createdBy: null, archived: c.archived === true })),
+    createChannel: ({ ownerId, name, visibility, topic }) => {
+      const created: DemoChatChannel = {
+        id: `chn_times_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+        type: "topic",
+        name,
+        topic,
+        eventId: null,
+        memberCount: 1,
+        roster: [{ userId: ownerId, role: "admin", joinedAt: new Date().toISOString() }],
+        visibility,
+      };
+      all.push(created);
+      byId.set(created.id, created);
+      return created.id;
+    },
+  });
   const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
     r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
 
@@ -2483,6 +2514,19 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         target.reactions = reactions.filter((x) => x.userIds.length > 0);
         return json({ messageId: id, reactions: target.reactions });
       }
+    }
+    if (pathname.startsWith("/api/v1/chat/times/")) {
+      // Same gate as chat-service: 編集 + chat:times.
+      const perms = currentAccount().permissions;
+      if (!perms.includes("app:chat:edit") || !perms.includes("chat:times")) {
+        return json({ error: { code: "FORBIDDEN", message: "chat:times required", retryable: false } } satisfies ErrorResponse, 403);
+      }
+      if (method === "GET" && pathname === "/api/v1/chat/times/preview") return json(timesSim.preview());
+      if (method === "POST" && pathname === "/api/v1/chat/times/bulk") {
+        const ids = (body as { userIds?: unknown } | null)?.userIds;
+        return json(timesSim.bulk(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : undefined));
+      }
+      return null;
     }
     if (pathname.startsWith("/api/v1/chat/slack-import/")) {
       if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
@@ -6591,7 +6635,7 @@ export function createDemoFetch(): typeof fetch {
     cancelInterview: (id) => moveApplicant(id, "scheduling", null),
   });
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
-  const chatStore = createChatStore({ addUsers: roster.addUsers });
+  const chatStore = createChatStore({ addUsers: roster.addUsers, activeMembers: roster.activeMembers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
   // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。
