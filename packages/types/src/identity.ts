@@ -300,6 +300,28 @@ export const MANAGED_ROLE_ID_PREFIX = "role_auto_";
 export type RoleAssignmentSource = "manual" | "auto:member-sync";
 export const AUTO_ASSIGNMENT_SOURCE: RoleAssignmentSource = "auto:member-sync";
 
+// ---- イベント運営ロール (イベント単位でも団体全体の問いに数えるロール) -------------------------
+// Organizer と名簿のチームロールは、運営する「イベント単位」で付ける (resourceType "event")。
+// その割当も、団体全体の問い (権限ゲート・/me とランチャー・通知の宛先・ロールのメール共有) に
+// 数える = どれかのイベントで持っていれば、そのロールの権限が効く。システム系 (admin /
+// maintainer / member / 役職 / bot / 人事・監査などの手作りロール) はここに入らず、団体全体の
+// 割当だけで判定する。イベント X を名指しした問い (resourceType + resourceId) は従来どおり X の割当だけ。
+
+export const ORGANIZER_ROLE_ID: RoleId = "role_sys_organizer";
+/** 名簿のチームロールの id 接頭辞 (member.teamRoleId)。 */
+export const TEAM_ROLE_ID_PREFIX = "role_auto_team_";
+
+/** イベント単位で持っても団体全体に数えるロールか (Organizer とチームロール)。 */
+export function isEventOperationRole(roleId: string): boolean {
+  return roleId === ORGANIZER_ROLE_ID || roleId.startsWith(TEAM_ROLE_ID_PREFIX);
+}
+
+/** この割当が団体全体の問いに数えられるか: 団体全体の割当、またはイベント運営ロールのイベント単位の割当。 */
+export function countsOrgWide(a: { roleId: string; resourceType: string | null; resourceId: string | null }): boolean {
+  if (a.resourceType === null && a.resourceId === null) return true;
+  return a.resourceType === "event" && a.resourceId !== null && isEventOperationRole(a.roleId);
+}
+
 /** 自動管理ロール 1 件 (id は MANAGED_ROLE_ID_PREFIX 始まり・権限は持たせない)。 */
 export interface ManagedRoleSpec {
   id: RoleId;

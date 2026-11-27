@@ -1,7 +1,7 @@
 // In-memory IdentityRepo — backs the test suite and `wrangler dev --local` smoke
 // runs. Mirrors the D1 DDL's unique constraints and ON DELETE CASCADE so tests
 // exercise the same conflict/cascade semantics the production store enforces.
-import type { identity } from "@dub/types";
+import { identity } from "@dub/types";
 import type {
   AssignmentRow,
   IdentityRepo,
@@ -219,7 +219,7 @@ export class MemIdentityRepo implements IdentityRepo {
     const users = new Set<string>();
     for (const a of this.assignments.values()) {
       if (a.orgId !== orgId) continue;
-      if (a.resourceType !== null || a.resourceId !== null) continue;
+      if (!identity.countsOrgWide(a)) continue;
       if (!roleIds.has(a.roleId)) continue;
       const u = this.users.get(a.userId);
       if (u && u.status === "active") users.add(u.id);
@@ -228,7 +228,7 @@ export class MemIdentityRepo implements IdentityRepo {
   }
 
   async orgWideRolePeers(orgId: string, userId: string, permission: identity.PermissionKey): Promise<string[]> {
-    const orgWide = (a: AssignmentRow): boolean => a.orgId === orgId && a.resourceType === null && a.resourceId === null;
+    const orgWide = (a: AssignmentRow): boolean => a.orgId === orgId && identity.countsOrgWide(a);
     const shared = new Set<string>();
     for (const a of this.assignments.values()) {
       if (a.userId !== userId || !orgWide(a)) continue;
@@ -251,7 +251,7 @@ export class MemIdentityRepo implements IdentityRepo {
   }
 
   async orgWideMailVisibleUsers(orgId: string, userId: string): Promise<string[]> {
-    const orgWide = (a: AssignmentRow): boolean => a.orgId === orgId && a.resourceType === null && a.resourceId === null;
+    const orgWide = (a: AssignmentRow): boolean => a.orgId === orgId && identity.countsOrgWide(a);
     const targets = new Set<string>();
     for (const a of this.assignments.values()) {
       if (a.userId !== userId || !orgWide(a)) continue;

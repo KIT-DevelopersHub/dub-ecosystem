@@ -12,7 +12,7 @@ import { createMockDriveShareClient } from "../src/mock-client";
 import { createInMemoryMeetingStore } from "../src/meetings-store";
 import { createInMemorySyncState } from "../src/meeting-sync-state";
 import { staticMemberDirectory, type MemberDirectory } from "../src/member-directory";
-import { createIdentityRoleMembership, meetingRoleIds, type ActiveUser } from "../src/role-membership";
+import { createIdentityRoleMembership, anyScopeRoleIds, type ActiveUser } from "../src/role-membership";
 import { createRoleFollowService, type RoleFollowDeps } from "../src/role-follow";
 import type { RoleGrantsService } from "../src/role-grants-service";
 import { buildMeetings, buildRoleGrants, fakeRoster, memAuthzHolding, stubGoogleAccount } from "./helpers";
@@ -203,7 +203,7 @@ describe("#908 cause: Organizer given for one event (event-scoped) — the actua
       fetch: async () => new Response(JSON.stringify({ items, nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } }),
     } as unknown as Fetcher;
     const got = await createIdentityRoleMembership(binding, { requestId: "req_908" }).listActiveUsers();
-    expect(got.map((u) => [u.id, meetingRoleIds(u)])).toEqual([["usr_a", [ORGANIZER]], ["usr_e", [ORGANIZER]]]);
+    expect(got.map((u) => [u.id, anyScopeRoleIds(u)])).toEqual([["usr_a", [ORGANIZER]], ["usr_e", [ORGANIZER]]]);
     expect(got[1]!.roleIds).toEqual([]); // Drive共有 keeps reading org-wide roles only
   });
 });

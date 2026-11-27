@@ -952,7 +952,12 @@ export class IdentityService {
    * PUT /internal/users/:id/managed-roles: the managed roles this user should hold. Adds the
    * missing auto assignments and removes auto assignments no longer wanted. Manual
    * assignments are never added, removed or duplicated (an existing manual grant satisfies a
-   * wanted role). Auto rows are org-wide, so they behave exactly like a manual grant.
+   * wanted role).
+   *
+   * Any scope counts: a team role held for an event (運営ロールをイベント単位へ移した後) satisfies
+   * the wanted role, so the sync never re-creates an org-wide duplicate, and an auto row no
+   * longer wanted is removed whatever its scope. A NEW auto row goes where the role lives now
+   * (`managedRoleScope`): the event of the role's newest event-scoped assignment, else org-wide.
    */
   async syncUserManagedRoles(userId: string, orgId: string, req: identity.PutUserManagedRolesRequest, ctx: RequestCtx): Promise<identity.PutUserManagedRolesResponse> {
     const user = await this.d.repo.getUser(userId);
@@ -961,31 +966,31 @@ export class IdentityService {
     const dryRun = req?.dryRun === true;
     await this.ensureManagedRoles(orgId, specs, dryRun, ctx);
 
-    const orgWide = (await this.d.repo.listAssignmentsByUser(userId, orgId)).filter((a) => a.resourceType === null && a.resourceId === null);
+    const mine = await this.d.repo.listAssignmentsByUser(userId, orgId);
     const wanted = new Set(specs.map((s) => s.id));
     const added: string[] = [];
     const removed: string[] = [];
     const manual: string[] = [];
     for (const id of wanted) {
-      const have = orgWide.find((a) => a.roleId === id);
-      if (!have) added.push(id);
-      else if ((have.source ?? "manual") !== AUTO_SOURCE) manual.push(id);
+      const have = mine.filter((a) => a.roleId === id);
+      if (have.length === 0) added.push(id);
+      else if (!have.some((a) => (a.source ?? "manual") === AUTO_SOURCE)) manual.push(id);
     }
-    const stale = orgWide.filter((a) => (a.source ?? "manual") === AUTO_SOURCE && !wanted.has(a.roleId));
-    removed.push(...stale.map((a) => a.roleId));
+    const stale = mine.filter((a) => (a.source ?? "manual") === AUTO_SOURCE && !wanted.has(a.roleId));
+    removed.push(...new Set(stale.map((a) => a.roleId)));
     if (dryRun || (added.length === 0 && stale.length === 0)) return { dryRun, added, removed, manual };
 
     // granted_by is an FK to identity_users: the acting admin when it is a real user, else the
     // subject (the same fallback assignRole uses).
     const actor = ctx.actorId && (await this.d.repo.getUser(ctx.actorId)) ? ctx.actorId : userId;
     for (const roleId of added) {
+      const scope = await this.managedRoleScope(roleId);
       await this.d.repo.createAssignment({
         id: this.d.newId("ra"),
         userId,
         roleId,
         orgId,
-        resourceType: null,
-        resourceId: null,
+        ...scope,
         grantedBy: actor,
         grantedAt: this.d.now(),
         source: AUTO_SOURCE,
@@ -996,6 +1001,19 @@ export class IdentityService {
     await this.notifyMembership(ctx, orgId, userId, "added", added, "managed-sync");
     await this.notifyMembership(ctx, orgId, userId, "removed", removed, "managed-sync");
     return { dryRun, added, removed, manual };
+  }
+
+  /** Where a new auto assignment of `roleId` goes: an event-operation role (チーム) that is
+   *  already held per event goes to the event of its newest event-scoped assignment (so a new
+   *  team member joins the event the team runs); anything else stays org-wide. */
+  private async managedRoleScope(roleId: string): Promise<{ resourceType: string | null; resourceId: string | null }> {
+    if (!identityContract.isEventOperationRole(roleId)) return { resourceType: null, resourceId: null };
+    let newest: AssignmentRow | null = null;
+    for (const a of await this.d.repo.listAssignmentsByRole(roleId)) {
+      if (a.resourceType !== "event" || a.resourceId === null) continue;
+      if (!newest || a.grantedAt > newest.grantedAt) newest = a;
+    }
+    return newest ? { resourceType: "event", resourceId: newest.resourceId } : { resourceType: null, resourceId: null };
   }
 
   /** Lockout guard for deleteRole: does an active org-wide identity:admin remain without this role? */
@@ -1068,7 +1086,8 @@ export class IdentityService {
    * ロール管理 shows them) and the distinct ACTIVE users reached through those roles.
    * Serves `GET /internal/permission-holders` — notification-service resolves audience
    * recipients (notif:receive_admin / notif:receive_all) and renders 通知管理「誰に届くか」
-   * from it. Event-scoped grants never count (same rule as authz org-wide evaluation).
+   * from it. Event-scoped grants count only for event-operation roles (Organizer / チーム,
+   * `identity.countsOrgWide`) — the same rule as authz org-wide evaluation.
    */
   async permissionHolders(
     orgId: string,
@@ -1086,7 +1105,8 @@ export class IdentityService {
    * Role peers for `permission`: the OTHER active users who hold, org-wide, a role that
    * `userId` also holds org-wide and that carries `permission`. `mailVisibleUsers` uses it
    * with `mail:read_role_shared` (same-role mail sharing). Per role: a
-   * second, non-sharing role shares nothing. Event-scoped grants never count. An inactive
+   * second, non-sharing role shares nothing. Event-scoped grants count only for event-operation
+   * roles (`identity.countsOrgWide`), on both sides. An inactive
    * (or unknown) caller has no peers.
    */
   async rolePeers(userId: string, orgId: string, permission: string): Promise<{ userIds: string[] }> {

@@ -5,9 +5,10 @@
 // are optimistic (useAssignRoleInline / useRevokeRoleInline): the chip updates instantly
 // and rolls back on error.
 //
-// The chips read from `user.roleIds` (already on the list row — no per-row fetch). The
-// popover lazily fetches the user's assignments only while open, to resolve the
-// assignment id an org-wide revoke needs.
+// The chips read from `user.roleIds` (already on the list row — no per-row fetch), then the
+// roles held only for an event (`user.scopedRoleIds`, e.g. Organizer / チーム of one event),
+// marked「イベント」. The popover edits org-wide roles only; it lazily fetches the user's
+// assignments while open, to resolve the assignment id an org-wide revoke needs.
 import type { identity } from "@dub/types";
 import { Badge, Popover, Checkbox, Spinner, type BadgeTone } from "@dub/ui";
 import { useUserRoles, useAssignRoleInline, useRevokeRoleInline } from "../hooks/useRosterApi";
@@ -42,19 +43,29 @@ export function InlineRoleEditor({
 }) {
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   const assigned = user.roleIds;
+  const eventOnly = (user.scopedRoleIds ?? []).filter((id) => !assigned.includes(id));
 
   const chips = (
     <span style={chipsStyle}>
-      {assigned.length === 0 ? (
+      {assigned.length === 0 && eventOnly.length === 0 ? (
         <span style={emptyStyle} data-testid={`fe7-roles-empty-${user.id}`}>
           ロールなし
         </span>
       ) : (
-        assigned.map((roleId) => (
-          <Badge key={roleId} tone={roleTone(roleName(roleId))} testId={`fe7-role-chip-${user.id}-${roleId}`}>
-            {roleName(roleId)}
-          </Badge>
-        ))
+        <>
+          {assigned.map((roleId) => (
+            <Badge key={roleId} tone={roleTone(roleName(roleId))} testId={`fe7-role-chip-${user.id}-${roleId}`}>
+              {roleName(roleId)}
+            </Badge>
+          ))}
+          {eventOnly.map((roleId) => (
+            <span key={`event:${roleId}`} title="イベント単位で持っているロール">
+              <Badge tone={roleTone(roleName(roleId))} testId={`fe7-role-chip-event-${user.id}-${roleId}`}>
+                {roleName(roleId)}（イベント）
+              </Badge>
+            </span>
+          ))}
+        </>
       )}
     </span>
   );

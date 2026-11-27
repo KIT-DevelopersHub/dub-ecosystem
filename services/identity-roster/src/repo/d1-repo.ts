@@ -1,6 +1,6 @@
 // D1-backed IdentityRepo. Uses the namespace-scoped @dub/db client (enforcement
 // "strict" => statements may only touch identity_* tables). No runtime DDL.
-import type { identity } from "@dub/types";
+import { identity } from "@dub/types";
 import type { DbClient } from "@dub/db";
 import type {
   AssignmentRow,
@@ -27,6 +27,16 @@ interface UserDb {
   updated_at: string;
 }
 const ROLE_ID_CHUNK = 50;
+
+/** SQL twin of `identity.countsOrgWide` for assignment alias `a`: an org-wide row, or an
+ *  event-scoped row of an event-operation role (Organizer / 名簿のチーム). Literals come from
+ *  the contract constants, never from input. */
+export function countsOrgWideSql(a: string): string {
+  const team = identity.TEAM_ROLE_ID_PREFIX;
+  return `((${a}.resource_type IS NULL AND ${a}.resource_id IS NULL)
+          OR (${a}.resource_type = 'event' AND ${a}.resource_id IS NOT NULL
+              AND (${a}.role_id = '${identity.ORGANIZER_ROLE_ID}' OR substr(${a}.role_id, 1, ${team.length}) = '${team}')))`;
+}
 /** Above this many keys a narrowed role read falls back to whole bundles (bind limit: 50 ids + 40 keys < 100). */
 const MAX_ONLY_PERMISSIONS = 40;
 
@@ -456,7 +466,7 @@ export class D1IdentityRepo implements IdentityRepo {
          JOIN identity_role_permissions rp ON rp.role_id = a.role_id
          JOIN identity_users u ON u.id = a.user_id
         WHERE a.org_id = ?
-          AND a.resource_type IS NULL AND a.resource_id IS NULL
+          AND ${countsOrgWideSql("a")}
           AND rp.permission_key = ?
           AND u.status = 'active'`,
       orgId,
@@ -476,8 +486,8 @@ export class D1IdentityRepo implements IdentityRepo {
          CROSS JOIN identity_role_assignments peer ON peer.role_id = mine.role_id AND peer.org_id = mine.org_id
          CROSS JOIN identity_users u ON u.id = peer.user_id
         WHERE mine.user_id = ? AND mine.org_id = ?
-          AND mine.resource_type IS NULL AND mine.resource_id IS NULL
-          AND peer.resource_type IS NULL AND peer.resource_id IS NULL
+          AND ${countsOrgWideSql("mine")}
+          AND ${countsOrgWideSql("peer")}
           AND peer.user_id <> ?
           AND u.status = 'active'`,
       permission,
@@ -512,8 +522,8 @@ export class D1IdentityRepo implements IdentityRepo {
          CROSS JOIN identity_role_assignments peer ON peer.role_id = v.target_role_id AND peer.org_id = mine.org_id
          CROSS JOIN identity_users u ON u.id = peer.user_id
         WHERE mine.user_id = ? AND mine.org_id = ?
-          AND mine.resource_type IS NULL AND mine.resource_id IS NULL
-          AND peer.resource_type IS NULL AND peer.resource_id IS NULL
+          AND ${countsOrgWideSql("mine")}
+          AND ${countsOrgWideSql("peer")}
           AND peer.user_id <> ?
           AND u.status = 'active'`,
       userId,

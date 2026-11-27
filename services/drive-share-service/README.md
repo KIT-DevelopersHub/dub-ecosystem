@@ -160,6 +160,9 @@ to the system admin role only.
 - **Role membership follow**: identity calls `POST /internal/role-membership` synchronously; a call
   that fails or is left unfinished is queued on the freeq outbox (`identity.role_membership`) and
   freeq-drain redelivers it to `POST /internal/role-membership-async` (503 = retry) (#908).
+- **Role targets count any scope**: a role target (ミーティングの招待・Drive共有) counts members who
+  hold the role org-wide or only for one event (identity `roleIds` ∪ `scopedRoleIds`), so moving
+  Organizer / チーム to per-event assignments neither drops invitations nor unshares files.
 - **Calendar sharing**: a role calendar is shared read-only (ACL `reader`) with that role's
   members only; the 全体 calendar with every active member. Shares are made with
   `sendNotifications=false`: Google sends **no** share mail (it used to mail every member once per
