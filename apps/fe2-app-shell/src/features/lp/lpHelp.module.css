@@ -1,0 +1,18 @@
+/* LpHelp（#905）: 補足説明のポップオーバー本文。 */
+.panel {
+  width: min(320px, 80vw);
+  color: var(--dub-color-text-secondary);
+  font-size: var(--dub-font-size-sm);
+  line-height: var(--dub-font-lineHeight-relaxed);
+}
+.panel ul {
+  margin: 0;
+  padding-left: var(--dub-space-5);
+  display: grid;
+  gap: var(--dub-space-1);
+}
+.titleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-2);
+}
