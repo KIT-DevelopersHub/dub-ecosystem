@@ -187,7 +187,7 @@ export async function resolveSendIdentity(
       if (!shared || !userId) throw errors.forbidden(`not allowed to send as ${picked}`);
       let allowed: boolean;
       try {
-        allowed = await memberMaySend(env.SVC_MEMBER, ctx, shared, userId);
+        allowed = await memberMaySend(env.SVC_MEMBER, ctx, shared, userId, env.SVC_IDENTITY);
       } catch (err) {
         throw errors.upstreamUnavailable("member-service", err);
       }

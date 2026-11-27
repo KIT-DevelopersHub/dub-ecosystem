@@ -11,7 +11,7 @@ import type { RawInbound } from "../src/mime";
 import { listInbound } from "../src/repo";
 import { runScheduledSendDrain } from "../src/scheduled-send";
 import { displayFrom } from "../src/shared-mailbox";
-import { ctx, fakeIdentityFetcher, makeEnv } from "./helpers";
+import { ctx, fakeIdentityFetcher, makeEnv, withMailAdmins } from "./helpers";
 
 const INFO = "info@developershub.jp";
 const NAME = "北陸ITカンファレンス 実行委員会";
@@ -20,6 +20,7 @@ const ROSTER = {
   usr_bob: { email: "bob@developershub.jp" },
   usr_info: { email: INFO },
   usr_guest: { email: "guest@gmail.example" },
+  usr_admin: { email: "admin@developershub.jp" },
 };
 
 /** member-service: `members` answers ?all=1, `teams[id]` answers ?teamIds=id. */
@@ -46,15 +47,15 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-function setup(member: { members: string[]; teams?: Record<string, string[]>; down?: boolean } = { members: ["usr_alice"] }) {
-  const made = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, ROSTER), SVC_MEMBER: memberFetcher(member) });
+function setup(member: { members: string[]; teams?: Record<string, string[]>; down?: boolean } = { members: ["usr_alice"] }, admins: string[] = ["usr_admin"]) {
+  const made = makeEnv({ SVC_IDENTITY: withMailAdmins(fakeIdentityFetcher(true, ROSTER), admins), SVC_MEMBER: memberFetcher(member) });
   const call = (path: string, user: string, init: RequestInit = {}) =>
     handler.fetch(
       new Request(`https://svc${path}`, { ...init, headers: { "content-type": "application/json", "x-dub-request-id": "req_shared", "x-dub-user-id": user } }),
       made.env,
       {} as never,
     );
-  return { ...made, member, call };
+  return { ...made, member, admins, call };
 }
 
 const compose = (over: Partial<mail.SendMailRequest> = {}) =>
@@ -218,6 +219,44 @@ describe("scheduled send as info@", () => {
     member.members = [];
     const res = await runScheduledSendDrain(env, later(), new MockMailProvider());
     expect(res.sent).toBe(0);
+    expect(captured).toHaveLength(0);
+  });
+});
+
+describe("mail:admin with no 名簿 row (admin@)", () => {
+  const at = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const later = () => Date.now() + 2 * 60 * 60 * 1000;
+
+  it("may pick info@ (all_members): offered, sent with the name, Cc'd, and re-checked when due", async () => {
+    const { call, env, raw, admins } = setup({ members: ["usr_alice"] });
+    const list = (await (await call("/mail/send-as", "usr_admin")).json()) as mail.MailSendAsList;
+    expect(list.items.map((i) => i.address)).toEqual(["admin@developershub.jp", INFO]);
+    expect((await call("/mail/outbox", "usr_admin", { method: "POST", body: compose({ fromAddress: INFO }) })).status).toBe(202);
+    expect(captured[0]!.from).toBe(`${NAME} <${INFO}>`);
+    expect(captured[0]!.cc?.map((a) => a.email)).toContain("admin@developershub.jp");
+    expect(raw.prepare(`SELECT owner_user_id, shared_mailbox FROM mail_send_log`).get()).toEqual({ owner_user_id: "usr_admin", shared_mailbox: INFO });
+
+    const body = JSON.stringify({ ...JSON.parse(compose({ fromAddress: INFO })), scheduledAt: at() });
+    expect((await call("/mail/scheduled", "usr_admin", { method: "POST", body })).status).toBe(202);
+    admins.length = 0; // mail:admin taken away before the time
+    expect((await runScheduledSendDrain(env, later(), new MockMailProvider())).sent).toBe(0);
+    expect(captured).toHaveLength(1);
+  });
+
+  it("still may not pick a team-scoped address", async () => {
+    const { call, raw } = setup({ members: ["usr_alice"], teams: { team_session: ["usr_alice"] } });
+    raw.prepare(`UPDATE mail_shared_mailbox SET allow = 'team', team_id = 'team_session' WHERE address = ?`).run(INFO);
+    const list = (await (await call("/mail/send-as", "usr_admin")).json()) as mail.MailSendAsList;
+    expect(list.items.map((i) => i.address)).toEqual(["admin@developershub.jp"]);
+    expect((await call("/mail/outbox", "usr_admin", { method: "POST", body: compose({ fromAddress: INFO }) })).status).toBe(403);
+    expect(captured).toHaveLength(0);
+  });
+
+  it("someone with neither a 名簿 row nor mail:admin may not", async () => {
+    const { call } = setup({ members: ["usr_alice"] });
+    const list = (await (await call("/mail/send-as", "usr_bob")).json()) as mail.MailSendAsList;
+    expect(list.items.map((i) => i.address)).toEqual(["bob@developershub.jp"]);
+    expect((await call("/mail/outbox", "usr_bob", { method: "POST", body: compose({ fromAddress: INFO }) })).status).toBe(403);
     expect(captured).toHaveLength(0);
   });
 });

@@ -7,7 +7,7 @@ import handler from "../src/index";
 import { MockMailProvider, type OutboundMail } from "../src/provider";
 import { runScheduledSendDrain } from "../src/scheduled-send";
 import { withSelfCc } from "../src/from";
-import { makeEnv, fakeIdentityFetcher } from "./helpers";
+import { makeEnv, fakeIdentityFetcher, withMailAdmins } from "./helpers";
 
 const INFO = "info@developershub.jp";
 const DESIGN = "design@developershub.jp";
@@ -52,7 +52,7 @@ afterEach(() => vi.restoreAllMocks());
 
 function setup(over: Partial<MemberState> = {}) {
   const member: MemberState = { members: ["usr_alice", "usr_bob"], teams: { team_design: ["usr_alice"] }, names: { team_design: "デザインチーム" }, ...over };
-  const made = makeEnv({ SVC_IDENTITY: fakeIdentityFetcher(true, ROSTER), SVC_MEMBER: memberFetcher(member) });
+  const made = makeEnv({ SVC_IDENTITY: withMailAdmins(fakeIdentityFetcher(true, ROSTER), []), SVC_MEMBER: memberFetcher(member) });
   made.raw
     .prepare(`INSERT INTO mail_team_list (id, address, team_id, created_by, created_at, updated_at, deleted_at) VALUES ('mtl_1', ?, 'team_design', NULL, 't', 't', NULL)`)
     .run(DESIGN);

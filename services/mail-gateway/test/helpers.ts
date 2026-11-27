@@ -207,3 +207,17 @@ export function makeEnv(overrides: Partial<Env> = {}): { env: Env; raw: ReturnTy
   };
   return { env, raw, sends: { mailAuto: mailAuto.sends, notif: notif.sends, audit: auditQ.sends } };
 }
+
+/** Wrap an identity fake so a `mail:admin` check is granted only to `admins` (the default fake
+ *  grants it to everyone). Read live, so a test can revoke. Every other request goes to `inner` unchanged. */
+export function withMailAdmins(inner: Fetcher, admins: readonly string[]): Fetcher {
+  return {
+    async fetch(req: Request): Promise<Response> {
+      if (new URL(req.url).pathname !== "/authz/check") return inner.fetch(req as never) as unknown as Promise<Response>;
+      const body = (await req.clone().json()) as identity.AuthzCheckRequest;
+      const res = (await (await inner.fetch(req as never)).json()) as identity.AuthzCheckResponse;
+      res.decisions = res.decisions.map((d, i) => (body.checks[i]?.permission === "mail:admin" ? { ...d, allowed: admins.includes(body.subjectUserId) } : d));
+      return Response.json(res);
+    },
+  } as unknown as Fetcher;
+}

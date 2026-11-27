@@ -61,7 +61,7 @@ export function registerSharedMailboxes(ext: Hono<AppBindings>): void {
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, c.get("dubCtx").requestId);
 
   // The caller's own address first (the compose default), then each shared mailbox and team
-  // mailing list member-service says they may send as. A member-service failure only hides the shared ones.
+  // mailing list they may send as (memberMaySend). A member-service failure only hides the shared ones.
   ext.get("/send-as", async (c) => {
     const ctx = c.get("dubCtx");
     const userId = c.get("userId") ?? null;
@@ -70,7 +70,7 @@ export function registerSharedMailboxes(ext: Hono<AppBindings>): void {
     if (userId) {
       for (const row of await listSendableMailboxes(dbOf(c), c.env.SVC_MEMBER, ctx)) {
         if (row.address === items[0]!.address) continue;
-        const allowed = await memberMaySend(c.env.SVC_MEMBER, ctx, row, userId).catch(() => false);
+        const allowed = await memberMaySend(c.env.SVC_MEMBER, ctx, row, userId, c.env.SVC_IDENTITY).catch(() => false);
         if (allowed) {
           items.push({
             address: row.address,
