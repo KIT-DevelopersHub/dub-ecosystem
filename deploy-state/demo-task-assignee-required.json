@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "task-assignee-required",
+  "worker": "dub-demo-task-assignee-required",
+  "url": "https://dub-demo-task-assignee-required.developershub-site.workers.dev",
+  "deployedSha": "77a161f4",
+  "branch": "feat/task-assignee-required",
+  "actor": "ko-tarou",
+  "markers": ["fe4-detail-save-needs-assignee"],
+  "live": true,
+  "verifiedAt": "2026-11-26T16:46:59Z",
+  "updatedAt": "2026-11-26T16:46:59Z",
+  "note": ""
+}

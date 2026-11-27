@@ -182,13 +182,14 @@ Request (`CreateTaskRequest`):
 | `title` | yes | 1..200 chars. |
 | `description` | no | string or null. |
 | `priority` | no | Enum; default `medium`. |
-| `assigneeId` | no | If present, must be an existing user. |
+| `assigneeId` | one of `assigneeId` / `assigneeTeamId` | If present, must be an existing user. **担当は必須**: sending neither → `400 VALIDATION_FAILED` (`{ field: "assigneeId", reason: "required" }`). |
+| `assigneeTeamId` | one of `assigneeId` / `assigneeTeamId` | Team assignee (§4.6). Exclusive with `assigneeId`. |
 | `dueAt` | no | ISO-8601 UTC. |
 | `origin` | no | **service-role only.** A non-service caller supplying it → `400` (`{ field: "origin", reason: "not_allowed" }`). Defaults to `internal`. |
 
 New tasks start `status: "todo"`, `version: 1`, `archivedAt: null`. Response `201` is the
-full `Task` body (§2). On success the service emits `task.created` (+`task.assigned` when
-an assignee is set).
+full `Task` body (§2). On success the service emits `task.created` + `task.assigned`
+(every new task has an assignee).
 
 Errors: `TASK_EVENT_NOT_FOUND` (404) if the event does not exist;
 `TASK_EVENT_ARCHIVED` (422) if the event is archived; `VALIDATION_FAILED` (400) for bad
@@ -215,8 +216,10 @@ Request (`UpdateTaskRequest`):
 }
 ```
 
-All content fields are optional; `description`, `assigneeId`, `dueAt` accept `null` to
-clear. `status` is validated against the transition table (§5.1). `assigneeId`, when set to
+All content fields are optional; `description`, `dueAt` accept `null` to clear.
+`assigneeId` / `assigneeTeamId` accept `null` only while the other side stays set — a PATCH
+whose result has neither is `400 VALIDATION_FAILED` (`{ field: "assigneeId", reason:
+"required" }`, §4.7). `status` is validated against the transition table (§5.1). `assigneeId`, when set to
 a concrete user, must exist.
 
 Response `200` is the updated `Task` (with `version` incremented). A single PATCH may emit
@@ -234,6 +237,7 @@ Errors, in the order they are checked:
 | Writing a protected field on an `origin: "github"` task as a non-service caller | `TASK_GITHUB_ORIGIN_READONLY` | 422 |
 | Illegal status transition | `TASK_INVALID_STATUS_TRANSITION` | 409 |
 | `assigneeId` not an existing user | `VALIDATION_FAILED` (`{ field: "assigneeId", reason: "not_found" }`) | 400 |
+| The task would end with no person and no team (担当は必須, §4.7) | `VALIDATION_FAILED` (`{ field: "assigneeId", reason: "required" }`) | 400 |
 
 ### 4.5 `DELETE /api/v1/tasks/{id}` — soft delete
 
@@ -412,7 +416,8 @@ builds on.
 
 ## 4.6 担当チーム (team assignee, #882)
 
-A task's 担当 is a person **XOR** a team **XOR** nobody.
+A task's 担当 is a person **XOR** a team (担当は必須 — see §4.7; "nobody" only survives on
+rows created before that rule).
 
 - `assigneeTeamId` (create / PATCH) hands the task to a team. Setting a non-null
   `assigneeTeamId` clears `assigneeId`, and setting a non-null `assigneeId` clears
@@ -430,3 +435,22 @@ A task's 担当 is a person **XOR** a team **XOR** nobody.
 - origin=github: handing a github task to a team would clear its protected person
   assignee, so a user doing that gets `422 TASK_GITHUB_ORIGIN_READONLY`.
 - D1: `infra/d1/migrations/task/0006_task_assignee_team.sql` (additive column + index).
+
+## 4.7 担当は必須 (assignee required)
+
+Every task has a 担当: a person (`assigneeId`) or a team (`assigneeTeamId`).
+
+- **Create**: neither → `400 VALIDATION_FAILED` (`{ field: "assigneeId", reason: "required" }`).
+  Applies to every caller, service roles included.
+- **PATCH**: checked on the result. A write that would leave neither (clearing the only
+  side, or editing a legacy unassigned row without choosing one) → the same 400. A
+  version-only no-op still returns 200.
+- **Legacy unassigned rows** (created before this rule) stay readable and listed as-is;
+  the UI shows 「担当未設定」 and holds edits until an assignee is chosen, which is then
+  sent in the same PATCH.
+- **Callers**: the fe4 create forms (タスク作成 / タスク発行, shared `TaskFormFields`) default
+  the 担当 — the team when the gantt is filtered to one team, otherwise the creator.
+  カレンダー creates with the current user. github-sync imports an issue with its mapped
+  assignee, else the user who registered the repo (`github_repos.created_by`), and fills
+  the same fallback when it patches a legacy unassigned github task.
+

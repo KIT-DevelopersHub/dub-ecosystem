@@ -29,6 +29,10 @@ export function validateCreateTaskRequest(body: unknown): task.CreateTaskRequest
   c.optionalEnum("priority", body.priority, ENUM_SETS.taskPriority);
   c.optionalString("assigneeId", body.assigneeId);
   checkNullableString(c, "assigneeTeamId", body.assigneeTeamId);
+  // 担当は必須: 人 (assigneeId) かチーム (assigneeTeamId) のどちらか。
+  if (!body.assigneeId && !body.assigneeTeamId) {
+    c.add("assigneeId", "required", "assigneeId or assigneeTeamId is required");
+  }
   if (body.dueAt !== undefined && !isString(body.dueAt)) {
     c.add("dueAt", "invalid_type", "dueAt must be an ISO8601 string");
   }
@@ -55,6 +59,11 @@ export function validateUpdateTaskRequest(body: unknown): task.UpdateTaskRequest
   c.optionalEnum("priority", body.priority, ENUM_SETS.taskPriority);
   checkNullableString(c, "assigneeId", body.assigneeId);
   checkNullableString(c, "assigneeTeamId", body.assigneeTeamId);
+  // Clearing both in one PATCH always leaves the task unassigned (担当は必須). Whether a
+  // single-side null empties the task depends on the stored row — the service checks that.
+  if (body.assigneeId === null && body.assigneeTeamId === null) {
+    c.add("assigneeId", "required", "assigneeId or assigneeTeamId is required");
+  }
   checkNullableString(c, "dueAt", body.dueAt);
 
   c.throwIfInvalid();

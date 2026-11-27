@@ -42,17 +42,17 @@ describe("primary use case: user -> event -> task -> notification -> mail outbox
     expect(readBack.status).toBe(200);
     expect((readBack.json as event.EventDetail).id).toBe(ev.id);
 
-    // 2) task-service (REAL app + REAL SQL): create a task under the event.
+    // 2) task-service (REAL app + REAL SQL): create a task under the event (担当は必須).
     const madeTask = await call(w.taskApp, "POST", "/tasks", {
       userId: USERS.organizer,
-      body: { eventId: ev.id, title: "Prepare opening keynote" },
+      body: { eventId: ev.id, title: "Prepare opening keynote", assigneeId: USERS.organizer },
     });
     expect(madeTask.status).toBe(201);
     const t = madeTask.json as task.Task;
     expect(t.status).toBe("todo");
-    expect(t.assigneeId).toBeNull();
+    expect(t.assigneeId).toBe(USERS.organizer);
 
-    // 3) assignment: PATCH raises the REAL task.assigned event through the publisher seam.
+    // 3) reassignment: PATCH raises the REAL task.assigned event through the publisher seam.
     const assigned = await call(w.taskApp, "PATCH", `/tasks/${t.id}`, {
       userId: USERS.organizer,
       body: { version: t.version, assigneeId: USERS.member },
@@ -61,7 +61,9 @@ describe("primary use case: user -> event -> task -> notification -> mail outbox
     expect((assigned.json as task.Task).assigneeId).toBe(USERS.member);
 
     // the event carries the canonical @dub/events envelope shape.
-    const assignedEvt = w.emitted.find((e) => e.name === "task.assigned");
+    const assignedEvt = w.emitted.find(
+      (e) => e.name === "task.assigned" && (e.payload as { assigneeId?: string }).assigneeId === USERS.member,
+    );
     expect(assignedEvt, "task.assigned must be emitted").toBeTruthy();
     const payload = assignedEvt!.payload as { taskId: string; eventId: string; assigneeId: string };
     expect(payload.taskId).toBe(t.id);
@@ -137,7 +139,7 @@ describe("guardrails: real domain rules still bite through the smoke seams", () 
   it("creating a task under a missing event is rejected by the real event gate", async () => {
     const res = await call(w.taskApp, "POST", "/tasks", {
       userId: USERS.organizer,
-      body: { eventId: "event_does_not_exist", title: "orphan" },
+      body: { eventId: "event_does_not_exist", title: "orphan", assigneeId: USERS.organizer },
     });
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
@@ -149,7 +151,7 @@ describe("guardrails: real domain rules still bite through the smoke seams", () 
     const t = (
       await call(w.taskApp, "POST", "/tasks", {
         userId: USERS.organizer,
-        body: { eventId: ev.id, title: "T" },
+        body: { eventId: ev.id, title: "T", assigneeId: USERS.organizer },
       })
     ).json as task.Task;
     const stale = await call(w.taskApp, "PATCH", `/tasks/${t.id}`, {

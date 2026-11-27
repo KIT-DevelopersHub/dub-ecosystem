@@ -2,7 +2,7 @@
 // toast on create + close-on-success, all via the existing detail-pane save path.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { renderWithProviders as render } from "./helpers-providers";
+import { pickFirstAssignee, renderWithProviders as render } from "./helpers-providers";
 import type { task, identity } from "@dub/types";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
 import type { ScopeTask } from "../src/domain/task-hierarchy";
@@ -14,7 +14,7 @@ beforeEach(() => localStorage.clear());
 
 const mkTask = (id: string, over: Partial<task.Task> = {}): task.Task => ({
   id, eventId: "evt_1", title: id === "self" ? "対象タスク" : id, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: "2026-08-20T00:00:00Z", origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: "2026-08-20T00:00:00Z", origin: "internal",
   archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 3, ...over,
 });
 
@@ -114,6 +114,7 @@ describe("create UI feedback (success toast + close-on-success)", () => {
     const modal = await screen.findByTestId("fe4-create-modal");
     fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "新規タスク" } });
     fireEvent.change(within(modal).getByTestId("fe4-create-due"), { target: { value: "2026-09-01" } });
+    pickFirstAssignee();
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     // success toast appears…
     expect(await screen.findByTestId("toast-success")).toHaveTextContent("タスクを作成しました");
@@ -129,6 +130,7 @@ describe("create UI feedback (success toast + close-on-success)", () => {
     const modal = await screen.findByTestId("fe4-create-modal");
     fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "失敗する作成" } });
     client.failNext = new ApiError(400, { error: { code: "TASK_VALIDATION_FAILED", message: "入力内容を確認してください", retryable: false } });
+    pickFirstAssignee();
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     // error dialog surfaces, modal stays open, no success toast
     await screen.findByTestId("fe4-error-dialog");

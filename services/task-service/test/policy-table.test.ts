@@ -178,7 +178,7 @@ describe("service principal (allow-listed x-dub-caller)", () => {
   it("passes a keyed route with no x-dub-user-id, attributed as service:<caller>", async () => {
     const h = makeHarness();
     const app = buildApp(h.deps);
-    const res = await app.request("/tasks", serviceInit("POST", { eventId: "evt_1", title: "gh" }));
+    const res = await app.request("/tasks", serviceInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "gh" }));
     expect(res.status).toBe(201);
     expect(h.events.byName("task.created")[0]!.actorId).toBe("service:github-sync");
   });
@@ -188,13 +188,13 @@ describe("service principal (allow-listed x-dub-caller)", () => {
     // Deny every key this route's rule names: an ordinary user would 403.
     for (const k of ["app:tasks:view", "app:tasks:edit", "task:write"] as const) h.authz.denied.add(k);
     const app = buildApp(h.deps);
-    expect((await app.request("/tasks", serviceInit("POST", { eventId: "evt_1", title: "gh" }))).status).toBe(201);
-    expect((await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "u" }))).status).toBe(403);
+    expect((await app.request("/tasks", serviceInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "gh" }))).status).toBe(201);
+    expect((await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "u" }))).status).toBe(403);
   });
 
   it("is the ALLOW-LIST that decides, not the marker: an unknown caller gets 401", async () => {
     const app = buildTestApp();
-    const res = await app.request("/tasks", serviceInit("POST", { eventId: "evt_1", title: "x" }, "evil-service"));
+    const res = await app.request("/tasks", serviceInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "x" }, "evil-service"));
     expect(res.status).toBe(401);
   });
 
@@ -203,7 +203,7 @@ describe("service principal (allow-listed x-dub-caller)", () => {
     h.authz.denied.add("task:write");
     const app = buildApp(h.deps);
     // Marker + allow-listed caller, but a user id is present -> user principal (principal.ts).
-    const init = serviceInit("POST", { eventId: "evt_1", title: "x" });
+    const init = serviceInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "x" });
     const headers = { ...(init.headers as Record<string, string>), "x-dub-user-id": "usr_alice" };
     const res = await app.request("/tasks", { ...init, headers });
     expect(res.status).toBe(403);
@@ -241,7 +241,7 @@ describe("カレンダーの予定: the calendar-events routes, end to end", () 
 
   it("lets 予定を登録 add, move and keeps archive behind task:delete — /tasks stays refused", async () => {
     const app = buildApp(memberWithTasksView().deps);
-    const created = await app.request("/tasks/calendar-events", userInit("POST", { title: "定例", startAt: "2026-10-20T01:00:00Z" }));
+    const created = await app.request("/tasks/calendar-events", userInit("POST", { assigneeId: "usr_alice", title: "定例", startAt: "2026-10-20T01:00:00Z" }));
     expect(created.status).toBe(201);
     const t = (await created.json()) as task.Task;
 
@@ -253,13 +253,13 @@ describe("カレンダーの予定: the calendar-events routes, end to end", () 
     expect(((await moved.json()) as task.Task).startAt).toBe("2026-10-21T01:00:00Z");
 
     expect((await app.request(`/tasks/calendar-events/${t.id}`, userInit("DELETE"))).status).toBe(403);
-    expect((await app.request("/tasks", userInit("POST", { title: "x" }))).status).toBe(403);
+    expect((await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", title: "x" }))).status).toBe(403);
   });
 
   it("refuses without the 「予定を登録」 toggle", async () => {
     const h = memberWithTasksView();
     h.authz.denied.add("calendar:schedule_edit");
-    const res = await buildApp(h.deps).request("/tasks/calendar-events", userInit("POST", { title: "x" }));
+    const res = await buildApp(h.deps).request("/tasks/calendar-events", userInit("POST", { assigneeId: "usr_alice", title: "x" }));
     expect(res.status).toBe(403);
   });
 });

@@ -17,7 +17,7 @@ function makeApiError(): ApiError {
 
 const seedTask = (id: string, over: Partial<task.Task> = {}): task.Task => ({
   id, eventId: "evt_1", title: id, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: null, origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: null, origin: "internal",
   archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1, ...over,
 });
 
@@ -41,7 +41,7 @@ describe("optimistic create", () => {
       "evt_1",
       "2026-08-17T00:00:00.000Z",
     );
-    const p = s.create(c, { eventId: "evt_1", title: "会場確認", priority: "high" }, provisional);
+    const p = s.create(c, { eventId: "evt_1", title: "会場確認", priority: "high", assigneeId: "usr_a" }, provisional);
     // instant: provisional visible before the POST resolves
     expect(useTaskStore.getState().tasks[tempId]?.title).toBe("会場確認");
     const created = await p;
@@ -58,7 +58,7 @@ describe("optimistic create", () => {
     const tempId = provisionalTaskId();
     const provisional = buildProvisionalTask(
       tempId,
-      { title: "x", status: "todo", priority: "medium", assigneeId: null, teamId: null, startAt: null, dueAt: null, parentTaskId: null },
+      { title: "x", status: "todo", priority: "medium", assigneeId: "usr_fixture", teamId: null, startAt: null, dueAt: null, parentTaskId: null },
       "evt_1",
       "2026-08-17T00:00:00.000Z",
     );
@@ -159,7 +159,7 @@ describe("reparent → 先行(依存) save uses the LATEST version (reparent→d
   // on A. A stale (pre-detach) version 409s; re-reading the fresh version registers it.
   const mk = (id: string, over: Partial<task.Task> = {}): task.Task => ({
     id, eventId: "evt_1", title: id, description: null, status: "todo",
-    priority: "medium", assigneeId: null, dueAt: null, origin: "internal",
+    priority: "medium", assigneeId: "usr_fixture", dueAt: null, origin: "internal",
     archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1, ...over,
   });
 

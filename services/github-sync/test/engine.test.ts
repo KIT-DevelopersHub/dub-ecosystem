@@ -63,6 +63,8 @@ describe("GitHub -> internal (webhook)", () => {
     const createCall = h.tasks.calls.find((c) => c.op === "createTask");
     expect(createCall).toBeTruthy();
     expect((createCall!.input as task.CreateTaskRequest).origin).toBe("github");
+    // 担当は必須: no mappable GitHub assignee → the user who registered the repo.
+    expect((createCall!.input as task.CreateTaskRequest).assigneeId).toBe("user_1");
     const link = await h.stores.links.getByIssue("ghr_main", 5);
     expect(link?.syncState).toBe("in_sync");
     expect(h.publisher.count("link_created")).toBe(1);
@@ -80,6 +82,20 @@ describe("GitHub -> internal (webhook)", () => {
     const link = await h.stores.links.getByIssue(r.id, 5);
     expect(link?.syncState).toBe("in_sync");
     expect(link?.lastTaskVersion).toBe(2);
+  });
+
+  it("担当は必須: a legacy unassigned task gets the repo registrant on sync; an assigned one keeps its 担当", async () => {
+    const h = makeHarness();
+    const r = await seedRepo(h);
+    seedTask(h, { id: "task_11", title: "Old", version: 1 });
+    seedTask(h, { id: "task_12", title: "Old", version: 1, assigneeId: "user_x" });
+    await seedLink(h, { id: "ghl_11", taskId: "task_11", repoId: r.id, issueNumber: 11, lastTaskVersion: 1, lastGithubUpdatedAt: "2026-08-09T00:00:00Z" });
+    await seedLink(h, { id: "ghl_12", taskId: "task_12", repoId: r.id, issueNumber: 12, lastTaskVersion: 1, lastGithubUpdatedAt: "2026-08-09T00:00:00Z" });
+    for (const n of [11, 12]) {
+      await h.engine.applyWebhook(`req_${n}`, webhookEvent("edited", issue({ owner: "acme", repo: "web", number: n, title: "R", updatedAt: "2026-08-09T06:00:00Z" })));
+    }
+    expect(h.tasks.tasks.get("task_11")!.assigneeId).toBe("user_1");
+    expect(h.tasks.tasks.get("task_12")!.assigneeId).toBe("user_x");
   });
 
   it("suppresses echo when the webhook sender is our own App", async () => {

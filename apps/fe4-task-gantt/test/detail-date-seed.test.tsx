@@ -17,7 +17,7 @@ const dueOnly = (id: string): task.Task => ({
   description: null,
   status: "todo",
   priority: "medium",
-  assigneeId: null,
+  assigneeId: "usr_fixture",
   teamId: null,
   // start_at is NULL — exactly like the real conference seed (only due_at is set).
   startAt: null,

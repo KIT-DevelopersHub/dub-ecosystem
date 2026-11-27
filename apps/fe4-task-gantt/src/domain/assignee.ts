@@ -1,6 +1,6 @@
-// 担当 = 人 XOR チーム XOR 未割当 (#882). The picker encodes both kinds into one
-// dropdown value ("user:<id>" / "team:<id>" / "" = 未割当); the API keeps two
-// fields (assigneeId / assigneeTeamId) that the server keeps mutually exclusive.
+// 担当 = 人 XOR チーム (#882)。担当は必須で、未割当は作れない（"" は担当なしの古いタスクだけ）。
+// The picker encodes both kinds into one dropdown value ("user:<id>" / "team:<id>");
+// the API keeps two fields (assigneeId / assigneeTeamId) that the server keeps exclusive.
 import type { common, identity, task, team } from "@dub/types";
 
 export interface Assignee {
@@ -9,6 +9,31 @@ export interface Assignee {
 }
 
 export const UNASSIGNED: Assignee = { assigneeId: null, assigneeTeamId: null };
+
+/** 担当が決まっているか (人 or チーム)。作成・更新はこれが true のときだけ送れる。 */
+export function hasAssignee(a: Assignee): boolean {
+  return !!a.assigneeId || !!a.assigneeTeamId;
+}
+
+/** Shown under the 担当 field while it is empty (and as the server-400 message). */
+export const ASSIGNEE_REQUIRED_MESSAGE = "担当（人またはチーム）を選んでください";
+
+/**
+ * 新しいタスクの担当の既定値:
+ *  - ガントがチームで絞り込まれている → そのチーム
+ *  - それ以外 → 作成する本人（候補に居るときだけ）
+ *  - どちらも無い → 未選択（選ぶまで作成できない）
+ */
+export function defaultAssignee(
+  currentUserId: common.UserId | null,
+  users: readonly Pick<identity.UserSummary, "id">[],
+  teamFilter?: { teamId: common.TeamId | null | undefined; teams: readonly Pick<team.Team, "id">[] },
+): Assignee {
+  const tf = teamFilter?.teamId;
+  if (tf && teamFilter!.teams.some((t) => t.id === tf)) return { assigneeId: null, assigneeTeamId: tf };
+  if (currentUserId && users.some((u) => u.id === currentUserId)) return { assigneeId: currentUserId, assigneeTeamId: null };
+  return UNASSIGNED;
+}
 
 export function encodeAssignee(a: Assignee): string {
   if (a.assigneeId) return `user:${a.assigneeId}`;

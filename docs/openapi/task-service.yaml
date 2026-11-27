@@ -585,10 +585,18 @@ components:
           type: string
     CreateTaskRequest:
       type: object
-      description: origin is service-role only (else 400). priority defaults to 'medium'.
+      description: >-
+        origin is service-role only (else 400). priority defaults to 'medium'.
+        担当は必須: exactly one of assigneeId / assigneeTeamId (neither → 400
+        VALIDATION_FAILED {field: assigneeId, reason: required}).
       required:
         - eventId
         - title
+      anyOf:
+        - required:
+            - assigneeId
+        - required:
+            - assigneeTeamId
       properties:
         eventId:
           type: string
@@ -613,7 +621,11 @@ components:
           $ref: '#/components/schemas/TaskOrigin'
     UpdateTaskRequest:
       type: object
-      description: status validated against TASK_STATUS_TRANSITIONS.
+      description: >-
+        status validated against TASK_STATUS_TRANSITIONS. A PATCH that would leave the task
+        with neither assigneeId nor assigneeTeamId → 400 VALIDATION_FAILED
+        {field: assigneeId, reason: required} (担当は必須; a legacy unassigned task must
+        choose one in the same PATCH before any other edit is accepted).
       required:
         - version
       properties:

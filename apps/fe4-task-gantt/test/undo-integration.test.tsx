@@ -8,7 +8,7 @@ const EVENT = "evt_undo";
 const PERMS: identity.PermissionKey[] = ["task:read", "task:write", "task:delete"];
 const mk = (id: string, title: string): task.Task => ({
   id, eventId: EVENT, title, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: "2026-08-20T00:00:00Z", origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: "2026-08-20T00:00:00Z", origin: "internal",
   archivedAt: null, createdAt: `2026-08-0${id.length}T00:00:00Z`, updatedAt: "2026-08-01T00:00:00Z", version: 1,
 });
 const client = () => new MockApiClient({ tasks: [mk("t1", "会場予約"), mk("t2", "登壇者調整")] });

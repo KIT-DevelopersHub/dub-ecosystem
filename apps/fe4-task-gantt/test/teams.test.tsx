@@ -13,7 +13,7 @@ const TEAMS: team.Team[] = [
 
 const mk = (id: string, teamId: string | null): task.Task => ({
   id, eventId: "evt_1", title: id, description: null, status: "todo",
-  priority: "medium", assigneeId: null, teamId, dueAt: null, origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", teamId, dueAt: null, origin: "internal",
   archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1,
 });
 
@@ -39,7 +39,7 @@ describe("teams — canonical shared entity (feature B)", () => {
 
   it("create/update carry teamId; gantt rows expose it", async () => {
     const c = new MockApiClient({ teams: TEAMS });
-    const created = await api.createTask(c, { eventId: "evt_1", title: "x", teamId: "team_ops" });
+    const created = await api.createTask(c, { eventId: "evt_1", title: "x", teamId: "team_ops", assigneeId: "usr_fixture" });
     expect(created.teamId).toBe("team_ops");
     const dto = await api.getGantt(c, "evt_1");
     expect(dto.rows.find((r) => r.taskId === created.id)?.teamId).toBe("team_ops");

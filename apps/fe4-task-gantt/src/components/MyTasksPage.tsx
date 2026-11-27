@@ -3,7 +3,7 @@ import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
 import { listTasks, createTask, updateTask, replaceDependencies, resolveUsers, listMyTeamIds } from "../api/endpoints";
-import { isAssignedToMe } from "../domain/assignee";
+import { defaultAssignee, isAssignedToMe } from "../domain/assignee";
 import type { ScopeTask } from "../domain/task-hierarchy";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
@@ -82,6 +82,16 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
     () => users.get(currentUserId)?.displayName ?? people.find((p) => p.id === currentUserId)?.displayName ?? "自分",
     [users, people, currentUserId],
   );
+
+  // 担当は必須: 発行フォームの担当候補には必ず本人を入れる (タスクがまだ無くても本人を既定にできる)。
+  const createPeople = useMemo<readonly identity.UserSummary[]>(
+    () =>
+      effectivePeople.some((p) => p.id === currentUserId)
+        ? effectivePeople
+        : [{ id: currentUserId, displayName: currentUserName, avatarUrl: null }, ...effectivePeople],
+    [effectivePeople, currentUserId, currentUserName],
+  );
+  const createDefaultAssignee = useMemo(() => defaultAssignee(currentUserId, createPeople), [currentUserId, createPeople]);
 
   // 親タスク / 先行タスク pickers draw from the tasks currently loaded in the hub
   // (real ids only — never the optimistic temp rows). Predecessors are team-scoped
@@ -300,12 +310,13 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
       <MyTaskCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        people={effectivePeople}
+        people={createPeople}
         teams={teams}
         parentOptions={parentOptions}
         scopeTasks={scopeTasks}
         onCreate={onCreate}
         requesterName={currentUserName}
+        defaultAssignee={createDefaultAssignee}
       />
     </section>
   );

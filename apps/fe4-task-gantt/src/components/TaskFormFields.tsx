@@ -6,7 +6,7 @@ import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "..
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
 import { AssigneePicker } from "./AssigneePicker";
-import { deriveTaskTeam, type Assignee } from "../domain/assignee";
+import { ASSIGNEE_REQUIRED_MESSAGE, deriveTaskTeam, hasAssignee, type Assignee } from "../domain/assignee";
 import { useUserTeams } from "../api/useUserTeams";
 import styles from "../styles/app.module.css";
 
@@ -17,7 +17,7 @@ import styles from "../styles/app.module.css";
  *
  *   タイトル                （全幅）
  *   ステータス   重要度      （2カラム・同一行）
- *   担当                    （全幅）
+ *   担当 *                  （全幅・必須: 人 or チーム。未割当は選べない）
  *   開始日       終了日      （2カラム・同一行）
  *   親タスク                （全幅）
  *   先行タスク              （全幅）
@@ -53,7 +53,8 @@ export interface TaskFormFieldsProps {
   onPriorityChange: (v: task.TaskPriority) => void;
 
   users: readonly identity.UserSummary[];
-  /** 担当 = 人 XOR チーム (#882). The picker offers both; choosing one clears the other. */
+  /** 担当 = 人 XOR チーム (#882). 必須 — the picker has no 未割当; while both are null an
+   *  inline error shows and the parent modal keeps its submit disabled (hasAssignee). */
   assigneeId: common.UserId | null;
   onAssigneeChange: (v: common.UserId | null) => void;
   assigneeTeamId: common.TeamId | null;
@@ -120,6 +121,7 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
     descriptionPlaceholder,
   } = props;
 
+  const assigneeMissing = !hasAssignee({ assigneeId, assigneeTeamId });
   const depOptions = dependencyScopeOptions(scopeTasks, teamId);
   const teamLockedToParent = parentId != null;
   const userTeams = useUserTeams();
@@ -196,16 +198,18 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
         </div>
       </div>
 
-      {/* 担当 (全幅)。チームは担当に従う（入力欄は出さない） */}
+      {/* 担当 (全幅・必須)。チームは担当に従う（入力欄は出さない） */}
       <div className={styles.formFieldFull}>
         <label className={styles.formLabel} htmlFor={`${idPrefix}-assignee`}>
-          担当
+          担当<span className={styles.req}>*</span>
         </label>
         <AssigneePicker
           id={`${idPrefix}-assignee`}
           users={users}
           teams={teams}
           value={{ assigneeId, assigneeTeamId }}
+          invalid={assigneeMissing}
+          aria-describedby={assigneeMissing ? `${idPrefix}-assignee-error` : undefined}
           onChange={(next) => {
             onAssigneeChange(next.assigneeId);
             onAssigneeTeamIdChange(next.assigneeTeamId);
@@ -213,6 +217,11 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
           }}
           testId={`${idPrefix}-assignee`}
         />
+        {assigneeMissing && (
+          <span id={`${idPrefix}-assignee-error`} className={styles.fieldError} role="alert" data-testid={`${idPrefix}-assignee-error`}>
+            {ASSIGNEE_REQUIRED_MESSAGE}
+          </span>
+        )}
       </div>
 
       {/* 開始日 / 終了日 (2カラム・同一行) */}

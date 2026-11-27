@@ -59,6 +59,7 @@ describe("タスク作成モーダル: 親をプリセットするとチーム�
         scopeTasks={SCOPE}
         onCreate={onCreate}
         initialParentId={"p" as common.TaskId}
+        defaultAssignee={{ assigneeId: null, assigneeTeamId: "team_hq" as common.TeamId }}
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-create-title"), { target: { value: "子タスク" } });

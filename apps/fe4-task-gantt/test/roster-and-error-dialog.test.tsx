@@ -13,7 +13,7 @@ const PERMS: identity.PermissionKey[] = ["task:read", "task:write", "task:delete
 
 const mk = (id: string, title: string, due: string): task.Task => ({
   id, eventId: EVENT, title, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: due, origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: due, origin: "internal",
   archivedAt: null, createdAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1,
 });
 
@@ -39,8 +39,8 @@ describe("assignee roster in the create modal (bug 1b)", () => {
     const list = await screen.findByRole("listbox");
     await waitFor(() => expect(within(list).getByRole("option", { name: "久米" })).toBeInTheDocument());
     expect(within(list).getByRole("option", { name: "荒木" })).toBeInTheDocument();
-    // and still keeps the 未割当 option
-    expect(within(list).getByRole("option", { name: "未割当" })).toBeInTheDocument();
+    // 担当は必須: 「未割当」は選択肢に無い
+    expect(within(list).queryByRole("option", { name: "未割当" })).toBeNull();
   });
 });
 

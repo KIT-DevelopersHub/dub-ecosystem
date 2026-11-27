@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import type { task, identity } from "@dub/types";
 import { App } from "../src/App";
 import { MockApiClient } from "../src/api/mock-client";
+import { pickFirstAssignee } from "./helpers-providers";
 
 const EVENT = "evt_test";
 const PERMS: identity.PermissionKey[] = ["task:read", "task:write", "task:delete"];
@@ -61,6 +62,7 @@ describe("TaskWorkspacePage — gantt-only workspace", () => {
     const modal = await screen.findByTestId("fe4-create-modal");
     fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "新しい打合せ" } });
     fireEvent.change(within(modal).getByTestId("fe4-create-due"), { target: { value: "2026-08-25" } });
+    pickFirstAssignee();
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     expect((await screen.findAllByText("新しい打合せ")).length).toBeGreaterThan(0);
   });

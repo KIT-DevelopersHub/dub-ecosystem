@@ -13,7 +13,7 @@ async function create(
   over: Partial<task.CreateTaskRequest> = {},
   init: (method: string, body?: unknown) => RequestInit = userInit,
 ): Promise<task.Task> {
-  const res = await app.request("/tasks", init("POST", { eventId: "evt_1", title: "T", ...over }));
+  const res = await app.request("/tasks", init("POST", { eventId: "evt_1", title: "T", assigneeId: "usr_alice", ...over }));
   expect(res.status).toBe(201);
   return (await res.json()) as task.Task;
 }
@@ -26,7 +26,7 @@ function setup(): { h: TestHarness; app: TaskApp } {
 describe("POST /tasks", () => {
   it("creates (201, version=1) and emits task.created with a ULID envelope id", async () => {
     const { h, app } = setup();
-    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "Hello" }));
+    const res = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "Hello" }));
     expect(res.status).toBe(201);
     const body = (await res.json()) as task.Task;
     expect(body.version).toBe(1);
@@ -51,7 +51,7 @@ describe("POST /tasks", () => {
   it("404 TASK_EVENT_NOT_FOUND when the event does not exist (no event emitted)", async () => {
     const { h, app } = setup();
     h.eventClient.missing.add("evt_x");
-    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_x", title: "T" }));
+    const res = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_x", title: "T" }));
     expect(res.status).toBe(404);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_EVENT_NOT_FOUND");
     expect(h.events.published).toHaveLength(0);
@@ -60,14 +60,14 @@ describe("POST /tasks", () => {
   it("422 TASK_EVENT_ARCHIVED when creating under an archived event", async () => {
     const { h, app } = setup();
     h.eventClient.archived.add("evt_1");
-    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const res = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T" }));
     expect(res.status).toBe(422);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_EVENT_ARCHIVED");
   });
 
   it("400 VALIDATION_FAILED when a normal client specifies origin", async () => {
     const { app } = setup();
-    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", origin: "github" }));
+    const res = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T", origin: "github" }));
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });
@@ -83,7 +83,7 @@ describe("POST /tasks", () => {
     const { app } = setup();
     const long = "x".repeat(201);
     const r1 = await app.request("/tasks", userInit("POST", { eventId: "evt_1" }));
-    const r2 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: long }));
+    const r2 = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: long }));
     expect(r1.status).toBe(400);
     expect(r2.status).toBe(400);
   });
@@ -96,8 +96,8 @@ describe("PATCH /tasks/:id", () => {
     const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1, assigneeId: "usr_bob" }));
     expect(res.status).toBe(200);
     const assigned = h.events.byName("task.assigned");
-    expect(assigned).toHaveLength(1);
-    expect(assigned[0]!.payload).toEqual({ taskId: t.id, eventId: "evt_1", assigneeId: "usr_bob" });
+    expect(assigned).toHaveLength(2); // create (usr_alice) + reassign
+    expect(assigned[1]!.payload).toEqual({ taskId: t.id, eventId: "evt_1", assigneeId: "usr_bob" });
   });
 
   it("status transition todo -> in_progress -> done emits task.status_changed", async () => {
@@ -347,7 +347,7 @@ describe("親子タスクの同一チーム制約 (PARENT_CHILD_TEAM_MISMATCH)",
     const parent = await create(app, { title: "親", teamId: "team_dev" });
     const res = await app.request(
       "/tasks",
-      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_dev" }),
+      userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_dev" }),
     );
     expect(res.status).toBe(201);
     expect(((await res.json()) as task.Task).teamId).toBe("team_dev");
@@ -358,7 +358,7 @@ describe("親子タスクの同一チーム制約 (PARENT_CHILD_TEAM_MISMATCH)",
     const parent = await create(app, { title: "親" }); // team=null
     const res = await app.request(
       "/tasks",
-      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id }),
+      userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "子", parentTaskId: parent.id }),
     );
     expect(res.status).toBe(201);
   });
@@ -368,7 +368,7 @@ describe("親子タスクの同一チーム制約 (PARENT_CHILD_TEAM_MISMATCH)",
     const parent = await create(app, { title: "親", teamId: "team_dev" });
     const res = await app.request(
       "/tasks",
-      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_sponsor" }),
+      userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "子", parentTaskId: parent.id, teamId: "team_sponsor" }),
     );
     expect(res.status).toBe(422);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
@@ -381,7 +381,7 @@ describe("親子タスクの同一チーム制約 (PARENT_CHILD_TEAM_MISMATCH)",
     const parent = await create(app, { title: "親", teamId: "team_dev" });
     const res = await app.request(
       "/tasks",
-      userInit("POST", { eventId: "evt_1", title: "子", parentTaskId: parent.id }), // team=null
+      userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "子", parentTaskId: parent.id }), // team=null
     );
     expect(res.status).toBe(422);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("TASK_PARENT_CHILD_TEAM_MISMATCH");
@@ -556,7 +556,7 @@ describe("routing + authz + correlation", () => {
   it("403 FORBIDDEN when the user lacks task:write", async () => {
     const { h, app } = setup();
     h.authz.denied.add("task:write");
-    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const res = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T" }));
     expect(res.status).toBe(403);
   });
 
@@ -568,7 +568,7 @@ describe("routing + authz + correlation", () => {
 
   it("propagates x-dub-request-id into the event envelope requestId", async () => {
     const { h, app } = setup();
-    await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }, { requestId: "req_custom" }));
+    await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T" }, { requestId: "req_custom" }));
     expect(h.events.byName("task.created")[0]!.requestId).toBe("req_custom");
   });
 });
@@ -604,20 +604,20 @@ describe("contract branches — validation + guards", () => {
 
   it("PATCH 400 assigneeId not_found; task left unchanged [§4.4]", async () => {
     const { h, app } = setup();
-    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const res0 = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T" }));
     const t = (await res0.json()) as task.Task;
     h.identity.unknown.add("usr_ghost");
     const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1, assigneeId: "usr_ghost" }));
     expect(res.status).toBe(400);
     expect((await errOf(res)).code).toBe("VALIDATION_FAILED");
     const after = await h.repo.getById(t.id);
-    expect(after!.assigneeId).toBeNull();
+    expect(after!.assigneeId).toBe("usr_alice");
     expect(after!.version).toBe(1);
   });
 
   it("PATCH 400 when version is missing [§4.4]", async () => {
     const { h, app } = setup();
-    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const res0 = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T" }));
     const t = (await res0.json()) as task.Task;
     const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { title: "x" }));
     expect(res.status).toBe(400);
@@ -628,7 +628,7 @@ describe("contract branches — validation + guards", () => {
 
   it("PATCH version-only body is a no-op that returns the current task (no events) [§4.4]", async () => {
     const { h, app } = setup();
-    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    const res0 = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T" }));
     const t = (await res0.json()) as task.Task;
     h.events.published = [];
     const res = await app.request(`/tasks/${t.id}`, userInit("PATCH", { version: 1 }));
@@ -683,7 +683,7 @@ describe("contract branches — validation + guards", () => {
 
   it("PUT dependencies 400 self_dependency when the task depends on itself [§4.6]", async () => {
     const { h, app } = setup();
-    const res0 = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "A" }));
+    const res0 = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "A" }));
     const a = (await res0.json()) as task.Task;
     const res = await app.request(
       `/tasks/${a.id}/dependencies`,
@@ -838,7 +838,7 @@ describe("WBS parent / team / wbs persistence (F5 — was untested; in-memory re
 
   it("400 on a non-ISO startAt", async () => {
     const { app } = setup();
-    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", startAt: "nope" }));
+    const res = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T", startAt: "nope" }));
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("VALIDATION_FAILED");
   });

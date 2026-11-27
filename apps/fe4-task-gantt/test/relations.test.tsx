@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { renderWithProviders as render } from "./helpers-providers";
+import { pickFirstAssignee, renderWithProviders as render } from "./helpers-providers";
 import type { identity, task, team } from "@dub/types";
 import { TaskCreateModal, type TaskDraft } from "../src/components/TaskCreateModal";
 import { TaskDetailPanel } from "../src/components/TaskDetailPanel";
@@ -61,6 +61,7 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + AD
         parentOptions={PARENT_OPTS}
         scopeTasks={SCOPE}
         onCreate={onCreate}
+        defaultAssignee={{ assigneeId: "usr_fixture", assigneeTeamId: null }}
       />,
     );
     fireEvent.change(screen.getByTestId("fe4-create-title"), { target: { value: "新タスク" } });
@@ -73,7 +74,7 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + AD
 
 const mkTask = (id: string): task.Task => ({
   id, eventId: "evt_1", title: id === "self" ? "対象タスク" : id, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: "2026-08-20T00:00:00Z", origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: "2026-08-20T00:00:00Z", origin: "internal",
   archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 3,
 });
 
@@ -160,10 +161,14 @@ const EVENT = "evt_ws";
 const PERMS: identity.PermissionKey[] = ["task:read", "task:write", "task:delete"];
 const wsTask = (id: string, title: string): task.Task => ({
   id, eventId: EVENT, title, description: null, status: "todo",
-  priority: "medium", assigneeId: null, dueAt: "2026-08-20T00:00:00Z", origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", dueAt: "2026-08-20T00:00:00Z", origin: "internal",
   archivedAt: null, createdAt: `2026-08-0${id.length}T00:00:00Z`, updatedAt: "2026-08-01T00:00:00Z", version: 1,
 });
-const wsClient = () => new MockApiClient({ tasks: [wsTask("t1", "会場予約"), wsTask("t2", "登壇者調整")] });
+const wsClient = () =>
+  new MockApiClient({
+    tasks: [wsTask("t1", "会場予約"), wsTask("t2", "登壇者調整")],
+    users: [{ id: "usr_fixture", displayName: "担当者", avatarUrl: null }],
+  });
 
 describe("TaskWorkspacePage — create under a parent, edit predecessors from detail", () => {
   it("creating a task under a parent makes the parent a collapsible work-package", async () => {
@@ -173,6 +178,7 @@ describe("TaskWorkspacePage — create under a parent, edit predecessors from de
     const modal = await screen.findByTestId("fe4-create-modal");
     fireEvent.change(within(modal).getByTestId("fe4-create-title"), { target: { value: "小タスク" } });
     fireEvent.change(within(modal).getByTestId("fe4-create-parent"), { target: { value: "t1" } });
+    pickFirstAssignee();
     fireEvent.click(within(modal).getByTestId("fe4-create-submit"));
     // t1 now owns a child → renders the expand/collapse toggle
     expect(await screen.findByTestId("fe4-gantt-toggle-t1")).toBeInTheDocument();

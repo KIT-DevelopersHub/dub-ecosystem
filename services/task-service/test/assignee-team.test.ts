@@ -10,7 +10,15 @@ function setup() {
 }
 
 async function create(app: ReturnType<typeof buildApp>, over: Partial<task.CreateTaskRequest>): Promise<task.Task> {
-  const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", ...over }));
+  const res = await app.request(
+    "/tasks",
+    userInit("POST", {
+      eventId: "evt_1",
+      title: "T",
+      ...(over.assigneeId || over.assigneeTeamId ? {} : { assigneeId: "usr_alice" }),
+      ...over,
+    }),
+  );
   expect(res.status).toBe(201);
   return (await res.json()) as task.Task;
 }
@@ -43,7 +51,7 @@ describe("担当チーム (assigneeTeamId)", () => {
 
   it("400 when assigneeTeamId is not a string", async () => {
     const { app } = setup();
-    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T", assigneeTeamId: 42 }));
+    const res = await app.request("/tasks", userInit("POST", { assigneeId: "usr_alice", eventId: "evt_1", title: "T", assigneeTeamId: 42 }));
     expect(res.status).toBe(400);
   });
 
@@ -63,15 +71,17 @@ describe("担当チーム (assigneeTeamId)", () => {
     expect(t2.assigneeTeamId).toBeNull();
   });
 
-  it("PATCH assigneeTeamId=null unassigns; an unchanged team emits no task.assigned", async () => {
+  it("an unchanged team emits no task.assigned; PATCH assigneeTeamId=null (no person) is 400 required", async () => {
     const { h, app } = setup();
     const t = await create(app, { assigneeTeamId: "team_ops" });
     const before = h.events.byName("task.assigned").length;
     const same = (await (await patch(app, t, { assigneeTeamId: "team_ops", title: "T2" })).json()) as task.Task;
     expect(h.events.byName("task.assigned").length).toBe(before);
-    const cleared = (await (await patch(app, same, { assigneeTeamId: null })).json()) as task.Task;
-    expect(cleared.assigneeTeamId).toBeNull();
-    expect(cleared.assigneeId).toBeNull();
+    const res = await patch(app, same, { assigneeTeamId: null });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain('"reason":"required"');
+    const after = await h.repo.getById(t.id);
+    expect(after!.assigneeTeamId).toBe("team_ops");
   });
 
   it("400 assignee_conflict on PATCH with both set", async () => {
@@ -112,5 +122,69 @@ describe("担当チーム (assigneeTeamId)", () => {
     const gh = (await res.json()) as task.Task;
     const r = await patch(app, gh, { assigneeTeamId: "team_ops" });
     expect(r.status).toBe(422);
+  });
+});
+
+// 担当は必須 (人 or チーム)。未割り当ては作れず、更新後に空になる PATCH も拒否する。
+describe("担当は必須 (assignee required)", () => {
+  async function seedUnassigned(h: ReturnType<typeof makeHarness>): Promise<task.Task> {
+    return h.repo.insert({
+      id: "task_legacy",
+      eventId: "evt_1",
+      title: "旧タスク",
+      description: null,
+      status: "todo",
+      priority: "medium",
+      assigneeId: null,
+      dueAt: null,
+      origin: "internal",
+      createdBy: "usr_alice",
+      now: "2026-08-09T00:00:00Z",
+    });
+  }
+
+  it("POST without a person or team is 400 VALIDATION_FAILED assigneeId/required (no event)", async () => {
+    const { h, app } = setup();
+    const res = await app.request("/tasks", userInit("POST", { eventId: "evt_1", title: "T" }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; details: { field: string; reason: string }[] } };
+    expect(body.error.code).toBe("VALIDATION_FAILED");
+    expect(body.error.details).toContainEqual(expect.objectContaining({ field: "assigneeId", reason: "required" }));
+    expect(h.events.published).toHaveLength(0);
+  });
+
+  it("POST by a service (origin=github) without an assignee is also 400", async () => {
+    const { app } = setup();
+    const res = await app.request("/tasks", serviceInit("POST", { eventId: "evt_1", title: "GH", origin: "github" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH assigneeId=null on a person-assigned task is 400 (cannot unassign)", async () => {
+    const { h, app } = setup();
+    const t = await create(app, { assigneeId: "usr_bob" });
+    const res = await patch(app, t, { assigneeId: null });
+    expect(res.status).toBe(400);
+    expect((await h.repo.getById(t.id))!.assigneeId).toBe("usr_bob");
+  });
+
+  it("an existing unassigned task still reads, but an edit without choosing an assignee is 400", async () => {
+    const { h, app } = setup();
+    const t = await seedUnassigned(h);
+    expect((await app.request(`/tasks/${t.id}`, userInit("GET"))).status).toBe(200);
+    const res = await patch(app, t, { title: "変更" });
+    expect(res.status).toBe(400);
+    expect((await h.repo.getById(t.id))!.title).toBe("旧タスク");
+    // a version-only body is still a no-op 200
+    expect((await patch(app, t, {})).status).toBe(200);
+  });
+
+  it("the same edit succeeds once the PATCH also chooses an assignee (person or team)", async () => {
+    const { h, app } = setup();
+    const t = await seedUnassigned(h);
+    const res = await patch(app, t, { title: "変更", assigneeTeamId: "team_ops" });
+    expect(res.status).toBe(200);
+    const after = (await res.json()) as task.Task;
+    expect(after.title).toBe("変更");
+    expect(after.assigneeTeamId).toBe("team_ops");
   });
 });

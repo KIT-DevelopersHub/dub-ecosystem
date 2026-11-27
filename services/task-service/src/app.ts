@@ -48,6 +48,13 @@ import {
 } from "./validate";
 import { decodeCursor, type ListFilter } from "./repo";
 
+/** 担当 (人 or チーム) が無いときの field error。作成と、更新後に空になる PATCH で返す。 */
+const ASSIGNEE_REQUIRED: FieldError = {
+  field: "assigneeId",
+  reason: "required",
+  message: "assigneeId or assigneeTeamId is required",
+};
+
 function ctxOf(c: Context): RequestContext {
   return extractContext(c.req.raw.headers, { allowGenerate: true });
 }
@@ -289,6 +296,8 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId && body.assigneeTeamId) {
       fe.push({ field: "assigneeTeamId", reason: "assignee_conflict", message: "assigneeId and assigneeTeamId are exclusive" });
     }
+    // 担当は必須 (人 or チーム)。未割り当てのタスクは作れない。
+    if (!body.assigneeId && !body.assigneeTeamId) fe.push(ASSIGNEE_REQUIRED);
     checkOptString(body.teamId, "teamId", fe);
     checkOptString(body.parentTaskId, "parentTaskId", fe);
     checkOptString(body.wbs, "wbs", fe);
@@ -496,6 +505,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.dueAt !== undefined) patch.dueAt = body.dueAt;
 
     if (Object.keys(patch).length === 0) return c.json(current); // version-only no-op
+    // 担当は必須: 更新後に人もチームも空になる書き込みは拒否。担当なしの既存タスクは、
+    // 担当を選ぶ (同じ PATCH に assigneeId / assigneeTeamId を入れる) まで編集できない。
+    if (!nextAssigneeId && !nextAssigneeTeamId) throw errors.validationFailed([ASSIGNEE_REQUIRED]);
 
     const now = nowIso();
     const ok = await deps.repo.update(id, patch, body.version, now);

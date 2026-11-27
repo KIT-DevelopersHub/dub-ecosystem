@@ -59,7 +59,7 @@ describe("task-hierarchy scope rules (ADR-0007: 同一チーム内なら別ス�
 
 const mkTask = (id: string, over: Partial<task.Task> = {}): task.Task => ({
   id, eventId: "evt_1", title: id, description: null, status: "todo",
-  priority: "medium", assigneeId: null, teamId: null, dueAt: null, origin: "internal",
+  priority: "medium", assigneeId: "usr_fixture", teamId: null, dueAt: null, origin: "internal",
   archivedAt: null, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z", version: 1, ...over,
 });
 
@@ -115,7 +115,7 @@ describe("replaceDependencies enforces the same-team rule (ADR-0007)", () => {
 describe("createTask / updateTask carry the WBS parent onto the gantt rows", () => {
   it("createTask with parentTaskId hangs the new row under that parent", async () => {
     const c = new MockApiClient({ tasks: [mkTask("P")] });
-    const child = await api.createTask(c, { eventId: "evt_1", title: "新子", parentTaskId: "P" });
+    const child = await api.createTask(c, { eventId: "evt_1", title: "新子", parentTaskId: "P", assigneeId: "usr_fixture" });
     const dto = await api.getGantt(c, "evt_1");
     const childRow = dto.rows.find((r) => r.taskId === child.id)!;
     expect(childRow.parentTaskId).toBe("P");
