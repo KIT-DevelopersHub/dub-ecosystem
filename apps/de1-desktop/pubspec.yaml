@@ -73,6 +73,9 @@ dependencies:
   # Phone shell: links to other sites / mailto: / tel: open in the OS app.
   url_launcher: ^6.3.1
 
+  # Phone shell: downloaded files go to the OS share sheet ("Save to Files" etc.).
+  share_plus: ^10.1.4
+
 # Vendored patch for a Windows-only vertical-scroll bug in
 # flutter_inappwebview_windows 0.6.0 (the latest stable release — the fix is
 # not upstream yet). See third_party/README.md for the full root-cause

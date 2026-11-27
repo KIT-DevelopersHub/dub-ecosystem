@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../mobile/file_saver.dart';
 import '../mobile/link_policy.dart';
 
 /// Full-screen viewer for a Dub page that asked for a new window
@@ -82,12 +83,27 @@ class _LinkViewerPageState extends State<LinkViewerPage> {
             initialUrlRequest: URLRequest(url: WebUri.uri(widget.url)),
             initialSettings: InAppWebViewSettings(
               useShouldOverrideUrlLoading: true,
+              useOnDownloadStart: true,
               allowsBackForwardNavigationGestures: true,
               supportZoom: true,
               builtInZoomControls: true,
               displayZoomControls: false,
             ),
             onWebViewCreated: (c) => _controller = c,
+            onDownloadStartRequest: (_, request) async {
+              if (!widget.appHosts.contains(request.url.host.toLowerCase())) {
+                await launchUrl(request.url, mode: LaunchMode.externalApplication);
+                return;
+              }
+              try {
+                await const FileSaver().downloadUrl(context, request);
+              } catch (_) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('ファイルをダウンロードできませんでした')),
+                );
+              }
+            },
             onTitleChanged: (_, title) {
               if (title != null && title.isNotEmpty && mounted) {
                 setState(() => _title = title);

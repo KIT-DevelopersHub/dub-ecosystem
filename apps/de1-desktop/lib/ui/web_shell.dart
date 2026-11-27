@@ -13,6 +13,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
 import '../feature_registry.dart';
+import '../mobile/download_bridge.dart';
+import '../mobile/file_saver.dart';
 import '../mobile/link_policy.dart';
 import '../mobile/new_window_bridge.dart';
 import '../push/fcm_push.dart';
@@ -384,6 +386,41 @@ class _WebShellState extends ConsumerState<WebShell> {
     return null;
   }
 
+  /// JS -> native: a file the page built in memory (see [DownloadBridge]).
+  Future<dynamic> _onSaveFile(List<dynamic> args) async {
+    if (args.length < 3 || !mounted) return null;
+    try {
+      await const FileSaver().saveBase64(
+        context,
+        name: args[0].toString(),
+        mime: args[1].toString(),
+        base64Data: args[2].toString(),
+      );
+    } catch (_) {
+      _snack('ファイルを保存できませんでした');
+    }
+    return null;
+  }
+
+  /// A server response marked as a download. Dub files are fetched with the
+  /// session and handed to the share sheet; other sites open in the browser.
+  Future<void> _onDownloadStart(
+    InAppWebViewController controller,
+    DownloadStartRequest request,
+  ) async {
+    final url = request.url;
+    if (!_appHosts.contains(url.host.toLowerCase())) {
+      await _launchExternal(url);
+      return;
+    }
+    try {
+      _snack('ダウンロードしています…');
+      await const FileSaver().downloadUrl(context, request);
+    } catch (_) {
+      _snack('ファイルをダウンロードできませんでした');
+    }
+  }
+
   Future<void> _launchExternal(Uri uri) async {
     try {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -599,6 +636,11 @@ class _WebShellState extends ConsumerState<WebShell> {
                       source: NewWindowBridge.jsSource(),
                       injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                     ),
+                  if (_isMobile)
+                    UserScript(
+                      source: DownloadBridge.jsSource(),
+                      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                    ),
                 ]),
                 initialSettings: InAppWebViewSettings(
                   transparentBackground: false,
@@ -607,7 +649,9 @@ class _WebShellState extends ConsumerState<WebShell> {
                   supportZoom: false,
                   applicationNameForUserAgent: 'Dub-Desktop',
                   useShouldOverrideUrlLoading: _isMobile,
+                  useOnDownloadStart: _isMobile,
                 ),
+                onDownloadStartRequest: _isMobile ? _onDownloadStart : null,
                 shouldOverrideUrlLoading:
                     _isMobile ? _onShouldOverrideUrlLoading : null,
                 onWebViewCreated: (controller) {
@@ -631,6 +675,10 @@ class _WebShellState extends ConsumerState<WebShell> {
                   controller.addJavaScriptHandler(
                     handlerName: NewWindowBridge.handlerName,
                     callback: _onOpenWindow,
+                  );
+                  controller.addJavaScriptHandler(
+                    handlerName: DownloadBridge.handlerName,
+                    callback: _onSaveFile,
                   );
                 },
                 onLoadStop: (controller, url) {
