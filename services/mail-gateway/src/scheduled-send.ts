@@ -72,6 +72,8 @@ export async function runScheduledSendDrain(
     const attempts = row.attempts + 1;
     try {
       const req = toSendRequest(row, await loadScheduledAttachments({ db, blobs }, row.id));
+      // System row (owner NULL, e.g. the 発行確認メール): mark it auto-generated like an inline system send.
+      if (row.owner_user_id === null) req.loopHeaders = { "auto-submitted": "auto-generated" };
       // From: a stored envelope wins; else resolve the composer's own address (or the
       // shared mailbox for a reply) exactly like the interactive /outbox lane.
       const fromAddress =
