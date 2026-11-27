@@ -27,14 +27,14 @@ function makeApi(passkeys: Partial<ApiClient["auth"]["passkeys"]>): ApiClient {
   return { auth: { passwordLogin: vi.fn(), passkeys: { ...passkeys } } } as unknown as ApiClient;
 }
 
-let assignSpy: ReturnType<typeof vi.fn>;
+let replaceSpy: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   webauthn.supported = true;
   webauthn.startAuthentication.mockReset();
   webauthn.startRegistration.mockReset();
-  assignSpy = vi.fn();
+  replaceSpy = vi.fn();
   Object.defineProperty(globalThis, "location", {
-    value: { ...globalThis.location, assign: assignSpy, pathname: "/", search: "" },
+    value: { ...globalThis.location, replace: replaceSpy, pathname: "/", search: "" },
     writable: true,
     configurable: true,
   });
@@ -49,7 +49,7 @@ describe("LoginScreen — passkey", () => {
     render(<LoginScreen api={makeApi({ loginOptions, loginVerify })} redirectPath="/home" />);
 
     fireEvent.click(screen.getByTestId("fe2-login-passkey"));
-    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledWith("/home"));
     expect(webauthn.startAuthentication).toHaveBeenCalledWith({ optionsJSON: { challenge: "c" } });
     expect(loginVerify).toHaveBeenCalledWith({ id: "cred" });
   });
@@ -60,7 +60,7 @@ describe("LoginScreen — passkey", () => {
     fireEvent.click(screen.getByTestId("fe2-login-passkey"));
     await waitFor(() => expect(screen.getByTestId("fe2-login-hint")).toBeInTheDocument());
     expect(screen.queryByTestId("fe2-login-error")).toBeNull();
-    expect(assignSpy).not.toHaveBeenCalled();
+    expect(replaceSpy).not.toHaveBeenCalled();
   });
 
   it("server rejection shows an error and keeps the password path", async () => {

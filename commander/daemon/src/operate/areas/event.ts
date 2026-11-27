@@ -218,7 +218,11 @@ export const EVENT: AreaSpec = {
     { service: S, route: "POST /events/:id/digest/run", reason: "AI の要約を作り直す管理者の操作。他アプリを読みに行き Mac mini の時間を使うので、画面の「今すぐ要約」からだけ動かす" },
     { service: S, route: "POST /events/:id/ask", reason: "AI への質問。個人情報に触れやすく、答えは画面で出典と一緒に読むものなので operate からは開けない" },
   ],
-  pending: [],
+  // イベントごとに使うアプリ (/events/:id/apps) は新設したばかり。Commander から操作させるかは後で決める。
+  pending: [
+    { service: S, route: "GET /events/:id/apps" },
+    { service: S, route: "PUT /events/:id/apps" },
+  ],
   ownerOpenedIrreversible: {
     "events.create": "オーナーが依頼表で「イベントの作成」を名指しで開放。作ったイベントはカタログから消せないが、中身は events.update で直せ、不要ならオーナーが Dub の画面でアーカイブできる",
     "events.actions.create": "イベント編集の一部としてオーナーが開放。追加したアクションはカタログから消せないが、中身は actions.update で直せ、不要ならオーナーが Dub の画面でアーカイブできる",

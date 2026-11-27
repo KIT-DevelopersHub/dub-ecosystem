@@ -50,36 +50,37 @@ flutter build macos           # release build -> build/macos/Build/Products/…/
 flutter run -d macos --dart-define=WEB_BASE_URL=https://dub-fe2-app-shell-demo.developershub-site.workers.dev
 ```
 
-### iOS
+### Phone (iOS / Android)
+
+The same shell is the Dub phone app. On iOS and Android it adds what a browser
+would otherwise do for the web app:
+
+| Behaviour | How |
+|---|---|
+| Stay logged in | `dub_session` cookie in the WebView store (sliding session) + optional Face ID / fingerprint autofill |
+| Links to other sites, `mailto:`, `tel:` | Opened in the OS browser / app (`lib/mobile/link_policy.dart`) |
+| `target=_blank` / `window.open` to Dub | In-app viewer that shares the session (`lib/ui/link_viewer.dart`) |
+| Downloads (`<a download>`, attachments) | OS share sheet: "Save to Files", other apps (`lib/mobile/download_bridge.dart`, `file_saver.dart`) |
+| File upload / camera | The WebView's own file picker (camera/photo usage strings in `Info.plist`) |
+| Back | iOS edge swipe; Android back button walks the web history, then exits |
+| Push | FCM (Android, iOS via APNs). Unregistered on logout |
 
 ```bash
 flutter pub get
-flutter build ios --release          # signed build -> build/ios/iphoneos/Runner.app
-flutter install -d <device-id>       # install to a connected/trusted iPhone
-# or: flutter run -d <device-id>     # build + install + launch, attached debugger
+flutter run -d <device-id>                 # debug on a connected phone
+flutter build ipa --release                # iOS archive for App Store Connect
+flutter build appbundle --release          # Android .aab for Google Play
+flutter build apk --release                # Android APK for direct install
 ```
 
-Signing: Automatic (Personal Team), bundle id `jp.developershub.dubDesktop`. The device must
-be connected via cable (or on the same LAN with Developer Mode + Wi-Fi debugging enabled),
-unlocked, and already trusted by this Mac — `flutter devices` / `xcrun devicectl list devices`
-must list it before install will work.
-
-### Android (experimental — same WebView shell on a phone)
-
-The same shell also runs on Android; the SPA has a `width=device-width` viewport and
-responsive breakpoints, so it reflows to a mobile layout (login renders cleanly). It is
-usable but not mobile-first: data-dense views (Gantt, roster tables, mail/chat) are
-cramped and scroll horizontally, so this is for internal testing/sharing, not an end-user
-mobile product. Requires JDK 17 (Flutter 3.29's Gradle plugin rejects newer JDKs).
-
-```bash
-flutter build apk --release                  # universal APK (all devices)
-flutter build apk --release --split-per-abi  # smaller per-ABI APKs
-# APK -> build/app/outputs/flutter-apk/app-release.apk
-```
-
-APKs are **debug-signed** (no release keystore): Android will warn on install and they
-must not go to a store. To install, enable "unknown sources" and open the APK.
+- Bundle id / application id: `jp.developershub.dubDesktop` (iOS),
+  `jp.developershub.dub_desktop` (Android). Changing them requires a new Firebase app.
+- iOS signing uses the Apple Developer team configured in Xcode (Automatic).
+- Android release signing reads `android/key.properties` (see
+  `android/key.properties.example`). Without it, release builds are signed with
+  the debug key: fine for testing, rejected by Google Play.
+- Android builds need JDK 17.
+- App icon and launch images come from `tool/make_icons.py`.
 
 macOS requires deployment target ≥ 10.15 (already configured). `apps/de1-desktop` has no
 `package.json`, so it is invisible to the pnpm/turbo web build.

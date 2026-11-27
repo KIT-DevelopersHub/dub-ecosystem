@@ -47,6 +47,9 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /internal/health/ready": INTERNAL,
   "GET /internal/status": INTERNAL,
   "GET /health/quota": INTERNAL,
+  // Mail monitor heartbeat (#898): app-health-monitor reads it over its Service Binding
+  // (dead-man's switch for the cron-driven checks). Check states only, no secrets.
+  "GET /internal/monitor/heartbeat": INTERNAL,
 
   // ---- Resend delivery-problem webhook (bounce / suppressed / complained / failed / delayed)
   // INTERNAL, not PUBLIC: this Worker has no public hostname. Resend calls api-gateway's
@@ -104,6 +107,9 @@ export const POLICY_TABLE = definePolicyTable({
   "PUT /mail/templates/:id": appLevel("mail", "edit", "mail:send"),
   "DELETE /mail/templates/:id": appLevel("mail", "edit", "mail:send"),
   "GET /mail/templates": appLevel("mail", "view", "mail:read"),
+  // The Froms the caller may pick in compose (共用アドレス, 0027). Read-only and keyed on the
+  // caller; whether a shared one may be USED is checked again on every send by the handler.
+  "GET /mail/send-as": appLevel("mail", "view", "mail:read"),
 
   // 閲覧 on メール + mail:read — reads, and the two mutations that only touch the reader's
   // own view of mail they can already see (the read flag of one message; their personal
@@ -162,12 +168,22 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /mail/admin/email-routing/rules": ["mail:admin"],
   "PATCH /mail/admin/email-routing/rules/:id": ["mail:admin"],
   "DELETE /mail/admin/email-routing/rules/:id": ["mail:admin"],
+  // Resend の送信停止リスト（届かなくなった宛先の確認と戻し）。同じ管理画面の権限。
+  "GET /mail/admin/email-routing/suppressions": ["mail:admin"],
+  "DELETE /mail/admin/email-routing/suppressions/:email": ["mail:admin"],
   // Team mailing lists (0024): each one is an Email Routing rule, same admin console.
   "GET /mail/admin/lists": ["mail:admin"],
   "POST /mail/admin/lists": ["mail:admin"],
   "DELETE /mail/admin/lists/:id": ["mail:admin"],
+  // Shared sending addresses (0027): who may send as info@ etc. is org mail administration.
+  "GET /mail/admin/shared-mailboxes": ["mail:admin"],
+  "POST /mail/admin/shared-mailboxes": ["mail:admin"],
+  "PATCH /mail/admin/shared-mailboxes/:id": ["mail:admin"],
+  "DELETE /mail/admin/shared-mailboxes/:id": ["mail:admin"],
   // Production canary probe results (read-only operational data, same admin console).
   "GET /mail/admin/canary/probes": ["mail:admin"],
+  // Production mail monitor state (send / receive / API / send errors), read-only (#898).
+  "GET /mail/admin/monitor": ["mail:admin"],
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────

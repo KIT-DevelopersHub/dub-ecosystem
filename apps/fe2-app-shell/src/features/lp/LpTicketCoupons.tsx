@@ -43,6 +43,7 @@ import {
   type CouponDraft,
   type CouponDraftErrors,
 } from "./lpTickets.ts";
+import { LpHelp, LpTitleWithHelp } from "./LpHelp.tsx";
 import styles from "./lp.module.css";
 
 const n = (v: number): string => v.toLocaleString("ja-JP");
@@ -91,7 +92,7 @@ export function LpTicketCouponsLockedCard(): JSX.Element {
   return (
     <Card testId="fe2-lp-coupons-locked" header={<span className={styles.sectionTitle}>クーポン</span>}>
       <span className={styles.note} data-testid="fe2-lp-coupons-publish-hint">
-        0 円の券種はクーポンコードでのみ申し込めます。クーポンの一覧・{COUPON_ISSUE_LABEL}・停止には lp:publish 権限が必要です。
+        クーポンの一覧・{COUPON_ISSUE_LABEL}・停止には lp:publish 権限が必要です。
       </span>
     </Card>
   );
@@ -226,7 +227,19 @@ export function LpTicketCouponsCard({ types }: { types: LpTicketTypeSummary[] })
       testId="fe2-lp-coupons"
       header={
         <div className={styles.cardHeaderRow}>
-          <span className={styles.sectionTitle}>クーポン</span>
+          <LpTitleWithHelp
+            title="クーポン"
+            titleClassName={styles.sectionTitle}
+            help={
+              <LpHelp label="クーポンの説明" testId="fe2-lp-coupons-help">
+                <ul>
+                  <li>0 円の券種はクーポンコードでのみ申し込めます。</li>
+                  <li>コードを招待者に渡し、購入ページで入力してもらいます。</li>
+                  <li>1 つのコードで使える枚数と期限を決められます。</li>
+                </ul>
+              </LpHelp>
+            }
+          />
           <Button
             variant="secondary"
             size="sm"
@@ -241,9 +254,6 @@ export function LpTicketCouponsCard({ types }: { types: LpTicketTypeSummary[] })
       }
     >
       <Stack gap={5}>
-        <span className={styles.note}>
-          0 円の券種はクーポンコードでのみ申し込めます。コードを招待者に渡し、購入ページで入力してもらいます。1 つのコードで使える枚数と期限を決められます。
-        </span>
         {content}
       </Stack>
       {issuing ? (

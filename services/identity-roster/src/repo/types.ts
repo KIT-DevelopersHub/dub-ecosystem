@@ -93,8 +93,10 @@ export interface IdentityRepo {
 
   // roles
   getRole(roleId: string): Promise<RoleRow | null>;
-  /** Roles (with permissions) for the given ids in one read; unknown ids are absent. */
-  getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]>;
+  /** Roles (with permissions) for the given ids in one read; unknown ids are absent.
+   *  `onlyPermissions` narrows each role's `permissions` to that subset (the authz hot path
+   *  only asks about a few keys, and reading a role's whole bundle cost ~150 rows per check). */
+  getRolesByIds(roleIds: readonly string[], onlyPermissions?: readonly string[]): Promise<RoleRow[]>;
   getRoleByName(orgId: string, name: string): Promise<RoleRow | null>;
   listRoles(orgId: string, limit: number, cursor?: string): Promise<{ items: RoleRow[]; nextCursor: string | null }>;
   createRole(row: RoleRow, mailVisibleRoleIds?: string[]): Promise<void>;
@@ -109,6 +111,9 @@ export interface IdentityRepo {
   deleteRole(roleId: string): Promise<void>; // cascades assignments + role_permissions
   /** roleId -> distinct users holding it (any scope) in the org. Roles with zero members are omitted. */
   roleMemberCounts(orgId: string): Promise<Map<string, number>>;
+  /** The org's roles carrying `permission`, as (id, name) in id order, with their member counts
+   *  — permissionHolders' read, without loading every role's whole permission bundle. */
+  rolesWithPermission(orgId: string, permission: identity.PermissionKey): Promise<{ id: string; name: string; memberCount: number }[]>;
 
   // assignments
   listAssignmentsByUser(userId: string, orgId: string): Promise<AssignmentRow[]>;

@@ -66,6 +66,18 @@ describe("Sent list conversation summary", () => {
     expect(thread.map((m) => m.messageId)).toEqual(["r1@outside.com", "r2@outside.com"]);
   });
 
+  it("read-all Sent scope still finds both the root (by id) and our replies (by thread id)", async () => {
+    const h = makeHarness();
+    const rootId = await sendAsAlice(h, "k1");
+    const ideps = inboundDeps(h, { identity: fakeIdentityFetcher(true, ROSTER) });
+    await handleInbound(ideps, reply("r1@outside.com", rootId));
+    await sendAsAlice(h, "k2", { inReplyTo: "r1@outside.com", subject: "Re: 見積もりの件" });
+
+    const page = await listSent(h.db, { ownerUserId: { readAll: true }, viewer: "usr_alice", inboundScope: "usr_alice", limit: 10 });
+    expect(page.items.map((i) => i.conversation?.id)).toEqual([rootId, rootId]);
+    expect(page.items.map((i) => i.conversation?.messageCount)).toEqual([3, 3]);
+  });
+
   it("our follow-up reply shares the root's conversation and both rows count it", async () => {
     const h = makeHarness();
     const rootId = await sendAsAlice(h, "k1");

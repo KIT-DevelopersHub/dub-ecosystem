@@ -1506,3 +1506,8 @@ svg {
     animation: none;
   }
 }
+
+/* ヘッダーの AI ボタン (右側の AI パネルの開閉)。title のツールチップ用の入れ物。 */
+.fe2-ai-toggle {
+  display: inline-flex;
+}
