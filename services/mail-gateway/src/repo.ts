@@ -26,6 +26,7 @@ export interface SendLogRow {
   from_address: string | null; // 0004: envelope From used for the send
   owner_user_id: string | null; // 0006: the user who sent it (Sent-folder scope); NULL = system
   bcc_json?: string | null; // 0018: JSON MailAddress[] of Bcc recipients (sender-only); NULL = none / pre-0018
+  shared_mailbox?: string | null; // 0027: shared address it went out as; NULL = ordinary / pre-0027
 }
 
 export interface InboundRow {
@@ -123,15 +124,19 @@ export async function insertSendClaim(
     // Owner = the human sender (Sent-folder scope). NULL for pure system/automation
     // sends with no user on the call — they belong to no person's Sent folder.
     ownerUserId: string | null;
+    // 共用アドレス (0027): the shared address the send goes out as. The column is written only
+    // when set, so every other send keeps working on a database without 0027.
+    sharedMailbox?: string | null;
   },
 ): Promise<number> {
   const now = nowIso();
+  const shared = row.sharedMailbox ? [row.sharedMailbox] : [];
   const res = await db.run(
     `INSERT OR IGNORE INTO mail_send_log
        (id, idempotency_key, req_hash, requester, to_json, subject, thread_id,
         provider, provider_message_id, status, error_code, created_at, updated_at,
-        text_body, html_body, cc_json, snippet, from_address, owner_user_id, bcc_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        text_body, html_body, cc_json, snippet, from_address, owner_user_id, bcc_json${shared.length ? ", shared_mailbox" : ""})
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?${shared.length ? ", ?" : ""})`,
     row.id,
     row.idempotencyKey,
     row.reqHash,
@@ -148,6 +153,7 @@ export async function insertSendClaim(
     row.fromAddress,
     row.ownerUserId,
     row.bccJson ?? null,
+    ...shared,
   );
   return res.meta.changes;
 }
@@ -1034,6 +1040,7 @@ export interface ScheduledRow {
   html_body: string | null;
   in_reply_to: string | null;
   from_address: string | null;
+  shared_mailbox?: string | null; // 0027: shared address the composer picked (drain re-checks it)
   scheduled_at: string;
   status: mail.ScheduledSendStatus;
   sent_message_id: string | null;
@@ -1139,15 +1146,18 @@ export async function insertScheduled(
     inReplyTo: string | null;
     fromAddress: string | null;
     scheduledAt: string;
+    // 共用アドレス (0027): written only when picked, like the send log.
+    sharedMailbox?: string | null;
   },
 ): Promise<void> {
   const now = nowIso();
+  const shared = row.sharedMailbox ? [row.sharedMailbox] : [];
   await db.run(
     `INSERT INTO mail_scheduled
        (id, owner_user_id, to_json, cc_json, bcc_json, subject, text_body, html_body, in_reply_to,
         from_address, scheduled_at, status, sent_message_id, error_code, attempts, snippet,
-        created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', NULL, NULL, 0, ?, ?, ?)`,
+        created_at, updated_at${shared.length ? ", shared_mailbox" : ""})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', NULL, NULL, 0, ?, ?, ?${shared.length ? ", ?" : ""})`,
     row.id,
     row.ownerUserId,
     row.toJson,
@@ -1162,6 +1172,7 @@ export async function insertScheduled(
     snippetOf(row.textBody),
     now,
     now,
+    ...shared,
   );
 }
 
