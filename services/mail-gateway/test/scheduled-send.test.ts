@@ -286,7 +286,8 @@ describe("scheduled reply keeps threading + recipients (0020)", () => {
     const provider = new MockMailProvider();
     expect((await runScheduledSendDrain(env, later(), provider)).sent).toBe(1);
     const out = provider.sent[0]!;
-    expect(out.from).toBe("info@developershub.jp");
+    // info@ is a shared mailbox (0027 seed), so the From carries its display name.
+    expect(out.from).toBe("北陸ITカンファレンス 実行委員会 <info@developershub.jp>");
     expect(out.to.map((a) => a.email)).toEqual(["partner@partner.example"]);
     expect(out.cc.map((a) => a.email)).toEqual(["cc-person@partner.example"]);
     expect(out.bcc?.map((a) => a.email)).toContain("boss@developershub.jp");

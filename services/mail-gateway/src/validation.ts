@@ -247,6 +247,15 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
 
   const attachments = parseAttachments(b.attachments, fe);
 
+  // The From the composer picked (共用アドレス, 0027). Whether this caller may use it is the
+  // handler's call (resolveSendIdentity); here it only has to be an address.
+  let fromAddress: string | undefined;
+  if (b.fromAddress !== undefined) {
+    if (typeof b.fromAddress !== "string" || b.fromAddress.length > 320 || !EMAIL_RE.test(b.fromAddress.trim())) {
+      fe.push({ field: "fromAddress", reason: "invalid_type", message: "an email address" });
+    } else fromAddress = b.fromAddress.trim().toLowerCase();
+  }
+
   if (fe.length > 0) throw mailInvalid(fe);
 
   const out: mail.SendMailRequest = {
@@ -260,6 +269,7 @@ export function parseSendMailRequest(body: unknown): mail.SendMailRequest {
   if (inReplyTo !== undefined) out.inReplyTo = inReplyTo;
   if (loopHeaders !== undefined) out.loopHeaders = loopHeaders;
   if (attachments !== undefined) out.attachments = attachments;
+  if (fromAddress !== undefined) out.fromAddress = fromAddress;
   return out;
 }
 
