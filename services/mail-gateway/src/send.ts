@@ -25,6 +25,7 @@ import {
 import type { OutboundMail } from "./provider";
 import type { SendDeps } from "./types";
 import { notifySponsorContact } from "./sponsor-sync";
+import { displayFrom } from "./shared-mailbox";
 
 /** FNV-1a 32-bit hex over the canonical request (same key + different body -> 409). */
 export function hashRequest(req: mail.SendMailRequest): string {
@@ -41,6 +42,8 @@ export function hashRequest(req: mail.SendMailRequest): string {
     // Attachment fingerprint: filename + type + base64 length (cheap, avoids hashing MBs
     // of bytes while still tripping the 409 when the same key carries different files).
     attachments: (req.attachments ?? []).map((a) => `${a.filename}:${a.contentType}:${a.contentBase64.length}`),
+    // Only when picked, so the hash of every request without one is unchanged.
+    ...(req.fromAddress ? { fromAddress: req.fromAddress } : {}),
   });
   let h = 0x811c9dc5;
   for (let i = 0; i < canonical.length; i++) {
@@ -186,6 +189,7 @@ export async function sendMail(
       fromAddress,
       // Owner = the human sender (Sent-folder account scope); null for system sends.
       ownerUserId: deps.ownerUserId ?? null,
+      sharedMailbox: deps.sharedMailbox ?? null,
     });
     if (claimed === 0) {
       // lost the race — another request claimed the key; re-read and dedup.
@@ -210,8 +214,11 @@ export async function sendMail(
     contentType: a.contentType,
     contentBase64: a.contentBase64,
   }));
+  // "表示名 <info@…>" for a shared mailbox; the bare address otherwise (stored rows, the
+  // Message-ID domain and the archive keep using the bare address).
+  const headerFrom = displayFrom(fromAddress, deps.fromName);
   const outbound: OutboundMail = {
-    from: fromAddress,
+    from: headerFrom,
     to: req.to,
     cc: wireCc,
     ...(wireBcc.length > 0 ? { bcc: wireBcc } : {}),
@@ -222,7 +229,7 @@ export async function sendMail(
     inReplyTo: req.inReplyTo ?? null,
     ...(references.length > 0 ? { references } : {}),
     mime: assembleMime({
-      from: fromAddress,
+      from: headerFrom,
       to: req.to,
       cc: wireCc,
       subject: req.subject,

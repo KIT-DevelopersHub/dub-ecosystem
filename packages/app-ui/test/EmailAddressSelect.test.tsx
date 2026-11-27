@@ -211,4 +211,13 @@ describe("EmailAddressSelect", () => {
     fireEvent.change(input, { target: { value: "bo" } });
     expect(within(screen.getByRole("listbox")).getByTestId("tok-icon").textContent).toBe("bob@x.com");
   });
+
+  it("shows locked chips first without a remove button, and hides a typed duplicate", () => {
+    render(<EmailAddressSelect value="me@x.com, a@x.com" onChange={() => {}} parse={parse} testId="cc" lockedTokens={[{ email: "me@x.com" }]} lockedHint="外せません" />);
+    const locked = screen.getByTestId("cc-locked");
+    expect(locked).toHaveTextContent("me@x.com");
+    expect(locked.querySelector("button")).toBeNull();
+    expect(screen.getAllByText("me@x.com")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "a@x.com を削除" })).toBeInTheDocument();
+  });
 });
