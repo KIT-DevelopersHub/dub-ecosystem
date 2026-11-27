@@ -196,9 +196,9 @@ describe("query plans (rows-read budget)", () => {
       }
       // A date-bounded Sent page stays on the per-owner index (not every user's sends).
       if (/FROM mail_send_log WHERE/.test(sql)) expect(plan.some((d) => d.includes("idx_mail_send_log_owner_status_created (owner_user_id=? AND status=? AND created_at>?)"))).toBe(true);
-      // Probes are index lookups.
-      if (sql.includes("mail_attachments ma")) expect(plan.some((d) => /SEARCH ma USING INDEX idx_mail_attachments_msg/.test(d))).toBe(true);
-      if (sql.includes("mail_user_flags sf")) expect(plan.some((d) => /SEARCH sf USING (INDEX|PRIMARY KEY|COVERING INDEX) /.test(d))).toBe(true);
+      // Probes are index lookups. SQLite 3.54+ (Node 24.22) runs EXISTS as a semi-join: "SEARCH ma EXISTS USING ...".
+      if (sql.includes("mail_attachments ma")) expect(plan.some((d) => /SEARCH ma (EXISTS )?USING INDEX idx_mail_attachments_msg/.test(d))).toBe(true);
+      if (sql.includes("mail_user_flags sf")) expect(plan.some((d) => /SEARCH sf (EXISTS )?USING (INDEX|PRIMARY KEY|COVERING INDEX) /.test(d))).toBe(true);
     }
   });
 });
