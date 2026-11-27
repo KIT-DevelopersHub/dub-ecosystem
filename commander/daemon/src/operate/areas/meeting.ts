@@ -154,6 +154,8 @@ export const MEETING: AreaSpec = {
     { service: SHARE, route: "PUT /meetings/attendance/links/:googleUserId" },
     { service: SHARE, route: "DELETE /meetings/attendance/links/:googleUserId" },
     { service: SHARE, route: "PUT /meetings/attendance/settings" },
+    // ミーティング単位の再同期 (/meetings/:id/sync) は新設したばかり。全体の meetings.sync と同じく招待メールが出るので、開けるかはオーナーが決める。
+    { service: SHARE, route: "POST /meetings/:id/sync" },
   ],
   ownerOpenedIrreversible: {
     "meetings.create": "作成は削除で取り消せるが、参加者への招待メールは取り消せない。オーナーが「ミーティングを1件ずつ追加する」ために名指しで開放",
