@@ -6,9 +6,9 @@
 // The persistent left sidebar is gone: tools now live behind the header AppLauncher
 // (Chrome-waffle style), so mail (Gmail 3-pane) and chat (Slack) render full-width
 // with no nested/double sidebar.
-import { useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AppShell, PageHeader, AppLauncher, Menu } from "@dub/ui";
+import { AppShell, PageHeader, AppLauncher, Menu, Button, Icon, isImeComposing } from "@dub/ui";
 import type { AppLauncherItem, MenuItem } from "@dub/ui";
 import type { identity } from "@dub/types";
 import type { NavEntry } from "../modules/types.tsx";
@@ -26,6 +26,9 @@ import { ImpersonationBanner } from "./ImpersonationBanner.tsx";
 import { HeaderAccountSwitcher } from "./HeaderAccountSwitcher.tsx";
 import { ProfileReminderBanner, useMissingProfileKeys } from "./ProfileReminder.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
+import { useUiStore } from "../store/uiStore.tsx";
+import { createEventApi } from "../composition/appClients.tsx";
+import { AiPanelHost } from "./ai/AiPanelHost.tsx";
 
 type Can = (permission: identity.PermissionKey) => boolean;
 
@@ -62,7 +65,15 @@ export interface AppShellLayoutProps {
   // Shared api-client — when provided, the floating feedback widget is mounted for
   // authenticated users. Optional so unit tests can render the shell without it.
   api?: ApiClient;
+  // Current route path — tells the AI panel what the viewer is looking at. Optional so unit
+  // tests can render the shell without a router (the panel then shows ホーム).
+  pathname?: string;
   children: ReactNode; // routed <Outlet/>
+}
+
+/** Cmd/Ctrl+J — open/close the AI panel (Dia/Chrome-style side panel shortcut). */
+export function isAiPanelToggle(e: KeyboardEvent): boolean {
+  return (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "j" && !isImeComposing(e);
 }
 
 // NavEntry[] -> @dub/ui AppLauncherItem[]: id keyed by path, badgeSource() hook
@@ -190,6 +201,7 @@ export function AppShellLayout({
   onLogout,
   title = "DevHub",
   api,
+  pathname = "/",
   children,
 }: AppShellLayoutProps): JSX.Element {
   const auth = useAuth();
@@ -216,6 +228,23 @@ export function AppShellLayout({
   // #849 プロフィール未入力のリマインド: バナー + ⚙ とアカウント設定の点。全部入力済みなら空。
   const missingProfile = useMissingProfileKeys(showAccount ? api : undefined);
   const profileIncomplete = missingProfile.length > 0;
+
+  // 右側の AI パネル (Dia のチャットのように常に横にいる AI)。開閉は localStorage に覚える。
+  const aiPanelOpen = useUiStore((s) => s.aiPanelOpen) && authed;
+  const toggleAiPanel = useUiStore((s) => s.toggleAiPanel);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const eventApi = useMemo(() => (api ? createEventApi(api) : undefined), [api]);
+  useEffect(() => {
+    if (!authed) return undefined;
+    const onKey = (e: KeyboardEvent): void => {
+      if (isAiPanelToggle(e)) {
+        e.preventDefault();
+        toggleAiPanel();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [authed, toggleAiPanel]);
 
   // The ⚙ menu's contents — a short list of self-service行き先, each a single row that
   // either opens a dialog or fires an action:
@@ -318,6 +347,20 @@ export function AppShellLayout({
           {leadingHeaderWidgets.map((Widget, i) => (
             <Widget key={`lead-${i}`} />
           ))}
+          {authed ? (
+            // AI を頭に: ヘッダーの先頭側に文字付きで置く (⌘J / Ctrl+J でも開閉)。
+            <span className="fe2-ai-toggle" title="AI アシスタント（⌘J / Ctrl+J）">
+              <Button
+                variant={aiPanelOpen ? "primary" : "secondary"}
+                size="sm"
+                iconLeft={<Icon name="sparkles" />}
+                onClick={toggleAiPanel}
+                testId="fe2-ai-panel-toggle"
+              >
+                AI
+              </Button>
+            </span>
+          ) : null}
           <AppLauncher
             testId="fe2-app-launcher"
             title="アプリ"
@@ -391,7 +434,21 @@ export function AppShellLayout({
 
   // No `sidebar` prop -> @dub/ui AppShell renders no left rail; main spans full width.
   return (
-    <AppShell header={header} testId="fe2-shell">
+    <AppShell
+      header={header}
+      testId="fe2-shell"
+      aside={
+        aiPanelOpen ? (
+          <AiPanelHost
+            pathname={pathname}
+            navEntries={navEntries}
+            onClose={() => setAiPanelOpen(false)}
+            {...(onNavigate ? { onNavigate } : {})}
+            {...(eventApi ? { eventApi } : {})}
+          />
+        ) : undefined
+      }
+    >
       {children}
       {authed ? (
         <CommandPalette commands={paletteCommands} {...(contentSearch ? { contentSearch } : {})} />
