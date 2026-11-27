@@ -36,7 +36,7 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     setError(null);
     try {
       await api.auth.passwordLogin(email.trim(), password);
-      globalThis.location.assign(redirectPath);
+      globalThis.location.replace(redirectPath);
     } catch (e) {
       setBusy(false);
       setError(messageFor(e, "メールアドレスまたはパスワードが正しくありません。"));
@@ -51,7 +51,7 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     setHint(null);
     const out = await signInWithPasskey(api);
     if (out.ok) {
-      globalThis.location.assign(redirectPath);
+      globalThis.location.replace(redirectPath);
       return;
     }
     setBusy(false);
@@ -81,7 +81,7 @@ export function LoginScreen({ api, redirectPath = "/" }: { api: ApiClient; redir
     setError(null);
     try {
       await api.auth.demoLogin();
-      globalThis.location.assign(redirectPath);
+      globalThis.location.replace(redirectPath);
     } catch (e) {
       setBusy(false);
       setError(messageFor(e, "デモログインに失敗しました。"));
