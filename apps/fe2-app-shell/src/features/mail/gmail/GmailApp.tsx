@@ -105,15 +105,16 @@ function SearchBar({ narrow, onOpenNav, filtersOpen, onToggleFilters }: { narrow
           maxWidth: 720,
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: narrow ? 6 : 12,
           height: 44,
-          padding: "0 16px",
+          // Phones: tighter insets so the placeholder fits beside the 絞り込み button.
+          padding: narrow ? "0 8px" : "0 16px",
           borderRadius: "var(--dub-radius-lg)",
           background: "var(--dub-color-surface-sunken)",
           border: "1px solid transparent",
         }}
       >
-        <MailIcon name="search" size={20} style={{ color: "var(--dub-color-text-muted)" }} />
+        <MailIcon name="search" size={narrow ? 18 : 20} style={{ color: "var(--dub-color-text-muted)", flexShrink: 0 }} />
         <input
           ref={ref}
           data-testid="fe2-mail-search"

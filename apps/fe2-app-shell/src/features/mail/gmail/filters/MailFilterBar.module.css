@@ -53,6 +53,11 @@
 .rangeSep {
   color: var(--dub-color-text-muted);
 }
+/* @dub/ui DatePicker draws its own icon; keep Chromium's native one clickable but invisible. */
+.range input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  cursor: pointer;
+}
 
 .active {
   display: flex;
@@ -102,6 +107,10 @@
   .range > :not(.rangeSep) {
     flex: 1;
     width: auto;
+  }
+  /* Phones: narrower side padding so the search placeholder isn't cut (beats Button's own size rule). */
+  .toggle.toggle[data-size] {
+    padding-inline: var(--dub-space-2);
   }
 }
 
