@@ -93,6 +93,36 @@ describe("ResendSuppressionsClient", () => {
   });
 });
 
+/** Like Workers' native fetch: throws "Illegal invocation" unless called with this = globalThis/undefined. */
+function stubStrictThisFetch(inner: (url: string, init?: RequestInit) => Promise<Response>) {
+  const strict = function (this: unknown, url: string, init?: RequestInit) {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation: function called with incorrect `this` reference");
+    return inner(url, init);
+  };
+  vi.stubGlobal("fetch", strict);
+}
+
+describe("default fetch (no fetchImpl injected)", () => {
+  it("the cron sweep reaches Resend without Illegal invocation (prod 2026-11-28)", async () => {
+    const { fake, store } = stubUpstreams({ suppressed: [raw("member@developershub.jp")], ruleAddrs: ["member@developershub.jp"] });
+    stubStrictThisFetch(fake);
+    const { env } = resendEnv({ MAIL_SUPPRESSION_AUTOHEAL: "true" } as Partial<Env>);
+    const out = await sweepSuppressions(env, createDbClient(env.DB, { namespace: "mail" }), NOW);
+    expect(out).toMatchObject({ enabled: true, error: null, removed: ["member@developershub.jp"] });
+    expect(store).toHaveLength(0);
+  });
+
+  it("a transport failure keeps the original error message", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("network down");
+    });
+    await expect(new ResendSuppressionsClient("k").list()).rejects.toMatchObject({
+      code: "MAIL_PROVIDER_UNAVAILABLE",
+      message: expect.stringContaining("TypeError: network down"),
+    });
+  });
+});
+
 describe("pickRemovable", () => {
   const s = (email: string, over: Partial<Suppression> = {}): Suppression => ({ id: `sup_${email}`, email, origin: "bounce", sourceId: null, createdAt: OLD, ...over });
   const views = annotate(
