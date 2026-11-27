@@ -192,6 +192,8 @@ export const LP: AreaSpec = {
     { service: S, route: "POST /lp/sponsor-inquiries/notify" },
     { service: S, route: "GET /lp/sponsor-inquiries/items" },
     { service: S, route: "PATCH /lp/sponsor-inquiries/items/:id" },
+    // 「詳しい分析」(/lp/insights) も未開放。
+    { service: S, route: "GET /lp/insights" },
   ],
   ownerOpenedIrreversible: {
     "lp.links.create": "削除 API が無く発行した URL は一覧に残り同じ値も再発行できないが、停止はできる。オーナーが「流入 URL の発行」を名指しで開放",
