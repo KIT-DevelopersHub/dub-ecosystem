@@ -77,7 +77,7 @@ api-gateway が全 `/api/v1/*` にレート制限を掛ける。外部契約は 
 |---|---|
 | gateway 500 / bind エラー | gateway ログの request-id → どの `SVC_*` bind か。bind 先 Worker の liveness と、`service=` 名と `name=` 一致（deploy runbook 事前チェック）を確認 |
 | ログインできない | auth-service `/health`、Google OAuth secret の投入状況、`REDIRECT_ALLOWLIST`/`COOKIE_DOMAIN` の env 値 |
-| メールが飛ばない・届かない・画面が開かない | [10-mail-incident.md](./10-mail-incident.md)。mail-gateway `/internal/health/ready`（503 なら provider secret 未結線）→ `/health/quota` |
+| メールが飛ばない・届かない・画面が開かない | [12-mail-incident.md](./12-mail-incident.md)。mail-gateway `/internal/health/ready`（503 なら provider secret 未結線）→ `/health/quota` |
 | 通知が来ない | notification `/internal/health` と Queue consumer（`dub-q-evt-notification` / DLQ 滞留）を確認 |
 | Queue 滞留 / 再試行地獄 | 対象 DLQ（`*-dlq`）のメッセージ有無。consumer 側 Worker のログを request-id で追う |
 | DB エラー | D1 `dub-core` の migration 台帳（`wrangler d1 migrations list`）と、名前空間所有（`infra/d1/src/registry.ts`）の整合 |

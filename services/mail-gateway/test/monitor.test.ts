@@ -91,7 +91,7 @@ describe("recordCheck (dedupe + retry)", () => {
     expect(alerter.msgs.map((m) => m.notice)).toEqual(["alert", "recovered"]);
     const start = new Date(T0).toISOString();
     expect(alerter.msgs.map((m) => m.dedupKey)).toEqual([`mail-monitor:api:${start}:alert`, `mail-monitor:api:${start}:recovered`]);
-    expect(alerter.msgs[0]!.body).toContain("docs/runbooks/10-mail-incident.md");
+    expect(alerter.msgs[0]!.body).toContain("docs/runbooks/12-mail-incident.md");
 
     // a second incident gets its own key
     await recordCheck(deps, "api", { ok: false, detail: "x" }, T0 + 90 * MIN);

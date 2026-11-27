@@ -363,7 +363,7 @@ Resend は宛先が Suppressions（送信停止リスト）に載っていると
 ## 3.8 メールの本番監視とアラート（#898・`src/monitor.ts`）
 
 canary（3.6）の結果と、追加の確認をまとめて「1 障害につき 1 回の通知・直ったら復旧の通知」にする。
-止まった時の手順は [docs/runbooks/10-mail-incident.md](../../docs/runbooks/10-mail-incident.md)。
+止まった時の手順は [docs/runbooks/12-mail-incident.md](../../docs/runbooks/12-mail-incident.md)。
 
 | 確認 | 中身 | 間隔 |
 |---|---|---|

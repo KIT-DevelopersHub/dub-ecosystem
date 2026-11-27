@@ -96,7 +96,7 @@ MAIL_CANARY_DEADLINE_MIN = "10"
 # メンバーの送信失敗を確認し、2 回続けて失敗したらアプリ内通知（管理者向け・スマホ通知も）+
 # Slack（MAIL_ALERT_SLACK_WEBHOOK_URL を secret で入れた時だけ）に 1 回だけ知らせ、直ったら「復旧」を送る。
 # 先に migration infra/d1/migrations/mail/0029_mail_monitor_state.sql を dub-core に適用すること。
-# 手順: docs/runbooks/10-mail-incident.md
+# 手順: docs/runbooks/12-mail-incident.md
 MAIL_MONITOR_ENABLED = "true"
 MAIL_MONITOR_INTERVAL_MIN = "15"
 # 一覧/スレッド API を試す名簿ユーザー（mail:read + mail:read_all を持つ管理者）。未設定なら API 確認は止まる。
