@@ -138,12 +138,12 @@ test("(c) 運営 回答一覧 lists submitted 参加届 and opens a detail drawe
 });
 
 // SPA in-app navigation to the 組織図 (full page.goto would re-seed the in-memory demo
-// store and drop the resolve mutation). Opens the app-launcher → members → 組織図 (subnav tab).
+// store and drop the resolve mutation). Opens the app-launcher → members → 組織図 (view switch).
 async function gotoMembersOrgInApp(page: import("@playwright/test").Page): Promise<void> {
   await page.getByTestId("fe2-app-launcher-trigger").click();
   await page.getByTestId("fe2-app-launcher-item-members").click();
   await expect(page.getByTestId("members-page")).toBeVisible();
-  await page.getByTestId("member-roster-subnav-tab-org-chart").click();
+  await page.getByTestId("members-view-switch-org-chart").click();
   await expect(page.getByTestId("members-orgchart")).toBeVisible();
 }
 

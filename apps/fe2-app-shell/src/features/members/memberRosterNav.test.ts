@@ -1,20 +1,25 @@
 // 統合アプリ「運営メンバー・名簿」共有サブナビの active 判定（最長前方一致）。
 import { describe, expect, it } from "vitest";
-import { activeSectionId } from "./MemberRosterNav.tsx";
+import { activeMembersView, activeSectionId } from "./MemberRosterNav.tsx";
 
 describe("activeSectionId", () => {
   it("maps each section root path to its id", () => {
     expect(activeSectionId("/members")).toBe("members");
-    expect(activeSectionId("/members/org-chart")).toBe("org-chart");
-    expect(activeSectionId("/members/roster")).toBe("member-roster");
     expect(activeSectionId("/admin/users")).toBe("roster");
   });
 
   it("keeps the parent tab highlighted on deeper sub-routes", () => {
     expect(activeSectionId("/admin/users/usr_123")).toBe("roster");
-    // /members は運営メンバー、/members/roster は運営名簿（最長一致で運営名簿が勝つ）
-    expect(activeSectionId("/members/roster")).toBe("member-roster");
-    expect(activeSectionId("/members")).toBe("members");
+  });
+
+  it("keeps チーム別 / 一覧表 / 組織図 under the one 運営メンバー tab (#901)", () => {
+    expect(activeSectionId("/members/roster")).toBe("members");
+    expect(activeSectionId("/members/org-chart")).toBe("members");
+    expect(activeMembersView("/members")).toBe("teams");
+    expect(activeMembersView("/members/roster")).toBe("table");
+    expect(activeMembersView("/members/org-chart")).toBe("org-chart");
+    expect(activeMembersView("/admin/users")).toBeNull();
+    expect(activeMembersView("/members-foo")).toBeNull();
   });
 
   it("does not surface ロール管理 / 変更履歴 in the roster subnav (own tile / removed)", () => {

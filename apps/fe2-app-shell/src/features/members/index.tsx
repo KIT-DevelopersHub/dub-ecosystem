@@ -5,7 +5,7 @@ export { MembersProvider, MembersApiProvider, useMembersApi } from "./MembersPro
 export { MembersPage } from "./MembersPage.tsx";
 export { MemberRosterPage } from "./MemberRosterPage.tsx";
 export { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
-export { MemberRosterSubnav, activeSectionId } from "./MemberRosterNav.tsx";
+export { MemberRosterSubnav, activeSectionId, activeMembersView } from "./MemberRosterNav.tsx";
 export { MemberStatusBadge } from "./MemberStatusBadge.tsx";
 export { MEMBER_STATUS_LABEL, statusLabel, statusTone, statusGroup } from "./memberStatus.ts";
 export { membersRoutes, membersNav } from "./module.tsx";

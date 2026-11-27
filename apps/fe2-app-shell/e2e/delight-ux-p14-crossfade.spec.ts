@@ -21,9 +21,9 @@ test.describe("P14 — app-switch crossfade", () => {
     });
     await page.screenshot({ path: shot("p14-01-members-tab.png") });
 
-    // In-app SPA sub-navigation (運営メンバー -> 運営名簿, same "members" app segment) must
+    // In-app SPA sub-navigation (チーム別 -> 一覧表, same "members" app segment) must
     // NOT remount the crossfade wrapper — the stamped marker survives.
-    await page.getByTestId("member-roster-subnav").getByRole("tab", { name: "運営名簿" }).click();
+    await page.getByTestId("members-view-switch-table").click();
     await expect(page.getByTestId("member-roster-app")).toBeVisible();
     const probeAfterTab = await page.evaluate(
       () => (document.querySelector('[data-testid="fe2-app-fade"]') as HTMLElement)?.dataset.probe,

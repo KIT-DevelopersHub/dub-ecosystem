@@ -92,9 +92,21 @@
 /* 統合アプリ「運営メンバー・名簿」の共有サブナビ帯（運営メンバー/名簿/ロール/
    アドレス/履歴 を横断）。ページ見出しの上に薄い区切りとして敷く。 */
 .rosterSubnav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2) var(--dub-space-4);
   border-bottom: 1px solid var(--dub-color-border-default);
-  margin-bottom: var(--dub-space-4);
+  margin-bottom: var(--dub-space-5);
+}
+.rosterSubnavTabs {
+  min-width: 0;
   overflow-x: auto;
+}
+/* 運営メンバータブの表示切り替え（チーム別 / 一覧表 / 組織図）。狭い幅ではタブの下へ折り返す。 */
+.rosterViewSwitch {
+  padding-bottom: var(--dub-space-2);
 }
 
 /* タブ下本体の読み込み中スケルトン。バー(rosterSubnav)は残したまま、この領域だけが

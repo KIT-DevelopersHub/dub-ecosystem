@@ -1,6 +1,6 @@
-// 組織図 — 統合アプリ「運営メンバー・名簿」の上タブの1つ（/members/org-chart）。
-// 以前は 運営メンバー画面の内側タブ（チーム別 / 組織図）だったが、タブが二段で分かりにくい
-// ため共有サブナビへ昇格した。表示専用（編集は 運営メンバー 画面）。印刷 / PNG はここに残す。
+// 組織図 — 運営メンバータブの表示切り替えの1つ（/members/org-chart・#901）。
+// 同じ人たちを チーム別 / 一覧表 / 組織図 で見せ分ける。切り替えは共有サブナビ(MemberRosterNav)
+// の右側。表示専用（編集は チーム別 / 一覧表）。印刷 / PNG はここに残す。
 import { Button, PageHeader, SkeletonLoader, ErrorState } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useScopedOverview } from "./hooks.ts";
