@@ -117,3 +117,23 @@ describe("GET /members/me/mention-teams (チーム名の解決 + 自分の所属
     expect((await call(app, "GET", "/members/me/mention-teams", { userId: null })).status).toBe(401);
   });
 });
+
+describe("GET /members/internal/team-names", () => {
+  it("returns the names of the asked teams only (unknown ids left out)", async () => {
+    const app = createApp(makeDeps());
+    const { hq, corp } = await seedTeamWithPeople(app);
+    const res = await call(app, "GET", `/members/internal/team-names?teamIds=${hq},team_unknown`, { internal: true });
+    expect(res.status).toBe(200);
+    expect(res.json.teams).toEqual([{ id: hq, name: "統括チーム" }]);
+    const both = await call(app, "GET", `/members/internal/team-names?teamIds=${hq},${corp}`, { internal: true });
+    expect((both.json.teams as { name: string }[]).map((t) => t.name).sort()).toEqual(["法人チーム", "統括チーム"].sort());
+    const none = await call(app, "GET", "/members/internal/team-names", { internal: true });
+    expect(none.json.teams).toEqual([]);
+  });
+
+  it("is internal only", async () => {
+    const app = createApp(makeDeps());
+    const res = await call(app, "GET", "/members/internal/team-names?teamIds=x");
+    expect(res.status).toBe(403);
+  });
+});

@@ -125,6 +125,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.listTeamIdentityUserIds(teamIds, { excludeDeclined }));
   });
 
+  // チーム名 (mail-gateway → member-service, s2s のみ)。チームのメーリングリストを差出人にした時の
+  // 表示名と署名に使う。?teamIds=a,b -> { teams: [{ id, name }] }。
+  app.get("/members/internal/team-names", async (c) => {
+    const teamIds = (c.req.query("teamIds") ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+    return c.json(await svc.listTeamNames(teamIds));
+  });
+
   // 名簿の Gmail 逆引き (drive-share-service → member-service, s2s のみ). カレンダー > ミーティングの
   // 招待先を「名簿の Gmail、無ければ Dub のログインメール」で決めるため。body { userIds } ->
   // { items: [{ userId, gmail, name }] } (リンク済みの行だけ)。
