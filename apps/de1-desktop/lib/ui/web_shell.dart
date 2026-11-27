@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
 import '../feature_registry.dart';
+import '../mobile/back_policy.dart';
 import '../mobile/download_bridge.dart';
 import '../mobile/file_saver.dart';
 import '../mobile/link_policy.dart';
@@ -333,7 +334,8 @@ class _WebShellState extends ConsumerState<WebShell> {
   /// Handle an Android back gesture/button that the framework did *not* pop.
   ///
   /// Browser-parity: if the WebView has back history, go back inside the SPA
-  /// (like a browser's back button); otherwise let the app exit.
+  /// (like a browser's back button), skipping `/login` (see [backSteps]);
+  /// otherwise let the app exit.
   Future<void> _onPopInvoked(bool didPop, Object? result) async {
     if (didPop) return;
     // A native card (autofill prompt / settings) is open: close it first.
@@ -342,9 +344,15 @@ class _WebShellState extends ConsumerState<WebShell> {
       return;
     }
     final controller = _controller;
-    if (controller != null && await controller.canGoBack()) {
-      await controller.goBack();
-      return;
+    if (controller != null) {
+      final list = await controller.getCopyBackForwardList();
+      final items = list?.list ?? const [];
+      final steps = backSteps([for (final i in items) i.url],
+          list?.currentIndex ?? items.length - 1);
+      if (steps != null) {
+        await controller.goBackOrForward(steps: steps);
+        return;
+      }
     }
     await SystemNavigator.pop();
   }
