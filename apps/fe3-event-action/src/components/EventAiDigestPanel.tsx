@@ -103,7 +103,7 @@ function Discrepancies({ items }: { items: event.EventDigestDiscrepancy[] }) {
   );
 }
 
-function AskBox({ eventId, stopped }: { eventId: string; stopped: "disabled" | "offline" | null }) {
+function AskBox({ eventId, stopped }: { eventId: string; stopped: Stopped }) {
   const [q, setQ] = useState("");
   const ask = useAskEvent(eventId);
   const res = ask.data;
@@ -161,21 +161,92 @@ function AskBox({ eventId, stopped }: { eventId: string; stopped: "disabled" | "
   );
 }
 
+type Stopped = "disabled" | "offline" | null;
+
+function stoppedOf(data: event.GetEventDigestResponse | undefined): Stopped {
+  if (!data) return null;
+  if (!data.enabled) return "disabled";
+  return data.provider.status === "offline" ? "offline" : null;
+}
+
+// The read-only digest (preview while AI is OFF / the AI digest once ON). Shared by the event
+// home panel and the shell's AI side panel; `idPrefix` keeps their testids apart.
+function DigestBody({
+  data,
+  canRun,
+  idPrefix,
+}: {
+  data: event.GetEventDigestResponse | undefined;
+  canRun: boolean;
+  idPrefix: string;
+}) {
+  const stopped = stoppedOf(data);
+  const digest = data?.digest ?? null;
+  const preview = !digest && stopped === "disabled" ? (data?.preview ?? null) : null;
+  const hasPreview = preview !== null && (preview.lines.length > 0 || preview.discrepancies.length > 0);
+  return (
+    <>
+      {stopped === "offline" ? <StoppedNotice reason={stopped} /> : null}
+      {hasPreview && preview ? (
+        <>
+          <Discrepancies items={preview.discrepancies} />
+          {preview.lines.length > 0 ? <CitedLines lines={preview.lines} testId={`${idPrefix}-preview-lines`} /> : null}
+          <div className={styles.aiMeta} data-testid={`${idPrefix}-preview-meta`}>
+            {formatDateTime(preview.collectedAt)} 時点でイベントから集めた情報です。AI による要約は
+            {AI_UNAVAILABLE_MESSAGE}
+          </div>
+        </>
+      ) : stopped === "disabled" ? (
+        <ComingSoonNotice testId={`${idPrefix}-digest-coming-soon`} prefix="AI のまとめは" />
+      ) : null}
+      {digest ? (
+        <>
+          <Discrepancies items={digest.discrepancies} />
+          {digest.lines.length > 0 ? (
+            <CitedLines lines={digest.lines} testId={`${idPrefix}-lines`} />
+          ) : (
+            <div className={styles.sectionEmpty}>まとめる内容がありませんでした。</div>
+          )}
+          <div className={styles.aiMeta}>
+            {formatDateTime(digest.generatedAt)} に作成（{digest.trigger === "manual" ? "手動" : "定期"}・{digest.model}）
+          </div>
+        </>
+      ) : stopped ? null : (
+        <div className={styles.sectionEmpty}>
+          まだまとめがありません。{canRun ? "「今すぐ要約」で作れます。" : "管理者が作るまでお待ちください。"}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 「AI のまとめ」の中身だけ (今すぐ要約・質問欄なし)。シェルの AI パネルが使う。 */
+export function EventAiDigestSummary({ eventId, idPrefix = "fe3-ai-summary" }: { eventId: string; idPrefix?: string }) {
+  const q = useEventDigestQuery(eventId);
+  return (
+    <section className={styles.aiSummary} aria-label="AI のまとめ" data-testid={idPrefix}>
+      <div className={styles.aiSummaryHead}>
+        <Icon name="info" />
+        <span>AI のまとめ</span>
+      </div>
+      {q.isLoading ? (
+        <SkeletonLoader lines={4} testId={`${idPrefix}-skeleton`} />
+      ) : q.isError ? (
+        <div className={styles.errorText}>{normalizeError(q.error).message}</div>
+      ) : (
+        <DigestBody data={q.data} canRun={false} idPrefix={idPrefix} />
+      )}
+    </section>
+  );
+}
+
 export function EventAiDigestPanel({ eventId, canRun }: { eventId: string; canRun: boolean }) {
   const q = useEventDigestQuery(eventId);
   const run = useRunEventDigest(eventId);
 
   const data = q.data;
-  const stopped: "disabled" | "offline" | null = !data
-    ? null
-    : !data.enabled
-      ? "disabled"
-      : data.provider.status === "offline"
-        ? "offline"
-        : null;
+  const stopped = stoppedOf(data);
   const digest = data?.digest ?? null;
-  const preview = !digest && stopped === "disabled" ? (data?.preview ?? null) : null;
-  const hasPreview = preview !== null && (preview.lines.length > 0 || preview.discrepancies.length > 0);
 
   return (
     <section className={`${styles.section} ${styles.aiPanel}`} data-testid="fe3-ai-digest">
@@ -203,36 +274,7 @@ export function EventAiDigestPanel({ eventId, canRun }: { eventId: string; canRu
         <div className={styles.errorText}>{normalizeError(q.error).message}</div>
       ) : (
         <>
-          {stopped === "offline" ? <StoppedNotice reason={stopped} /> : null}
-          {hasPreview && preview ? (
-            <>
-              <Discrepancies items={preview.discrepancies} />
-              {preview.lines.length > 0 ? <CitedLines lines={preview.lines} testId="fe3-ai-preview-lines" /> : null}
-              <div className={styles.aiMeta} data-testid="fe3-ai-preview-meta">
-                {formatDateTime(preview.collectedAt)} 時点でイベントから集めた情報です。AI による要約は
-                {AI_UNAVAILABLE_MESSAGE}
-              </div>
-            </>
-          ) : stopped === "disabled" ? (
-            <ComingSoonNotice testId="fe3-ai-digest-coming-soon" prefix="AI のまとめは" />
-          ) : null}
-          {digest ? (
-            <>
-              <Discrepancies items={digest.discrepancies} />
-              {digest.lines.length > 0 ? (
-                <CitedLines lines={digest.lines} testId="fe3-ai-lines" />
-              ) : (
-                <div className={styles.sectionEmpty}>まとめる内容がありませんでした。</div>
-              )}
-              <div className={styles.aiMeta}>
-                {formatDateTime(digest.generatedAt)} に作成（{digest.trigger === "manual" ? "手動" : "定期"}・{digest.model}）
-              </div>
-            </>
-          ) : stopped ? null : (
-            <div className={styles.sectionEmpty}>
-              まだまとめがありません。{canRun ? "「今すぐ要約」で作れます。" : "管理者が作るまでお待ちください。"}
-            </div>
-          )}
+          <DigestBody data={data} canRun={canRun} idPrefix="fe3-ai" />
           <AskBox eventId={eventId} stopped={stopped} />
         </>
       )}

@@ -55,6 +55,7 @@ import { LpTicketFieldsCard } from "./LpTicketFields.tsx";
 import { LpTicketCouponsCard, LpTicketCouponsLockedCard } from "./LpTicketCoupons.tsx";
 import { LpTabs } from "./LpTabs.tsx";
 import { LpConfigLink } from "./LpConfigLink.tsx";
+import { LpHelp, LpTitleWithHelp } from "./LpHelp.tsx";
 import styles from "./lp.module.css";
 
 export function LpTicketsScreen(): JSX.Element {
@@ -88,8 +89,8 @@ export function LpTicketsScreen(): JSX.Element {
       <Stack gap={6}>
         <SalesStatusCard state={state} />
         <div className={styles.kpiGrid}>
-          <SummaryTile testId="fe2-lp-tickets-sold" label="販売数" value={`${state.totals.sold.toLocaleString("ja-JP")} 枚`} hint="支払い済みの枚数（無料券を含む・1 回で複数枚の購入あり）" />
-          <SummaryTile testId="fe2-lp-tickets-revenue" label="売上" value={formatYen(state.totals.revenueJpy)} hint="支払い済みの合計（税込）" />
+          <SummaryTile testId="fe2-lp-tickets-sold" label="販売数" value={`${state.totals.sold.toLocaleString("ja-JP")} 枚`} hint="支払い済み・無料券を含む" />
+          <SummaryTile testId="fe2-lp-tickets-revenue" label="売上" value={formatYen(state.totals.revenueJpy)} hint="支払い済み・税込" />
         </div>
         <LpTicketTypesCard types={state.types} canEdit={canEdit} />
         {canToggle ? <LpTicketCouponsCard types={state.types} /> : canEdit ? <LpTicketCouponsLockedCard /> : null}
@@ -104,7 +105,7 @@ export function LpTicketsScreen(): JSX.Element {
       <PageHeader
         testId="fe2-lp-tickets-header"
         title="LP管理"
-        description="LP のチケット購入ページの販売状態・券種・入力項目を設定し、売れ行きと購入者を確認します。"
+        description="チケットの販売状況・券種・購入者を管理します。"
       />
       <LpTabs active="tickets" />
       {body}
@@ -131,7 +132,25 @@ function SalesStatusCard({ state }: { state: LpTicketsState }): JSX.Element {
       ? { tone: "warning" as const, label: "販売の公開待ち" }
       : { tone: "neutral" as const, label: "元の表示" };
   return (
-    <Card testId="fe2-lp-tickets-status" header={<span className={styles.sectionTitle}>チケット販売</span>}>
+    <Card
+      testId="fe2-lp-tickets-status"
+      header={
+        <LpTitleWithHelp
+          title="チケット販売"
+          titleClassName={styles.sectionTitle}
+          help={
+            <LpHelp label="チケット販売の説明" testId="fe2-lp-tickets-status-help">
+              <ul>
+                <li data-testid="fe2-lp-tickets-enabled-hint">
+                  販売の公開/停止と「参加登録」ボタンの差し替えは「公開設定」タブの本番でまとめて切り替えます（lp:publish 権限が必要）。
+                </li>
+                <li>決済（Stripe）が未設定の間は有料券を購入できません。無料券はクーポンコードで申し込めます。</li>
+              </ul>
+            </LpHelp>
+          }
+        />
+      }
+    >
       <Stack gap={5}>
         <div className={styles.statusRow}>
           <span className={styles.kpiLabel}>販売</span>
@@ -144,9 +163,6 @@ function SalesStatusCard({ state }: { state: LpTicketsState }): JSX.Element {
           </Badge>
           <LpConfigLink testId="fe2-lp-tickets-config-link" />
         </div>
-        <span className={styles.note} data-testid="fe2-lp-tickets-enabled-hint">
-          販売の公開/停止と「参加登録」ボタンの差し替えは「公開設定」タブの本番でまとめて切り替えます（lp:publish 権限が必要）。
-        </span>
         <div className={styles.statusRow}>
           <span className={styles.kpiLabel}>購入ページ</span>
           <a
@@ -166,8 +182,8 @@ function SalesStatusCard({ state }: { state: LpTicketsState }): JSX.Element {
             {state.paymentReady ? "Stripe 接続済み" : "決済 未設定"}
           </Badge>
           {!state.paymentReady ? (
-            <span className={styles.note}>
-              Stripe の鍵を登録するまで有料のチケットは購入できません（無料のチケットはクーポンコードで申し込めます）。
+            <span className={styles.note} data-testid="fe2-lp-tickets-payment-unset">
+              有料券は購入できません
             </span>
           ) : (
             <span className={styles.note} data-testid="fe2-lp-tickets-payment-methods">

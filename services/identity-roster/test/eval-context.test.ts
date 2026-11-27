@@ -90,8 +90,38 @@ for (const [name, make] of [["mem", () => ({ repo: new MemIdentityRepo() as Iden
       expect((await svc.effectivePermissions("u_a", ORG)).permissions.sort()).toEqual(["mail:read", "mail:send"]);
       expect((await svc.effectivePermissions("u_off", ORG)).permissions).toEqual([]);
     });
+
+    it("getRolesByIds narrowed to onlyPermissions keeps every role but only the asked keys", async () => {
+      const { repo } = make();
+      await seed(repo);
+      const byId = async (only: string[]) =>
+        Object.fromEntries((await repo.getRolesByIds(["r_mail", "r_empty", "r_all"], only)).map((r) => [r.id, [...r.permissions].sort()]));
+      expect(await byId(["mail:send", "identity:read"])).toEqual({ r_mail: ["mail:send"], r_empty: [], r_all: [] });
+      expect(await byId([])).toEqual({ r_mail: [], r_empty: [], r_all: [] });
+    });
+
+    it("the in-process gate's narrowed read equals effectivePermissions ∩ keys", async () => {
+      const { repo } = make();
+      await seed(repo);
+      const svc = svcOver(repo);
+      const keys = ["mail:send", "mail:read_all", "identity:read"];
+      expect((await svc.heldOrgWidePermissions("u_a", ORG, keys)).sort()).toEqual(["mail:send"]);
+      expect(await svc.heldOrgWidePermissions("u_off", ORG, keys)).toEqual([]);
+    });
   });
 }
+
+describe("narrowed role read (d1)", () => {
+  it("authz/check binds only the asked keys into the role read", async () => {
+    const { repo, queries } = d1Repo();
+    await seed(repo);
+    const svc = svcOver(repo);
+    queries.length = 0;
+    expect(await allowed(svc, "u_a", [{ permission: "mail:send" } as identity.AuthzQuery])).toEqual([true]);
+    const roleRead = queries.find((q) => q.includes("LEFT JOIN identity_role_permissions"));
+    expect(roleRead).toContain("rp.permission_key IN (?)");
+  });
+});
 
 describe("eval context query count (d1)", () => {
   it("loads user + assignments + all roles in 3 queries regardless of role count", async () => {

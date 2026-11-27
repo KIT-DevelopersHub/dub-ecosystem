@@ -32,6 +32,11 @@ export interface SendDeps {
   audit: AuditEnv;
   orgId: string;
   fromAddress: string;
+  /** Display name for the From header (共用アドレス, 0027). Absent/null = the bare address. */
+  fromName?: string | null;
+  /** Shared address this send goes out as (共用アドレス, 0027), stored on the send log so the
+   *  recipient's reply also reaches the sender. Absent/null = not a shared-mailbox send. */
+  sharedMailbox?: string | null;
   ctx: RequestContext;
   /** Owner (Sent-folder account scope): the user who composed the send, or null for a
    *  pure system/automation send with no human on the call. Persisted on the send-log so

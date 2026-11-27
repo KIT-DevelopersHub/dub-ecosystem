@@ -21,6 +21,7 @@ export default defineConfig({
         pkg("@dub/http"),
         pkg("@dub/db"),
         pkg("@dub/events"),
+        pkg("@dub/freeq"),
         pkg("@dub/auth-client"),
         pkg("@dub/policy-gate"),
         pkg("@dub/gantt-calc"),

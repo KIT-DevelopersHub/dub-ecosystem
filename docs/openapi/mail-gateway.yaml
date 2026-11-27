@@ -376,7 +376,7 @@ paths:
       summary: Issue a receiving address (rule → mail Worker) and send a confirmation mail
       tags:
         - mail
-      description: 'Requires mail:admin. Creates a zone routing rule forwarding localPart@developershub.jp to the mail Worker, then sends a confirmation mail to the new address (best-effort; confirmationEmailSent reflects the outcome). Audited (mail.email_routing.address.issue). 409 when the address is already issued.'
+      description: 'Requires mail:admin. Creates a zone routing rule forwarding localPart@developershub.jp to the mail Worker, then queues a confirmation mail to the new address, sent by the cron after MAIL_ISSUE_CONFIRM_DELAY_MIN (default 5) so it cannot beat the new rule to the MX and hard-bounce (best-effort; confirmationEmailSent = queued). A Resend suppression left over from an earlier bounce of the same address is cleared (suppressionCleared). Audited (mail.email_routing.address.issue). 409 when the address is already issued.'
       requestBody:
         required: true
         content:
@@ -550,6 +550,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmailRoutingAddress'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+  /admin/email-routing/suppressions:
+    get:
+      operationId: listMailSuppressions
+      summary: List the Resend suppression list (addresses Resend silently drops)
+      tags:
+        - mail
+      description: 'Requires mail:admin. Proxies Resend GET /suppressions. Own-zone addresses carry receivingRuleEnabled (an enabled Email Routing receiving rule exists now, so the bounce cause is gone). 503 MAIL_SUPPRESSIONS_UNAVAILABLE when the provider is not Resend, RESEND_API_KEY is unset, or the account has no Suppressions API.'
+      responses:
+        '200':
+          description: Suppressions, sorted by address
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MailSuppression'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+        '503':
+          $ref: '#/components/responses/Unconfigured'
+  /admin/email-routing/suppressions/{email}:
+    delete:
+      operationId: removeMailSuppression
+      summary: Remove one address from the Resend suppression list
+      tags:
+        - mail
+      description: 'Requires mail:admin. Audited (mail.suppression.remove) and recorded in mail_provider_event (event_type dub.suppression_removed). removed=false when the address was not suppressed.'
+      parameters:
+        - name: email
+          in: path
+          required: true
+          schema:
+            type: string
+            format: email
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - email
+                  - removed
+                properties:
+                  email:
+                    type: string
+                    format: email
+                  removed:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -941,7 +1010,45 @@ components:
           description: ISO timestamp set on issue; empty on list (CF rules carry no created ts).
         confirmationEmailSent:
           type: boolean
-          description: Present on the issue (POST) response — whether the confirmation mail was accepted.
+          description: Present on the issue (POST) response — whether the confirmation mail was accepted (queued).
+        confirmationEmailScheduledAt:
+          type: string
+          nullable: true
+          description: Present on the issue (POST) response — when the queued confirmation mail goes out.
+        suppressionCleared:
+          type: boolean
+          nullable: true
+          description: Present on the issue (POST) response — true when a Resend suppression for the address was removed; false when none; null when not checked.
+    MailSuppression:
+      type: object
+      description: One Resend suppression-list entry (sends to it are dropped without an error).
+      required:
+        - id
+        - email
+        - origin
+        - internal
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        origin:
+          type: string
+          description: bounce | complaint | manual
+        sourceId:
+          type: string
+          nullable: true
+          description: Resend email id that triggered it (matches mail_send_log.provider_message_id).
+        createdAt:
+          type: string
+        internal:
+          type: boolean
+          description: Own zone (@developershub.jp).
+        receivingRuleEnabled:
+          type: boolean
+          nullable: true
+          description: Own zone only — an enabled receiving rule exists now. null when external or Email Routing is not configured.
     EmailRoutingAddress:
       type: object
       description: A Cloudflare Email Routing destination (forward-target) address.

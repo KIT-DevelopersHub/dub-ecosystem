@@ -36,6 +36,11 @@ export interface EmailAddressSelectProps {
   renderTokenIcon?: (token: EmailToken) => ReactNode;
   /** "boxed" (form field) | "flush" (borderless divider row). Default "boxed". */
   variant?: "boxed" | "flush";
+  /** Chips shown first that cannot be removed (e.g. the sender's own Cc). Not part of `value`;
+   *  a typed duplicate of one is not shown twice. */
+  lockedTokens?: EmailToken[];
+  /** Tooltip / accessible note on a locked chip. */
+  lockedHint?: string;
 }
 
 const matches = (t: EmailToken, q: string): boolean => {
@@ -57,6 +62,8 @@ export function EmailAddressSelect({
   removeIcon,
   renderTokenIcon,
   variant = "boxed",
+  lockedTokens,
+  lockedHint,
 }: EmailAddressSelectProps): JSX.Element {
   const { draft, setDraft, recipients, invalid, commit, remove, add } = useEmailAddressInput({
     value,
@@ -69,7 +76,8 @@ export function EmailAddressSelect({
   const composingRef = useRef(false);
 
   const invalidSet = useMemo(() => new Set(invalid.map((t) => t.trim())), [invalid]);
-  const selected = useMemo(() => new Set(recipients.map((r) => r.email)), [recipients]);
+  const lockedSet = useMemo(() => new Set((lockedTokens ?? []).map((t) => t.email.toLowerCase())), [lockedTokens]);
+  const selected = useMemo(() => new Set([...recipients.map((r) => r.email), ...lockedSet]), [recipients, lockedSet]);
   const suggestions = useMemo(() => {
     if (!candidates || draft.trim().length === 0) return [];
     const q = draft.trim();
@@ -111,7 +119,14 @@ export function EmailAddressSelect({
     <div className={styles.field} data-variant={variant} data-testid={testId ? `${testId}-field` : undefined}>
       {label != null ? <span className={styles.label}>{label}</span> : null}
 
-      {recipients.map((r) => (
+      {(lockedTokens ?? []).map((t) => (
+        <span key={`locked:${t.email}`} className={styles.chip} data-locked="true" data-has-icon={renderTokenIcon ? "true" : undefined} title={lockedHint} data-testid={testId ? `${testId}-locked` : undefined}>
+          {renderTokenIcon?.(t)}
+          {t.name ?? t.email}
+          {lockedHint ? <span className={styles.srOnly}>{lockedHint}</span> : null}
+        </span>
+      ))}
+      {recipients.filter((r) => !lockedSet.has(r.email.toLowerCase())).map((r) => (
         <span key={r.email} className={styles.chip} data-has-icon={renderTokenIcon ? "true" : undefined}>
           {renderTokenIcon?.(r)}
           {r.name ?? r.email}

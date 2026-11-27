@@ -67,6 +67,7 @@ export async function upsertSnapshot(db: DbClient, rows: readonly SnapshotRow[],
 
 /** When the latest snapshot was collected (MAX captured_at), or null if none ever was. */
 export async function readLatestCapturedAt(db: DbClient): Promise<string | null> {
+  // usage/0002 index on captured_at turns this MAX into a 1-row index probe (was a full scan).
   const row = await db.first<{ last: string | null }>(`SELECT MAX(captured_at) AS last FROM usage_snapshot`);
   return row?.last ?? null;
 }
@@ -99,17 +100,20 @@ export async function readLatestSnapshot(db: DbClient): Promise<SnapshotRow[]> {
     overflow_behavior: SnapshotRow["overflow_behavior"];
     status: SnapshotRow["status"];
   }>(
-    `SELECT provider, metric_key, label, used, limit_value, pct, unit, overflow_behavior, status
-       FROM usage_snapshot s
-      WHERE s.status != 'unknown'
-        AND s.capture_day = (
-          SELECT MAX(s2.capture_day)
-            FROM usage_snapshot s2
-           WHERE s2.provider = s.provider
-             AND s2.metric_key = s.metric_key
-             AND s2.status != 'unknown'
-             AND s2.capture_day >= date((SELECT MAX(capture_day) FROM usage_snapshot), '-${KNOWN_VALUE_LOOKBACK_DAYS} days')
-        )`,
+    // Per metric, the latest known day inside the lookback (one GROUP BY over the window via
+    // idx_usage_snapshot_day; the unary + keeps the planner off the (provider, metric_key, day)
+    // index, which would walk the whole table to avoid a sort), then one unique-index probe per metric for that day's row.
+    // Was a correlated MAX per outer row (~8 index rows each), ~2k rows read per call.
+    `SELECT s.provider, s.metric_key, s.label, s.used, s.limit_value, s.pct, s.unit, s.overflow_behavior, s.status
+       FROM (
+         SELECT provider, metric_key, MAX(capture_day) AS day
+           FROM usage_snapshot
+          WHERE status != 'unknown'
+            AND capture_day >= (SELECT date(MAX(capture_day), '-${KNOWN_VALUE_LOOKBACK_DAYS} days') FROM usage_snapshot)
+          GROUP BY +provider, +metric_key
+       ) b
+       JOIN usage_snapshot s
+         ON s.provider = b.provider AND s.metric_key = b.metric_key AND s.capture_day = b.day`,
   );
   return rows.map((r) => ({
     provider: r.provider,

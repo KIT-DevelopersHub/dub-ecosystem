@@ -38,6 +38,19 @@ export interface Env {
   // スポンサーのメール連携 (sponsor-sync.ts): 人が送った / 受け取ったメールを SVC_MEMBER に知らせる。
   // 既定 on。"off" で止める (メールの送受信には影響しない)。
   MAIL_SPONSOR_SYNC?: string;
+  // 本番のメール監視 (monitor.ts, #898)。"true" で有効 (migration 0029 が先)。
+  MAIL_MONITOR_ENABLED?: string;
+  MAIL_MONITOR_INTERVAL_MIN?: string; // 一覧API・送信失敗の確認間隔 (既定 15・5 の倍数)
+  MAIL_MONITOR_USER_ID?: string; // Workers Secret。一覧/スレッド API を試す名簿ユーザー (MAIL_CANARY_TO の持ち主・メール閲覧 + mail:read)。未設定なら API 確認なし
+  MAIL_MONITOR_SEND_ERROR_MIN?: string; // 直近1時間の送信失敗がこの件数以上かつ成功以上で失敗扱い (既定 3)
+  // Resend の送信停止リストの自動の戻し (resend-suppressions.ts)。"true" で有効。
+  // 自ゾーンで受信ルールが有効なアドレスの bounce 由来の登録だけを外す (同じアドレスは 7 日に 1 回)。
+  MAIL_SUPPRESSION_AUTOHEAL?: string;
+  // 発行確認メールを送るまでの待ち (分・既定 5)。Email Routing のルールが行き渡る前に送ると
+  // ハードバウンス → Resend の送信停止リスト入りになる。
+  MAIL_ISSUE_CONFIRM_DELAY_MIN?: string;
+  // Slack Incoming Webhook URL (Workers Secret)。未設定ならアプリ内通知 + audit のみ。
+  MAIL_ALERT_SLACK_WEBHOOK_URL?: string;
   // 新着メールの通知 (new-mail-notify.ts, SVC_NOTIFICATION)。既定 on。"off" で止める。
   MAIL_NEW_MAIL_NOTIFY?: string;
   // Every inbound mail is also forwarded (once per Message-ID) to this single address.

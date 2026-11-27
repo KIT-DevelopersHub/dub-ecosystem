@@ -196,6 +196,11 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const eventId = c.req.query("eventId");
     const assigneeId = c.req.query("assigneeId");
+    // #882: team assignees (comma list). With assigneeId the two OR together (me ∪ my teams).
+    const assigneeTeamIds = (c.req.queries("assigneeTeamId") ?? [])
+      .flatMap((s) => s.split(","))
+      .map((s) => s.trim())
+      .filter(Boolean);
     const teamId = c.req.query("teamId");
     const createdById = c.req.query("createdById");
     const includeArchived = c.req.query("includeArchived") === "true";
@@ -225,7 +230,8 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       const isSelf =
         principal.kind === "user" &&
         (assigneeId === principal.userId || createdById === principal.userId);
-      const isTeam = principal.kind === "user" && !!teamId;
+      // a team-assignee scope is a team scope too (shared grouping, not a per-person list).
+      const isTeam = principal.kind === "user" && (!!teamId || assigneeTeamIds.length > 0);
       const isPerson = principal.kind === "user" && !!(assigneeId || createdById);
       if (!isSelf && !isTeam && !isPerson) throw errors.validationFailed([{ field: "assigneeId", reason: "required" }]);
       if (!isSelf && !isTeam && !(await holdsKey(c, "identity:read"))) {
@@ -248,6 +254,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       limit: normalizeLimit(c.req.query("limit")),
       ...(eventId ? { eventId } : {}),
       ...(assigneeId ? { assigneeId } : {}),
+      ...(assigneeTeamIds.length > 0 ? { assigneeTeamIds } : {}),
       ...(teamId ? { teamId } : {}),
       ...(createdById ? { createdById } : {}),
       ...(statusRaw.length > 0 ? { statuses: statusRaw as task.TaskStatus[] } : {}),
@@ -276,6 +283,11 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     checkIso(body.dueAt, "dueAt", fe);
     if (body.assigneeId !== undefined && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
+    }
+    checkOptString(body.assigneeTeamId, "assigneeTeamId", fe);
+    // #882: 担当は人 XOR チーム。両方を同時に指定するのは矛盾なので 400。
+    if (body.assigneeId && body.assigneeTeamId) {
+      fe.push({ field: "assigneeTeamId", reason: "assignee_conflict", message: "assigneeId and assigneeTeamId are exclusive" });
     }
     checkOptString(body.teamId, "teamId", fe);
     checkOptString(body.parentTaskId, "parentTaskId", fe);
@@ -327,6 +339,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       status: "todo",
       priority: body.priority ?? "medium",
       assigneeId: body.assigneeId ?? null,
+      assigneeTeamId: body.assigneeTeamId ?? null,
       teamId: body.teamId ?? null,
       parentId: body.parentTaskId ?? null,
       wbs: body.wbs ?? null,
@@ -339,8 +352,16 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const evt = eventId ? { eventId } : {};
     const specs: EventSpec[] = [{ name: "task.created", payload: { taskId: id, ...evt } }];
-    if (created.assigneeId) {
-      specs.push({ name: "task.assigned", payload: { taskId: id, ...evt, assigneeId: created.assigneeId } });
+    if (created.assigneeId || created.assigneeTeamId) {
+      specs.push({
+        name: "task.assigned",
+        payload: {
+          taskId: id,
+          ...evt,
+          assigneeId: created.assigneeId,
+          ...(created.assigneeTeamId ? { assigneeTeamId: created.assigneeTeamId } : {}),
+        },
+      });
     }
     await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);
 
@@ -379,6 +400,10 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId !== undefined && body.assigneeId !== null && typeof body.assigneeId !== "string") {
       fe.push({ field: "assigneeId", reason: "invalid_type" });
     }
+    checkOptString(body.assigneeTeamId, "assigneeTeamId", fe);
+    if (body.assigneeId && body.assigneeTeamId) {
+      fe.push({ field: "assigneeTeamId", reason: "assignee_conflict", message: "assigneeId and assigneeTeamId are exclusive" });
+    }
     checkOptString(body.teamId, "teamId", fe);
     checkOptString(body.parentTaskId, "parentTaskId", fe);
     checkOptString(body.wbs, "wbs", fe);
@@ -388,9 +413,18 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (!current) throw taskErrors.notFound(id);
     if (body.version !== current.version) throw taskErrors.versionConflict();
 
+    // #882: 担当は人 XOR チーム。片方を非 null にしたら、もう片方は空にする。
+    const currentTeamAssignee = current.assigneeTeamId ?? null;
+    let nextAssigneeId = body.assigneeId !== undefined ? body.assigneeId : current.assigneeId;
+    let nextAssigneeTeamId = body.assigneeTeamId !== undefined ? body.assigneeTeamId : currentTeamAssignee;
+    if (body.assigneeId) nextAssigneeTeamId = null;
+    if (body.assigneeTeamId) nextAssigneeId = null;
+
     // origin=github protection (non-service principals cannot write protected fields).
     if (current.origin === "github" && !isServiceRole(principal)) {
       const violated: string[] = [];
+      // handing a github task to a team would clear its (protected) person assignee.
+      if (nextAssigneeId !== current.assigneeId && body.assigneeId === undefined) violated.push("assigneeId");
       if (body.title !== undefined && body.title !== current.title) violated.push("title");
       if (body.description !== undefined && body.description !== current.description) violated.push("description");
       if (body.status !== undefined && body.status !== current.status) violated.push("status");
@@ -406,8 +440,10 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (statusChanged) assertStatusTransition(current.status, body.status!);
 
     // assignee existence when set to a concrete user.
-    const assigneeChanged = body.assigneeId !== undefined && body.assigneeId !== current.assigneeId;
-    if (assigneeChanged && body.assigneeId) {
+    const personChanged = nextAssigneeId !== current.assigneeId;
+    const teamAssigneeChanged = nextAssigneeTeamId !== currentTeamAssignee;
+    const assigneeChanged = personChanged || teamAssigneeChanged;
+    if (personChanged && body.assigneeId) {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
     }
@@ -440,6 +476,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       status?: task.TaskStatus;
       priority?: task.TaskPriority;
       assigneeId?: common.UserId | null;
+      assigneeTeamId?: common.TeamId | null;
       teamId?: common.TeamId | null;
       parentId?: common.TaskId | null;
       wbs?: string | null;
@@ -450,7 +487,8 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.description !== undefined) patch.description = body.description;
     if (body.status !== undefined) patch.status = body.status;
     if (body.priority !== undefined) patch.priority = body.priority;
-    if (body.assigneeId !== undefined) patch.assigneeId = body.assigneeId;
+    if (personChanged || body.assigneeId !== undefined) patch.assigneeId = nextAssigneeId;
+    if (teamAssigneeChanged || body.assigneeTeamId !== undefined) patch.assigneeTeamId = nextAssigneeTeamId;
     if (body.teamId !== undefined) patch.teamId = body.teamId;
     if (body.parentTaskId !== undefined) patch.parentId = body.parentTaskId;
     if (body.wbs !== undefined) patch.wbs = body.wbs;
@@ -485,7 +523,12 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (assigneeChanged) {
       specs.push({
         name: "task.assigned",
-        payload: { taskId: id, ...evt, assigneeId: updated.assigneeId },
+        payload: {
+          taskId: id,
+          ...evt,
+          assigneeId: updated.assigneeId,
+          ...(updated.assigneeTeamId ? { assigneeTeamId: updated.assigneeTeamId } : {}),
+        },
       });
     }
     await emit(deps.events, { requestId: ctx.requestId, actorId }, specs);

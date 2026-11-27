@@ -11,7 +11,7 @@
 // the gate's port.
 //
 // It is deliberately a thin ADAPTER, not a second evaluator: the decision still comes from
-// `IdentityService.effectivePermissions`, i.e. `authz.ts`'s `effectiveOrgWidePermissions`
+// `IdentityService.heldOrgWidePermissions` (effectivePermissions narrowed to the asked keys), i.e. `authz.ts`'s `effectiveOrgWidePermissions`
 // over the rows the repo loaded — the exact function `POST /authz/check` and the gateway's
 // /me aggregation answer from. There is no second copy of the RBAC semantics to drift.
 import type { PermissionGranter } from "@dub/policy-gate";
@@ -40,8 +40,8 @@ import type { IdentityService } from "./service";
 export function createInProcessGranter(svc: IdentityService): PermissionGranter {
   return async (userId, orgId, keys) => {
     if (keys.length === 0) return [];
-    const { permissions } = await svc.effectivePermissions(userId, orgId);
-    const held = new Set<string>(permissions);
+    // Same evaluator as effectivePermissions, narrowed to the asked keys (fewer rows read).
+    const held = new Set<string>(await svc.heldOrgWidePermissions(userId, orgId, keys));
     // Preserve the caller's key order, as the wire granter does.
     return keys.filter((k) => held.has(k));
   };

@@ -92,7 +92,9 @@ export type IconName =
   | "moon"
   | "monitor"
   // カラー設定 (fe2 設定メニュー → カラー設定ダイアログのエントリ). Additive, closed-union preserved.
-  | "palette";
+  | "palette"
+  // AI アシスタント (fe2 右側の AI パネルの開閉ボタン). Additive, closed-union preserved.
+  | "sparkles";
 
 export interface IconProps extends TestableProps {
   name: IconName;
@@ -219,6 +221,40 @@ export interface SelectProps<V extends string = string> extends TestableProps {
   placeholder?: string;
   invalid?: boolean;
   disabled?: boolean;
+  "aria-describedby"?: string;
+}
+
+/** One option of SearchableSelect. `group` puts it under a heading (e.g. メンバー / チーム). */
+export interface SearchableSelectOption<V extends string = string> {
+  value: V;
+  label: string;
+  /** Second line (e.g. an email). Also searched. */
+  description?: string;
+  group?: string;
+  disabled?: boolean;
+  testId?: string;
+}
+/** Searchable dropdown (search box at the top of the menu). Same value contract as Select. */
+export interface SearchableSelectProps<V extends string = string> extends TestableProps {
+  id: string;
+  value: V | null;
+  onChange: (value: V) => void;
+  options: SearchableSelectOption<V>[];
+  /** Trigger text when nothing is selected. */
+  placeholder?: string;
+  searchPlaceholder?: string;
+  /** Shown when the query matches nothing. */
+  emptyText?: string;
+  invalid?: boolean;
+  disabled?: boolean;
+  /** Options are still loading — the menu shows a skeleton. */
+  loading?: boolean;
+  /** Values floated to the top (under `pinnedLabel`) while the query is empty — e.g. recent picks. */
+  pinnedValues?: readonly V[];
+  pinnedLabel?: string;
+  /** Render at most this many matches. Default 100. */
+  maxResults?: number;
+  "aria-label"?: string;
   "aria-describedby"?: string;
 }
 
@@ -470,6 +506,9 @@ export interface AppShellProps extends TestableProps {
   // sidebar in favour of the header AppLauncher, so mail/chat get the full canvas.
   sidebar?: ReactNode;
   header?: ReactNode;
+  // Optional right rail (FE2 の AI パネル). Rendered beside the main column at full
+  // height so opening it narrows the content instead of covering it. Omitted = no rail.
+  aside?: ReactNode;
   children: ReactNode; // main content
 }
 
