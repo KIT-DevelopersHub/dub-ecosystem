@@ -57,3 +57,128 @@
   justify-content: flex-end;
   gap: var(--dub-space-4);
 }
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+}
+
+.link {
+  color: var(--dub-color-text-link);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+/* 本文の入力とプレビュー（LP管理のお知らせ詳細と同じ並び）。狭い画面では縦に積む。 */
+.mdEditor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--dub-space-4);
+  align-items: stretch;
+}
+@media (max-width: 760px) {
+  .mdEditor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.mdEditor textarea {
+  height: 100%;
+  min-height: 420px;
+  font-family: var(--dub-font-family-mono);
+  font-size: var(--dub-font-size-sm);
+}
+@media (pointer: coarse) {
+  .mdEditor textarea {
+    font-size: 16px;
+  }
+}
+.mdPreviewPane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  max-height: 560px;
+  min-height: 320px;
+  overflow-y: auto;
+  padding: var(--dub-space-3) var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-base);
+}
+.mdPreviewLabel {
+  color: var(--dub-color-text-muted);
+  font-size: var(--dub-font-size-xs);
+  font-weight: var(--dub-font-weight-medium);
+}
+.md {
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md :global(p) {
+  margin: 0 0 1em;
+}
+.md :global(h3) {
+  margin: 1.5em 0 0.6em;
+  padding-bottom: 0.3em;
+  border-bottom: 2px solid var(--dub-color-border-default);
+  font-size: var(--dub-font-size-lg);
+  line-height: 1.5;
+}
+.md :global(h4) {
+  margin: 1.2em 0 0.5em;
+  font-size: var(--dub-font-size-md);
+}
+.md :global(a) {
+  color: var(--dub-color-text-link);
+  text-decoration: underline;
+}
+.md :global(ul),
+.md :global(ol) {
+  margin: 0 0 1em;
+  padding-left: 1.5em;
+}
+.md :global(blockquote) {
+  margin: 0 0 1em;
+  padding: var(--dub-space-2) var(--dub-space-3);
+  border-left: 4px solid var(--dub-color-brand-500);
+  background: var(--dub-color-surface-sunken);
+  color: var(--dub-color-text-secondary);
+}
+.md :global(code) {
+  padding: 0.1em 0.35em;
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
+  font-family: var(--dub-font-family-mono);
+  font-size: 0.9em;
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.historyRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--dub-space-2) var(--dub-space-4);
+  padding: var(--dub-space-2) 0;
+  border-bottom: 1px solid var(--dub-color-border-default);
+  color: var(--dub-color-text-primary);
+  font-size: var(--dub-font-size-sm);
+}
+.historyRow:last-child {
+  border-bottom: 0;
+}
+.historyVersion {
+  font-weight: var(--dub-font-weight-bold);
+}

@@ -72,3 +72,11 @@ export function insightsApiBase(env: { LP_INSIGHTS?: string; TICKETS_DEMO?: stri
   if (env.DUB_API_BASE) return env.DUB_API_BASE;
   return env.TICKETS_DEMO === "1" ? null : DEFAULT_DUB_API_BASE;
 }
+
+/**
+ * 古い版（v3.6 より前のビルド）の流入 URL 計測（VisitBeacon）は端末の localStorage に訪問者 ID（dub_lp_vid）を作る。
+ * 公開中の版はビルドし直さないと直らないので、全ての版の HTML にこれを足して、読み込み時とページを離れる時に消す
+ * （= 次の訪問に持ち越さない）。サーバー側（api-gateway /public/lp-visits）もこの ID を使わない。
+ */
+export const LEGACY_VID_CLEANUP_TAG =
+  '<script id="lp-vid-cleanup">(function(){function c(){try{localStorage.removeItem("dub_lp_vid")}catch(e){}}c();try{addEventListener("pagehide",c)}catch(e){}})();</script>';

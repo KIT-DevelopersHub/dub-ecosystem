@@ -211,8 +211,8 @@ const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/spo
 const GOALS_READS = ["GET /members/goals"];
 const GOALS_WRITES = ["DELETE /members/goals/:teamId/:month", "PUT /members/goals/:teamId/:month"];
 // 会計: 閲覧 (+accounting:read) / 編集。
-const ACCOUNTING_READS = ["GET /members/accounting/issuer"];
-const ACCOUNTING_WRITES = ["PUT /members/accounting/issuer"];
+const ACCOUNTING_READS = ["GET /members/accounting/issuer", "GET /members/accounting/privacy-policy"];
+const ACCOUNTING_WRITES = ["PUT /members/accounting/issuer", "PUT /members/accounting/privacy-policy"];
 // チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
 const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
@@ -221,6 +221,7 @@ const SELF = ["GET /members/me/mention-teams"];
 const INTERNAL_ROUTES = [
   "GET /health",
   "GET /members/internal/accounting/issuer",
+  "GET /members/internal/accounting/privacy-policy",
   "GET /members/internal/hr/interview-form",
   "GET /members/internal/me/participation",
   "GET /members/internal/onboarding",

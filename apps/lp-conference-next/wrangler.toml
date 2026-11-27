@@ -1,7 +1,8 @@
 # lp-conference-next — public conference LP (Next.js SSG rebuild) delivered as a
 # SEPARATE Cloudflare Worker (承認済み設計: 公開LPは認証済み管理面とは別Worker).
 # The LP never calls internal services / admin APIs live, except reading the
-# publish flag (which version is public) from dub-lp-analytics.
+# publish flag (which version is public) from dub-lp-analytics and the privacy
+# policy text (/privacy) from dub-member-service.
 #
 # Multi-version: dist-bundle/ holds every version in versions.json
 # (versions/<id>/ = HTML + public files, _v/<id>/_next/ = chunks). worker/index.ts
@@ -37,6 +38,12 @@ service = "dub-lp-analytics"
 [[services]]
 binding = "LP_TICKETS"
 service = "dub-lp-tickets"
+
+# /privacy の本文 = 会計アプリで編集したプライバシーポリシー
+# (GET https://member-service/members/internal/accounting/privacy-policy)。無ければ既定の文案。
+[[services]]
+binding = "SVC_MEMBER"
+service = "dub-member-service"
 
 [vars]
 DEFAULT_VERSION = "v3.4"

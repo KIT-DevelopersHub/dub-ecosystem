@@ -3,7 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
-import type { accounting, identity } from "@dub/types";
+import { privacyPolicy, type accounting, type identity } from "@dub/types";
 import { describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { ApiError, createApiClient } from "../../lib/api-client.tsx";
@@ -21,10 +21,20 @@ const ISSUER: accounting.AccountingIssuer = {
   version: 3, updatedBy: "usr_1" as accounting.AccountingIssuer["updatedBy"], updatedByName: "佐藤", updatedAt: "2026-11-01T00:00:00Z",
 };
 
+const POLICY: accounting.PrivacyPolicy = {
+  body: "## 1. 取得する情報\n\n- 氏名", version: 2, updatedBy: "usr_1" as accounting.PrivacyPolicy["updatedBy"], updatedByName: "佐藤", updatedAt: "2026-11-20T01:00:00Z",
+};
+const POLICY_RES: accounting.GetPrivacyPolicyResponse = {
+  policy: POLICY,
+  history: [{ version: 2, updatedByName: "佐藤", updatedAt: POLICY.updatedAt }, { version: 1, updatedByName: "鈴木", updatedAt: "2026-11-10T01:00:00Z" }],
+};
+
 function fakeApi(issuer: accounting.AccountingIssuer | null, over: Partial<AccountingApi> = {}): AccountingApi {
   return {
     getIssuer: vi.fn(async () => ({ issuer })),
     putIssuer: vi.fn(async ({ expectedVersion, ...s }) => ({ ...ISSUER, ...s, version: expectedVersion + 1, warnings: [] })),
+    getPrivacyPolicy: vi.fn(async () => ({ policy: null, history: [] })),
+    putPrivacyPolicy: vi.fn(async ({ body, expectedVersion }) => ({ ...POLICY, body, version: expectedVersion + 1, updatedAt: "2026-11-27T03:00:00Z" })),
     ...over,
   };
 }
@@ -134,5 +144,100 @@ describe("AccountingScreen", () => {
     expect(await screen.findByTestId("fe2-accounting-readonly")).toBeInTheDocument();
     expect(field("name")).toBeDisabled();
     expect(screen.getByTestId("fe2-accounting-save")).toBeDisabled();
+  });
+});
+
+describe("会計 プライバシーポリシー demo transport", () => {
+  it("keeps versions with history and rejects a stale version", async () => {
+    const api = createAccountingApi(createApiClient({ baseUrl: "http://demo", fetchImpl: createDemoFetch() }));
+    expect(await api.getPrivacyPolicy()).toEqual({ policy: null, history: [] });
+    expect(await api.putPrivacyPolicy({ body: "初版\r\n", expectedVersion: 0 })).toMatchObject({ body: "初版", version: 1 });
+    await api.putPrivacyPolicy({ body: "改定", expectedVersion: 1 });
+    await expect(api.putPrivacyPolicy({ body: "古い", expectedVersion: 1 })).rejects.toMatchObject({ status: 409 });
+    await expect(api.putPrivacyPolicy({ body: " ", expectedVersion: 2 })).rejects.toMatchObject({ status: 400 });
+    const got = await api.getPrivacyPolicy();
+    expect(got.policy).toMatchObject({ body: "改定", version: 2 });
+    expect(got.history.map((h) => h.version)).toEqual([2, 1]);
+  });
+});
+
+describe("AccountingScreen プライバシーポリシー", () => {
+  const openTab = () => fireEvent.click(screen.getByTestId("fe2-accounting-tab-privacy"));
+  const bodyField = () => screen.getByTestId("fe2-accounting-privacy-body");
+
+  it("shows a skeleton, then the default draft when nothing is saved yet", async () => {
+    let resolve: (v: accounting.GetPrivacyPolicyResponse) => void = () => {};
+    mount(fakeApi(ISSUER, { getPrivacyPolicy: () => new Promise((r) => { resolve = r; }) }));
+    openTab();
+    expect(screen.getByTestId("fe2-accounting-privacy-skeleton")).toBeInTheDocument();
+    resolve({ policy: null, history: [] });
+    expect(await screen.findByTestId("fe2-accounting-privacy-unset")).toBeInTheDocument();
+    expect(bodyField()).toHaveValue(privacyPolicy.DEFAULT_PRIVACY_POLICY);
+    expect(screen.getByText("初期文案を表示中")).toBeInTheDocument();
+    // 未保存でも初期文案をそのまま保存できる。
+    expect(screen.getByTestId("fe2-accounting-privacy-save")).not.toBeDisabled();
+  });
+
+  it("previews the Markdown safely and lists the history", async () => {
+    mount(fakeApi(ISSUER, { getPrivacyPolicy: vi.fn(async () => POLICY_RES) }));
+    openTab();
+    fireEvent.change(await screen.findByTestId("fe2-accounting-privacy-body"), { target: { value: "## 見出し\n\n<script>alert(1)</script>" } });
+    const preview = screen.getByTestId("fe2-accounting-privacy-preview");
+    expect(preview.querySelector("h3")).toHaveTextContent("見出し");
+    expect(preview.querySelector("script")).toBeNull();
+    expect(preview).toHaveTextContent("<script>alert(1)</script>");
+    expect(screen.getByTestId("fe2-accounting-privacy-rev-2")).toHaveTextContent("佐藤");
+    expect(screen.getByTestId("fe2-accounting-privacy-rev-1")).toHaveTextContent("鈴木");
+    expect(screen.getByTestId("fe2-accounting-privacy-dirty")).toBeInTheDocument();
+  });
+
+  it("saves optimistically with the current version", async () => {
+    let release: () => void = () => {};
+    const putPrivacyPolicy = vi.fn(
+      ({ body, expectedVersion }: accounting.PutPrivacyPolicyRequest) =>
+        new Promise<accounting.PrivacyPolicy>((r) => { release = () => r({ ...POLICY, body, version: expectedVersion + 1 }); }),
+    );
+    mount(fakeApi(ISSUER, { getPrivacyPolicy: vi.fn(async () => POLICY_RES), putPrivacyPolicy }));
+    openTab();
+    fireEvent.change(await screen.findByTestId("fe2-accounting-privacy-body"), { target: { value: "改定した本文  " } });
+    fireEvent.click(screen.getByTestId("fe2-accounting-privacy-save"));
+    await waitFor(() => expect(putPrivacyPolicy).toHaveBeenCalledWith({ body: "改定した本文", expectedVersion: 2 }));
+    // 返事を待たずに履歴の先頭に第 3 版が出る。
+    expect(await screen.findByTestId("fe2-accounting-privacy-rev-3")).toBeInTheDocument();
+    expect(screen.getByTestId("fe2-accounting-privacy-save")).toBeDisabled();
+    release();
+    expect(await screen.findByText("プライバシーポリシーを保存しました")).toBeInTheDocument();
+  });
+
+  it("rolls back the history on a conflict but keeps the typed text", async () => {
+    const putPrivacyPolicy = vi.fn(async () => {
+      throw new ApiError(409, { error: { code: "ACCOUNTING_PRIVACY_POLICY_VERSION_CONFLICT", message: "conflict" } } as never);
+    });
+    mount(fakeApi(ISSUER, { getPrivacyPolicy: vi.fn(async () => POLICY_RES), putPrivacyPolicy }));
+    openTab();
+    fireEvent.change(await screen.findByTestId("fe2-accounting-privacy-body"), { target: { value: "私の変更" } });
+    fireEvent.click(screen.getByTestId("fe2-accounting-privacy-save"));
+    expect(await screen.findByText("他の人が先に更新しました。最新の内容を確認してください")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("fe2-accounting-privacy-rev-3")).toBeNull());
+    expect(bodyField()).toHaveValue("私の変更");
+  });
+
+  it("blocks an empty body", async () => {
+    const api = fakeApi(ISSUER, { getPrivacyPolicy: vi.fn(async () => POLICY_RES) });
+    mount(api);
+    openTab();
+    fireEvent.change(await screen.findByTestId("fe2-accounting-privacy-body"), { target: { value: "   " } });
+    fireEvent.click(screen.getByTestId("fe2-accounting-privacy-save"));
+    expect(await screen.findByText("本文を入力してください")).toBeInTheDocument();
+    expect(api.putPrivacyPolicy).not.toHaveBeenCalled();
+  });
+
+  it("is read-only for a viewer", async () => {
+    mount(fakeApi(ISSUER, { getPrivacyPolicy: vi.fn(async () => POLICY_RES) }), VIEWER);
+    openTab();
+    expect(await screen.findByTestId("fe2-accounting-privacy-readonly")).toBeInTheDocument();
+    expect(bodyField()).toBeDisabled();
+    expect(screen.getByTestId("fe2-accounting-privacy-save")).toBeDisabled();
+    expect(screen.getByTestId("fe2-accounting-privacy-reset")).toBeDisabled();
   });
 });

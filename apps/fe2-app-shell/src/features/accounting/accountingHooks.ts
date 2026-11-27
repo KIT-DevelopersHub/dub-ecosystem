@@ -52,3 +52,63 @@ export function useSaveIssuer() {
     },
   });
 }
+
+// ---- 公式サイトのプライバシーポリシー ----
+
+export const PRIVACY_POLICY_KEY = queryKeys.feature("accounting", "privacy-policy");
+
+export function usePrivacyPolicy() {
+  const api = useAccountingApi();
+  return useQuery({ queryKey: PRIVACY_POLICY_KEY, queryFn: () => api.getPrivacyPolicy(), staleTime: 30_000 });
+}
+
+/** 保存の楽観値: 本文を版だけ進めて見せ、履歴の先頭にも 1 行足す (更新者・日時はサーバの返事で置き換える)。 */
+export function optimisticPrivacyPolicy(
+  body: string,
+  prev: accounting.GetPrivacyPolicyResponse | undefined,
+  me: string | null,
+  now: string,
+): accounting.GetPrivacyPolicyResponse {
+  const version = (prev?.policy?.version ?? 0) + 1;
+  const policy: accounting.PrivacyPolicy = {
+    body,
+    version,
+    updatedBy: prev?.policy?.updatedBy ?? ("" as accounting.PrivacyPolicy["updatedBy"]),
+    updatedByName: me,
+    updatedAt: now,
+  };
+  return { policy, history: [{ version, updatedByName: me, updatedAt: now }, ...(prev?.history ?? [])] };
+}
+
+export function useSavePrivacyPolicy(me: string | null) {
+  const api = useAccountingApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (body: accounting.PutPrivacyPolicyRequest) => api.putPrivacyPolicy(body),
+    onMutate: async (body) => {
+      await qc.cancelQueries({ queryKey: PRIVACY_POLICY_KEY });
+      const snapshot = qc.getQueryData<accounting.GetPrivacyPolicyResponse>(PRIVACY_POLICY_KEY);
+      qc.setQueryData(PRIVACY_POLICY_KEY, optimisticPrivacyPolicy(body.body, snapshot, me, new Date().toISOString()));
+      return { snapshot };
+    },
+    onSuccess: (saved) => {
+      qc.setQueryData<accounting.GetPrivacyPolicyResponse>(PRIVACY_POLICY_KEY, (cur) => ({
+        policy: saved,
+        history: (cur?.history ?? []).map((h) =>
+          h.version === saved.version ? { version: saved.version, updatedByName: saved.updatedByName, updatedAt: saved.updatedAt } : h,
+        ),
+      }));
+      toast.show({ kind: "success", title: "プライバシーポリシーを保存しました", description: "公式サイトには 1 分ほどで反映されます。" });
+    },
+    onError: (err, _body, c) => {
+      qc.setQueryData(PRIVACY_POLICY_KEY, c?.snapshot);
+      void qc.invalidateQueries({ queryKey: PRIVACY_POLICY_KEY });
+      const message =
+        ApiError.isApiError(err) && err.status === 409 ? "他の人が先に更新しました。最新の内容を確認してください"
+        : ApiError.isApiError(err) ? toDisplayableError(err).message
+        : "もう一度お試しください。";
+      toast.show({ kind: "error", title: "プライバシーポリシーを保存できませんでした", description: message });
+    },
+  });
+}

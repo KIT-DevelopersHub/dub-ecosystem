@@ -38,6 +38,7 @@ export * as hrInterview from "./hr-interview"; // 人事: 面談の日程調整 
 export * as hrResult from "./hr-interview-result"; // 人事: 面談結果の登録 (合否メール・合格のアカウント発行)
 export * as goal from "./goal"; // member-service /members/goals (目標管理: チームの月間目標と KPI)
 export * as accounting from "./accounting"; // member-service /members/accounting/issuer (会計: 団体の発行者情報・領収書が読む)
+export * as privacyPolicy from "./privacy-policy"; // 公式サイト /privacy の既定の文案と本文の検査 (会計アプリで編集・LP Worker が描く)
 export * as sponsor from "./sponsor"; // member-service /members/sponsor/* (スポンサー: 名刺の共有)
 
 export const CONTRACT_VERSION = "1.0.0";
