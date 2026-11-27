@@ -1,6 +1,6 @@
 // 統合アプリ「運営メンバー・名簿」共有サブナビの active 判定（最長前方一致）。
 import { describe, expect, it } from "vitest";
-import { activeMembersView, activeSectionId } from "./MemberRosterNav.tsx";
+import { MEMBER_VIEWS, activeMembersView, activeSectionId } from "./MemberRosterNav.tsx";
 
 describe("activeSectionId", () => {
   it("maps each section root path to its id", () => {
@@ -38,5 +38,12 @@ describe("activeSectionId", () => {
     expect(activeSectionId("/mail")).toBeNull();
     // 前方一致の誤爆防止: /membersXYZ は /members セクションではない
     expect(activeSectionId("/members-foo")).toBeNull();
+  });
+
+  it("offers 一覧表 only with members:roster_view (same gate as /members/roster)", () => {
+    const byId = new Map(MEMBER_VIEWS.map((v) => [v.id, v.requiredPermissions]));
+    expect(byId.get("table")).toContain("members:roster_view");
+    expect(byId.get("teams")).toEqual(["app:members:view"]);
+    expect(byId.get("org-chart")).toEqual(["app:members:view"]);
   });
 });
