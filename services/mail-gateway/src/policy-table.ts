@@ -168,6 +168,9 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /mail/admin/email-routing/rules": ["mail:admin"],
   "PATCH /mail/admin/email-routing/rules/:id": ["mail:admin"],
   "DELETE /mail/admin/email-routing/rules/:id": ["mail:admin"],
+  // Resend の送信停止リスト（届かなくなった宛先の確認と戻し）。同じ管理画面の権限。
+  "GET /mail/admin/email-routing/suppressions": ["mail:admin"],
+  "DELETE /mail/admin/email-routing/suppressions/:email": ["mail:admin"],
   // Team mailing lists (0024): each one is an Email Routing rule, same admin console.
   "GET /mail/admin/lists": ["mail:admin"],
   "POST /mail/admin/lists": ["mail:admin"],

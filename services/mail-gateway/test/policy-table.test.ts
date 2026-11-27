@@ -153,10 +153,12 @@ const EMAIL_ROUTING_ADMIN = [
   "DELETE /mail/admin/email-routing/addresses/:id",
   "DELETE /mail/admin/email-routing/issued-addresses/:id",
   "DELETE /mail/admin/email-routing/rules/:id",
+  "DELETE /mail/admin/email-routing/suppressions/:email",
   "GET /mail/admin/email-routing/addresses",
   "GET /mail/admin/email-routing/issued-addresses",
   "GET /mail/admin/email-routing/roster-addresses",
   "GET /mail/admin/email-routing/rules",
+  "GET /mail/admin/email-routing/suppressions",
   "PATCH /mail/admin/email-routing/issued-addresses/:id",
   "PATCH /mail/admin/email-routing/rules/:id",
   "POST /mail/admin/email-routing/addresses",
@@ -215,7 +217,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(72);
+    expect(everyRoute).toHaveLength(74);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing
