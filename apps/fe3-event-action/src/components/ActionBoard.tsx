@@ -18,6 +18,7 @@ import type { common, event } from "@dub/types";
 import { Icon, Button, SkeletonList } from "@dub/ui";
 import { ActionCard } from "./ActionCard";
 import { ActionCreateModal } from "./ActionCreateModal";
+import { useActionRegistry } from "../context/ApiContext";
 import { useActionsQuery } from "../hooks/useEventQueries";
 import { useUpdateAction } from "../hooks/useEventMutations";
 import { computeReorder } from "../lib/sortOrder";
@@ -74,6 +75,15 @@ export function ActionBoard({
 
   const items = query.data?.items ?? [];
   const kinds = useMemo(() => [...new Set(items.map((a) => a.kind))], [items]);
+  const registry = useActionRegistry();
+  const kindOptions = useMemo(() => {
+    const labelled = kinds.map((kind) => ({ kind, label: registry.resolve(kind).label }));
+    // Unknown kinds share the generic label; add the kind so the options stay distinct.
+    return labelled.map(({ kind, label }) => ({
+      kind,
+      label: labelled.filter((o) => o.label === label).length > 1 ? `${label}（${kind}）` : label,
+    }));
+  }, [kinds, registry]);
 
   const onDragEnd = (e: DragEndEvent) => {
     const overId = e.over?.id;
@@ -107,9 +117,9 @@ export function ActionBoard({
           data-testid="fe3-actionboard-kind-filter"
         >
           <option value="">すべての種別</option>
-          {kinds.map((k) => (
-            <option key={k} value={k}>
-              {k}
+          {kindOptions.map((o) => (
+            <option key={o.kind} value={o.kind}>
+              {o.label}
             </option>
           ))}
         </select>
