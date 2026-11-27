@@ -227,6 +227,7 @@ const INTERNAL_ROUTES = [
   "GET /members/internal/onboarding",
   "GET /members/internal/participation/:id/onboard-target",
   "GET /members/internal/team-members",
+  "GET /members/internal/team-names",
   "POST /members/internal/google-emails",
   "POST /members/internal/hr/applicants/:id/interview-result/claim",
   "POST /members/internal/hr/applicants/:id/interview-result/complete",

@@ -14,6 +14,8 @@
 //   POST   /admin/email-routing/rules          create a rule (localpart matcher -> forward action)
 //   PATCH  /admin/email-routing/rules/:id       update a rule (enable/disable, matchers, actions)
 //   DELETE /admin/email-routing/rules/:id       delete a rule
+//   GET    /admin/email-routing/suppressions    Resend suppression list (own zone annotated)
+//   DELETE /admin/email-routing/suppressions/:email  remove one address from it
 //
 // Every MUTATION is audited (publishAudit) with success/failure. Reads are not audited
 // (mirrors the message read routes). When CF_EMAIL_ROUTING_TOKEN is unset, every route
@@ -23,10 +25,10 @@ import { DubError } from "@dub/errors";
 import { publishAudit } from "@dub/events";
 import { nowIso } from "@dub/db";
 import { consoleSink, HEADERS } from "@dub/observability";
-import type { auditLog, mail } from "@dub/types";
+import type { auditLog } from "@dub/types";
 import { common } from "@dub/types";
 import { SERVICE_NAME } from "./config";
-import { buildAuditEnv, buildDb, buildSendDeps } from "./deps";
+import { buildAuditEnv, buildDb } from "./deps";
 import type { AppBindings } from "./env";
 import {
   CfEmailRoutingClient,
@@ -45,7 +47,15 @@ import {
   parseUpdateIssuedAddressRequest,
   parseUpdateRuleRequest,
 } from "./email-routing-validation";
-import { sendMail } from "./send";
+import { insertScheduled, newScheduledId } from "./repo";
+import {
+  annotate,
+  enabledReceivingAddresses,
+  recordRemoval,
+  requireSuppressionsClient,
+  suppressionsClientFromEnv,
+  zoneOf,
+} from "./resend-suppressions";
 import { findActiveTeamList } from "./team-list";
 
 /** Mount the Email Routing admin routes on the external app. */
@@ -112,6 +122,29 @@ export function registerEmailRoutingAdmin(ext: Hono<AppBindings>): void {
   });
 
   ext.delete("/admin/email-routing/issued-addresses/:id", async (c) => c.json(await revokeAddress(c, c.req.param("id")), 200));
+
+  // ---- Resend suppression list (宛先の送信停止) ----
+  // A suppressed address is dropped silently by Resend (the send API still answers 200).
+  // List = every suppression, own-zone ones annotated with whether a receiving rule is
+  // enabled now (= the bounce cause is gone, safe to remove). Remove = audited.
+  ext.get("/admin/email-routing/suppressions", async (c) => {
+    const client = requireSuppressionsClient(c.env);
+    const list = await client.list();
+    const enabled = await enabledReceivingAddresses(c.env).catch(() => null);
+    return c.json({ items: annotate(list, zoneOf(c.env), enabled) });
+  });
+
+  ext.delete("/admin/email-routing/suppressions/:email", async (c) => {
+    const client = requireSuppressionsClient(c.env);
+    const email = decodeURIComponent(c.req.param("email")).trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new DubError("VALIDATION_FAILED", "email is required", { status: 400 });
+    const existing = await client.get(email);
+    if (!existing) return c.json({ email, removed: false }, 200);
+    await audited(c, "mail.suppression.remove", "mail_suppression", email, () => client.remove(email));
+    const ctx = c.get("dubCtx");
+    await recordRemoval(buildDb(c.env, ctx.requestId), existing, ctx.userId ?? "admin", Date.now());
+    return c.json({ email, removed: true }, 200);
+  });
 
   // ---- routing rules ----
   ext.get("/admin/email-routing/rules", async (c) => {
@@ -181,7 +214,9 @@ export function registerEmailRoutingInternal(app: Hono<AppBindings>): void {
 }
 
 /** Issue `localPart@zone` as a receiving rule. 409 when already issued or a team list. */
-async function issueAddress(c: Context<AppBindings>): Promise<IssuedEmailAddress & { confirmationEmailSent: boolean }> {
+async function issueAddress(
+  c: Context<AppBindings>,
+): Promise<IssuedEmailAddress & { confirmationEmailSent: boolean; confirmationEmailScheduledAt: string | null; suppressionCleared: boolean | null }> {
   const cfg = requireEmailRoutingConfig(c.env);
   const { localPart, address } = parseIssueAddressRequest(await c.req.json().catch(() => null), cfg.zoneName);
   const client = new CfEmailRoutingClient(cfg);
@@ -202,10 +237,18 @@ async function issueAddress(c: Context<AppBindings>): Promise<IssuedEmailAddress
     enabled: rule.enabled,
     createdAt: nowIso(),
   };
-  // Confirmation mail is best-effort: the address is already issued, so a send hiccup
-  // must never turn a successful issue into a 5xx. The outcome is surfaced as a flag.
-  const confirmationEmailSent = await sendIssuanceConfirmation(c, address);
-  return { ...issued, createdAt: issued.createdAt || nowIso(), confirmationEmailSent };
+  // Confirmation mail is best-effort: the address is already issued, so a hiccup must never
+  // turn a successful issue into a 5xx. It is queued (see sendIssuanceConfirmation), and
+  // `confirmationEmailSent` keeps its name for the existing clients: true = accepted.
+  const suppressionCleared = await clearSuppressionOnIssue(c, address);
+  const confirmation = await sendIssuanceConfirmation(c, address);
+  return {
+    ...issued,
+    createdAt: issued.createdAt || nowIso(),
+    confirmationEmailSent: confirmation.queued,
+    confirmationEmailScheduledAt: confirmation.scheduledAt,
+    suppressionCleared,
+  };
 }
 
 async function revokeAddress(c: Context<AppBindings>, id: string): Promise<{ id: string }> {
@@ -241,42 +284,85 @@ export async function audited<T>(
   }
 }
 
+/** Wait before the confirmation goes out (minutes, default 5, 0..60). */
+export function issueConfirmDelayMin(env: AppBindings["Bindings"]): number {
+  const n = Number.parseInt(env.MAIL_ISSUE_CONFIRM_DELAY_MIN ?? "", 10);
+  return Number.isFinite(n) && n >= 0 && n <= 60 ? n : DEFAULT_ISSUE_CONFIRM_DELAY_MIN;
+}
+export const DEFAULT_ISSUE_CONFIRM_DELAY_MIN = 5;
+export const ISSUE_CONFIRM_SUBJECT = "メールアドレスを発行しました";
+
 /**
- * Send the "address issued" confirmation to the freshly-issued address. It goes out from
+ * Queue the "address issued" confirmation to the freshly-issued address. It goes out from
  * the system default (info@developershub.jp) via the configured provider (Resend); because
  * the issued address now routes to the mail Worker, the message round-trips back INTO Dub's
  * inbox — the admin sees it arrive, proving the issue actually works end-to-end.
  *
- * Best-effort by contract: a provider failure is logged and reported as `false`, never
- * thrown, so a send outage cannot fail an already-successful issue. Idempotency-keyed on
- * the address so a retried issue does not double-send. Loop headers mark it auto-generated
- * so mail-automation does not treat it as a message to auto-reply to.
+ * NOT sent inline: a freshly created Email Routing rule takes a moment to reach the MX, and
+ * a mail that lands first hard-bounces — Resend then puts the address on its suppression
+ * list and silently drops every later send to it (16 member addresses + dev-monitor@ hit
+ * this; 2026-11-27). So the mail is parked in mail_scheduled (system row, owner NULL) and
+ * the 5-minute cron's scheduled-send drain sends it after MAIL_ISSUE_CONFIRM_DELAY_MIN.
+ *
+ * Best-effort by contract: a failure is logged and reported as `false`, never thrown, so it
+ * cannot fail an already-successful issue.
  */
-async function sendIssuanceConfirmation(c: Context<AppBindings>, address: string): Promise<boolean> {
+async function sendIssuanceConfirmation(c: Context<AppBindings>, address: string): Promise<{ queued: boolean; scheduledAt: string | null }> {
   const ctx = c.get("dubCtx");
-  const req: mail.SendMailRequest = {
-    to: [{ email: address }],
-    subject: "メールアドレスを発行しました",
-    textBody:
-      `${address} を発行しました。\n\n` +
-      "これは、DevelopersHub 管理コンソールでこのメールアドレスが発行されたことをお知らせする確認メールです。" +
-      "今後このアドレス宛に届いたメールは、Dub のメール受信トレイで確認できます。\n\n" +
-      "— DevelopersHub",
-    loopHeaders: { "auto-submitted": "auto-generated", "x-dub-mail-loop": "email-routing-issue-confirm" },
-  };
+  const scheduledAt = new Date(Date.now() + issueConfirmDelayMin(c.env) * 60_000).toISOString();
   try {
-    const deps = buildSendDeps(c.env, ctx);
-    const { status } = await sendMail(deps, req, `email-routing-issue:${address}`, ctx.userId ?? "email-routing-admin");
-    return status === "sent" || status === "duplicate";
+    await insertScheduled(buildDb(c.env, ctx.requestId), {
+      id: newScheduledId(),
+      ownerUserId: null,
+      toJson: JSON.stringify([{ email: address }]),
+      ccJson: null,
+      subject: ISSUE_CONFIRM_SUBJECT,
+      textBody:
+        `${address} を発行しました。\n\n` +
+        "これは、DevelopersHub 管理コンソールでこのメールアドレスが発行されたことをお知らせする確認メールです。" +
+        "今後このアドレス宛に届いたメールは、Dub のメール受信トレイで確認できます。\n\n" +
+        "— DevelopersHub",
+      htmlBody: null,
+      inReplyTo: null,
+      fromAddress: null,
+      scheduledAt,
+    });
+    return { queued: true, scheduledAt };
   } catch (err) {
     consoleSink({
       level: "error",
-      message: "mail-gateway: issued-address confirmation email failed",
+      message: "mail-gateway: issued-address confirmation email could not be queued",
       service: SERVICE_NAME,
       requestId: ctx.requestId,
       fields: { address, error: err instanceof Error ? err.message : String(err) },
     });
-    return false;
+    return { queued: false, scheduledAt: null };
+  }
+}
+
+/**
+ * Re-issuing an address that bounced before: its Resend suppression would keep dropping mail
+ * even though the rule now exists. Clear it (best-effort, audited). null = not checked
+ * (provider is not Resend / API unavailable), false = was not suppressed.
+ */
+async function clearSuppressionOnIssue(c: Context<AppBindings>, address: string): Promise<boolean | null> {
+  const client = suppressionsClientFromEnv(c.env);
+  if (!client) return null;
+  try {
+    const existing = await client.get(address);
+    if (!existing) return false;
+    await audited(c, "mail.suppression.remove", "mail_suppression", address, () => client.remove(address));
+    await recordRemoval(buildDb(c.env, c.get("dubCtx").requestId), existing, "issue", Date.now());
+    return true;
+  } catch (err) {
+    consoleSink({
+      level: "warn",
+      message: "mail-gateway: could not check/clear the Resend suppression on issue",
+      service: SERVICE_NAME,
+      requestId: c.get("dubCtx").requestId,
+      fields: { address, error: err instanceof Error ? err.message : String(err) },
+    });
+    return null;
   }
 }
 

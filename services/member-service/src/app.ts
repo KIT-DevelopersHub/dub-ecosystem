@@ -118,7 +118,18 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const teamIds = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
     // excludeDeclined: a team mailing list delivers mail bodies, so someone who left must not
     // keep receiving them. Mentions omit it and keep notifying the whole roster as before.
-    return c.json(await svc.listTeamIdentityUserIds(teamIds, { excludeDeclined: c.req.query("excludeDeclined") === "1" }));
+    const excludeDeclined = c.req.query("excludeDeclined") === "1";
+    // all=1: every linked 運営メンバー, no team filter (mail-gateway: who may send as a shared
+    // address open to 運営メンバー全員).
+    if (c.req.query("all") === "1") return c.json(await svc.listMemberIdentityUserIds({ excludeDeclined }));
+    return c.json(await svc.listTeamIdentityUserIds(teamIds, { excludeDeclined }));
+  });
+
+  // チーム名 (mail-gateway → member-service, s2s のみ)。チームのメーリングリストを差出人にした時の
+  // 表示名と署名に使う。?teamIds=a,b -> { teams: [{ id, name }] }。
+  app.get("/members/internal/team-names", async (c) => {
+    const teamIds = (c.req.query("teamIds") ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+    return c.json(await svc.listTeamNames(teamIds));
   });
 
   // 名簿の Gmail 逆引き (drive-share-service → member-service, s2s のみ). カレンダー > ミーティングの

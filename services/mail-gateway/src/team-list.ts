@@ -26,7 +26,7 @@ export interface TeamListRow {
 export const TEAM_LIST_COLUMNS = `id, address, team_id, created_at`;
 
 /** @dub/db wraps every failure in DB_QUERY_FAILED: the D1 text is on the cause chain. */
-function isMissingTable(err: unknown): boolean {
+export function isMissingTable(err: unknown): boolean {
   for (let e: unknown = err, depth = 0; e && depth < 5; e = (e as { cause?: unknown }).cause, depth++) {
     if (e instanceof Error && /no such table/i.test(e.message)) return true;
   }

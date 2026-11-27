@@ -112,6 +112,12 @@
   min-width: 0;
   min-height: 0; /* let .shellContent own the scroll instead of growing the shell */
 }
+.shellAside {
+  /* Right rail (FE2 AI panel): owns its width; full height beside the main column. */
+  flex-shrink: 0;
+  display: flex;
+  min-height: 0;
+}
 .shellHeader {
   position: sticky;
   top: 0;
