@@ -42,7 +42,15 @@ export function Tabs({ items, activeId, onChange, testId }: TabsProps) {
       if (l < list.scrollLeft) list.scrollLeft = l;
       else if (r > list.scrollLeft + list.clientWidth) list.scrollLeft = r - list.clientWidth;
     }
-    const measure = (): Geom => ({ left: activeEl.offsetLeft, width: activeEl.offsetWidth });
+    // Measure in fractional px: offsetLeft/offsetWidth round to whole px, so the
+    // underline of the last tab could end ~1px past the strip and make it scroll.
+    // Rects include ancestor transforms (entrance/modal scale); undo a real scale.
+    const measure = (): Geom => {
+      const lr = list.getBoundingClientRect();
+      const ar = activeEl.getBoundingClientRect();
+      const s = list.offsetWidth > 0 && Math.abs(lr.width - list.offsetWidth) > 1 ? lr.width / list.offsetWidth : 1;
+      return { left: (ar.left - lr.left) / s - list.clientLeft + list.scrollLeft, width: ar.width / s };
+    };
     const apply = (): void => {
       const g = measure();
       if (key) lastGeom.set(key, g);

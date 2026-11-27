@@ -55,6 +55,7 @@ function validate(body: unknown): { value: gateway.PublicParticipationRequest } 
       nameKana: optStr(b.nameKana),
       nameRomaji: optStr(b.nameRomaji),
       desiredTeamId: optStr(b.desiredTeamId),
+      eventId: optStr(b.eventId),
       position: member.isMemberPosition(position) ? position : null,
       turnstileToken: optStr(b.turnstileToken),
     },

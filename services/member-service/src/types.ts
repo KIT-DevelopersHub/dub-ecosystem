@@ -2,6 +2,7 @@
 // the CANONICAL @dub/types `member` namespace (Team is the single shared team
 // definition across all apps); this file adds only the internal persistence rows and
 // injected-dependency interfaces. Distinct from identity_* (RBAC login accounts).
+import type { EventInviteNotifier } from "./eventInvite";
 import type { common, member } from "@dub/types";
 import type { PermissionGranter } from "@dub/policy-gate";
 import type { HrRepo } from "./hr-repo";
@@ -104,6 +105,8 @@ export interface ParticipationRow extends member.PersonProfile {
   schoolEmail: string;
   gmail: string;
   desiredTeamId: string | null;
+  /** この 参加届 を出したイベント (0030 additive column)。null = 指定なし。 */
+  eventId: string | null;
   /** 役職 (0018 additive column)。 */
   position: member.MemberPosition | null;
   desiredActivity: member.DesiredActivity | null;
@@ -183,6 +186,13 @@ export interface MemberRepo {
   listOnboardingMeetings(orgId: common.OrgId): Promise<OnboardingMeetingRow[]>;
   upsertOnboardingMeeting(row: OnboardingMeetingRow): Promise<void>;
   deleteOnboardingMeeting(orgId: common.OrgId, teamId: string | null): Promise<void>;
+
+  // 運営メンバー per event (member_event_people / member_event_teams). Idempotent writes.
+  getEventStaff(eventId: string): Promise<{ personIds: string[]; teamIds: string[] }>;
+  addEventPerson(eventId: string, personId: string, addedBy: common.UserId, addedAt: common.ISODateTime): Promise<void>;
+  removeEventPerson(eventId: string, personId: string): Promise<void>;
+  addEventTeam(eventId: string, teamId: string, addedBy: common.UserId, addedAt: common.ISODateTime): Promise<void>;
+  removeEventTeam(eventId: string, teamId: string): Promise<void>;
 }
 
 export interface AppDeps {
@@ -252,4 +262,6 @@ export interface AppDeps {
   /** 情報が足りない本人への催促 (notification-service)。best-effort ではなく、失敗は
    *  操作した管理者へ返す。undefined なら催促できない (binding の無い環境)。 */
   sendProfileReminder?: (ctx: { requestId: string; userId: string }, target: ProfileReminderTarget) => Promise<{ deduplicated: boolean }>;
+  /** 「〇〇の運営に招待されました」の in-app 通知 (best-effort)。undefined なら通知しない。 */
+  notifyEventInvite?: EventInviteNotifier;
 }

@@ -92,9 +92,22 @@
 /* 統合アプリ「運営メンバー・名簿」の共有サブナビ帯（運営メンバー/名簿/ロール/
    アドレス/履歴 を横断）。ページ見出しの上に薄い区切りとして敷く。 */
 .rosterSubnav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2) var(--dub-space-4);
   border-bottom: 1px solid var(--dub-color-border-default);
-  margin-bottom: var(--dub-space-4);
-  overflow-x: auto;
+  margin-bottom: var(--dub-space-5);
+}
+/* スクロールさせない。狭い幅でのはみ出しは Tabs 自身(≤640px で横スクロール帯)に任せ、
+   ここで二重のスクロール領域を作らない。 */
+.rosterSubnavTabs {
+  min-width: 0;
+}
+/* 運営メンバータブの表示切り替え（チーム別 / 一覧表 / 組織図）。狭い幅ではタブの下へ折り返す。 */
+.rosterViewSwitch {
+  padding-bottom: var(--dub-space-2);
 }
 
 /* タブ下本体の読み込み中スケルトン。バー(rosterSubnav)は残したまま、この領域だけが
@@ -676,4 +689,69 @@
   .orgCol {
     box-shadow: none;
   }
+}
+
+/* 運営メンバー per event: the selected event's staff bar + the pick-from-roster dialog */
+.eventStaffBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--dub-space-3);
+  padding: var(--dub-space-3) var(--dub-space-4);
+  margin-bottom: var(--dub-space-4);
+  border: 1px solid var(--dub-color-border-default);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-sunken);
+}
+.eventStaffText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-1);
+  min-width: 0;
+  flex: 1 1 16rem;
+}
+.eventStaffTitle {
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.eventStaffHint {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
+.eventStaffSection {
+  display: grid;
+  gap: var(--dub-space-2);
+  margin-bottom: var(--dub-space-5);
+}
+.eventStaffSectionTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-md);
+  font-weight: var(--dub-font-weight-bold);
+}
+.eventStaffList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--dub-space-2) var(--dub-space-4);
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: var(--dub-space-1);
+}
+.eventStaffRows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--dub-space-2) var(--dub-space-4);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+.eventStaffRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-1) var(--dub-space-2);
+  border-radius: var(--dub-radius-sm);
+  background: var(--dub-color-surface-sunken);
 }

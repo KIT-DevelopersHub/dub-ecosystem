@@ -8,6 +8,7 @@
 //    テンプレートとして読み、人事側はチェック状態 (member_hr_onboarding_checks) だけを持つ。
 import { DubError, errors } from "@dub/errors";
 import { hr, member } from "@dub/types";
+import { parseEventScopeId } from "@dub/validation";
 import type { HrRepo, ApplicantRow } from "./hr-repo";
 import type { MemberService, ReqCtx } from "./service";
 import type { AppDeps } from "./types";
@@ -259,6 +260,8 @@ export class HrService {
     // 既に名簿に結ばれている人は /stage で採用に戻せばよい (二重追加しない)。
     if (cur.memberId !== null) throw errBadTransition(cur.stage, "hired");
     if (cur.version !== expected) throw errVersionConflict(id);
+    // 採用画面で選んだイベントの運営メンバーにも入れる (null/省略 = どこにも入れない)。
+    const eventId = parseEventScopeId(body.eventId);
 
     let memberId: string;
     const linkTo = text(body.memberId, "memberId", 200);
@@ -291,6 +294,7 @@ export class HrService {
 
     const next: ApplicantRow = { ...cur, stage: "hired", memberId, version: cur.version + 1, updatedAt: this.deps.now() };
     if (!(await this.deps.hrRepo.updateApplicant(next, expected))) throw errVersionConflict(id);
+    await this.members.enrollInEvent(ctx, eventId, memberId);
     await this.event(ctx, id, "joined", { fromStage: cur.stage, toStage: "hired", body: linkTo ? "既存の名簿に紐付け" : "名簿に新規追加" });
     return { applicant: toApplicant(next), memberId };
   }

@@ -620,6 +620,40 @@ CREATE TABLE member_accounting_issuer (
 `.trim(),
 };
 
+// 0029: 運営メンバー per event. The event SELECTS its staff / 班 from the org-wide roster
+// (mirrors 0029_event_staff.sql). Additive, IF NOT EXISTS.
+export const MEMBER_EVENT_STAFF_MIGRATION: Migration = {
+  id: "0029_event_staff",
+  namespace: "member",
+  up: `
+CREATE TABLE IF NOT EXISTS member_event_people (
+  event_id  TEXT NOT NULL,
+  person_id TEXT NOT NULL,
+  added_by  TEXT NOT NULL,
+  added_at  TEXT NOT NULL,
+  PRIMARY KEY (event_id, person_id)
+);
+CREATE INDEX IF NOT EXISTS idx_member_event_people_person ON member_event_people(person_id);
+CREATE TABLE IF NOT EXISTS member_event_teams (
+  event_id TEXT NOT NULL,
+  team_id  TEXT NOT NULL,
+  added_by TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (event_id, team_id)
+);
+CREATE INDEX IF NOT EXISTS idx_member_event_teams_team ON member_event_teams(team_id);
+`.trim(),
+};
+
+// 0030: the event a 参加届 was submitted for (mirrors 0030_participation_event.sql). Additive.
+export const MEMBER_PARTICIPATION_EVENT_MIGRATION: Migration = {
+  id: "0030_participation_event",
+  namespace: "member",
+  up: `
+ALTER TABLE member_participations ADD COLUMN event_id TEXT;
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -650,4 +684,6 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_HR_INTERVIEW_RESULTS_MIGRATION,
   MEMBER_HR_BOOKED_BACKFILL_MIGRATION,
   MEMBER_ACCOUNTING_ISSUER_MIGRATION,
+  MEMBER_EVENT_STAFF_MIGRATION,
+  MEMBER_PARTICIPATION_EVENT_MIGRATION,
 ];

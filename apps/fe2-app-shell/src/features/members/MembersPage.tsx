@@ -17,9 +17,11 @@ import {
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { MEMBERS_TITLE, membersViewDescription } from "./MemberRosterNav.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { usePermissionGate } from "../../auth/PermissionGate.tsx";
-import { useMembersOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
+import { useScopedOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
+import { EventStaffSection } from "./EventStaffPanel.tsx";
 import { TeamsView } from "./TeamsView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { TeamFormDialog } from "./TeamFormDialog.tsx";
@@ -31,7 +33,8 @@ export function MembersPage(): JSX.Element {
   const { can } = usePermissions();
   // 閲覧のみでも書き込みボタンは押せる。押したら権限不足ダイアログ(申請ボタン付き)を出す。
   const gate = usePermissionGate({ appId: "members", locked: !canEdit });
-  const overview = useMembersOverview();
+  // イベントを選んでいる時は、そのイベントの運営メンバー・班だけ (全体の名簿から選んだもの)。
+  const overview = useScopedOverview();
   const deleteMember = useDeleteMember();
   const deleteTeam = useDeleteTeam();
 
@@ -45,12 +48,16 @@ export function MembersPage(): JSX.Element {
 
   const teams = overview.data?.teams ?? [];
   const members = overview.data?.members ?? [];
+  // 編集ダイアログは全体の行で開く (イベントで絞った teamIds のまま保存すると他の班が外れるため)。
+  const fullTeams = overview.full?.teams ?? teams;
+  const fullMembers = overview.full?.members ?? members;
+  const fullById = new Map(fullMembers.map((m) => [m.id, m]));
   // 辞退(declined)はチーム別には出さない(データは保持・辞退者は運営名簿の
   // 「辞退者」フィルタで参照)。
   const rosterMembers = members.filter((m) => m.status !== "declined");
 
   const openAddMember = () => setMemberDialog({ open: true, editing: null });
-  const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: m });
+  const openEditMember = (m: OrgMember) => setMemberDialog({ open: true, editing: fullById.get(m.id) ?? m });
   const openAddTeam = () => setTeamDialog({ open: true, editing: null });
   const openEditTeam = (t: MemberTeam) => setTeamDialog({ open: true, editing: t });
 
@@ -73,8 +80,8 @@ export function MembersPage(): JSX.Element {
     <div data-testid="members-page">
       <div className={styles.noPrint}>
         <PageHeader
-          title="運営メンバー"
-          description="運営メンバーの招待状況と所属チームを管理します"
+          title={MEMBERS_TITLE}
+          description={membersViewDescription("teams", "運営メンバーの招待状況と所属チームを管理します")}
           actions={
             <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "var(--dub-space-2)" }}>
               <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} onClick={gate.guard(openAddTeam)} testId="members-add-team">
@@ -87,6 +94,8 @@ export function MembersPage(): JSX.Element {
           }
         />
       </div>
+
+      <EventStaffSection scoped={overview} canEdit={canEdit} />
 
       <TeamsView
         teams={teams}
@@ -102,9 +111,9 @@ export function MembersPage(): JSX.Element {
       <MemberFormDialog
         open={memberDialog.open}
         onClose={() => setMemberDialog({ open: false, editing: null })}
-        teams={teams}
+        teams={fullTeams}
         editing={memberDialog.editing}
-        members={members}
+        members={fullMembers}
         orgOnly={!can("members:roster_edit")}
       />
       <TeamFormDialog

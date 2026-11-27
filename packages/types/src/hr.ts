@@ -154,6 +154,8 @@ export interface AddApplicantNoteRequest {
 export interface JoinApplicantRequest {
   expectedVersion: number;
   memberId?: string | null;
+  /** 採用した人をこのイベントの運営メンバーにも入れる (画面で選んでいるイベント)。 */
+  eventId?: string | null;
 }
 
 export interface JoinApplicantResponse {

@@ -11,6 +11,7 @@ import { hrForm, hrResult, member, type hr } from "@dub/types";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { kanaToRomaji } from "../../lib/romaji.ts";
 import { orgChartOrder, tierOf } from "../members/orgChartOrder.ts";
+import { EventTargetSelect, useEventTarget, useEventTitle } from "../../lib/eventTarget.tsx";
 import { useHrOrgMembers, useHrTeams, useRegisterInterviewResult } from "./hrHooks.ts";
 import styles from "./hr.module.css";
 
@@ -63,6 +64,9 @@ function ResultForm({ applicant: a, onClose }: { applicant: hr.Applicant; onClos
   // 合格の所属: チームは希望チームを最初から選んでおく (チーム一覧の読み込みを待たずに既定が決まる)。
   const [teamIds, setTeamIds] = useState<string[]>(() => (a.desiredTeamId ? [a.desiredTeamId] : []));
   const [leaderId, setLeaderId] = useState<string>(NO_LEADER);
+  // 合格した人を入れるイベント (既定 = ヘッダーで選んでいるイベント)。
+  const [eventTarget, setEventTarget] = useEventTarget();
+  const eventTargetTitle = useEventTitle(eventTarget);
   const teams = useHrTeams();
   const orgMembers = useHrOrgMembers(decision === "pass");
   const teamList = teams.data?.teams ?? [];
@@ -110,7 +114,12 @@ function ResultForm({ applicant: a, onClose }: { applicant: hr.Applicant; onClos
           reason: reason.trim(),
           includeReasonInMail: includeReason,
           ...(decision === "pass"
-            ? { localPart: localPart.trim().toLowerCase(), teamIds: chosenTeams.map((t) => t.id), leaderId: leaderId || null }
+            ? {
+                localPart: localPart.trim().toLowerCase(),
+                teamIds: chosenTeams.map((t) => t.id),
+                leaderId: leaderId || null,
+                ...(eventTarget ? { eventId: eventTarget } : {}),
+              }
             : {}),
         },
       },
@@ -230,6 +239,9 @@ function ResultForm({ applicant: a, onClose }: { applicant: hr.Applicant; onClos
               )}
             </FormField>
           ) : null}
+          {decision === "pass" ? (
+            <EventTargetSelect id="hr-result-event" value={eventTarget} onChange={setEventTarget} testId="fe2-hr-result-event" />
+          ) : null}
           {!a.email ? (
             <p className={styles.resultAlert} role="alert" data-testid="fe2-hr-result-no-email">
               応募者のメールアドレスが無いため、結果を送れません。
@@ -267,6 +279,11 @@ function ResultForm({ applicant: a, onClose }: { applicant: hr.Applicant; onClos
               <li data-testid="fe2-hr-result-confirm-leader">
                 リーダー（上長）: <strong>{leaderLabel ?? "なし"}</strong>
               </li>
+              {eventTarget ? (
+                <li data-testid="fe2-hr-result-confirm-event">
+                  運営メンバーに入れるイベント: <strong>{eventTargetTitle ?? eventTarget}</strong>
+                </li>
+              ) : null}
               <li>初期パスワードは既存の「アカウント発行のお知らせ」メールで別に届きます</li>
             </ul>
           ) : (

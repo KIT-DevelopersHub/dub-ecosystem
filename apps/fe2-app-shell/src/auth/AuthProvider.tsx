@@ -221,6 +221,11 @@ export function useOptionalCan(permission: PermissionKey): boolean | null {
   return ctx ? ctx.can(permission) : null;
 }
 
+/** The shell api-client, or null outside <AuthProvider> (isolated feature tests). */
+export function useOptionalApi(): ApiClient | null {
+  return useContext(AuthCtx)?.api ?? null;
+}
+
 /** The viewer's display name + the shell api-client, for chrome that files a request as them. */
 export function useViewerApi(): { api: ApiClient; displayName: string | null } {
   const { api, state } = useAuthCtx();

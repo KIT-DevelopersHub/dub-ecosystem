@@ -164,6 +164,8 @@ Request (`event.CreateEventRequest`):
 - `title` (required, non-empty). Missing/blank ⇒ `400 VALIDATION_FAILED` (`{ field: "title", reason: "required" }`).
 - `description`, `startsAt`, `endsAt` optional.
 - `phase` is **not** accepted here — every event is created at `"planning"`.
+- `enabledApps` optional (array of `appRegistry.AppId`). Omitted ⇒ `event.EVENT_DEFAULT_ENABLED_APPS`
+  (`events`, `gantt`, `admin`). Unknown id ⇒ `400 VALIDATION_FAILED` (`enabledApps[i]`). See §3.12.
 
 Response `201`: the full `DubEvent` (`version: 1`, `phase: "planning"`). Emits `event.created`.
 
@@ -192,6 +194,8 @@ Permission: `event:read` (resource-scoped to `event`/`:id`). Response `200`: `Ev
 ```
 
 Unknown / cross-org id ⇒ `404 NOT_FOUND` (existence-hiding).
+
+Additive: `enabledApps` (resolved, launcher order) is included — see §3.12.
 
 ### 3.4 `PATCH /api/v1/events/:id` — update event
 
@@ -310,6 +314,60 @@ updated `DubAction`. Emits `action.updated` when any field changed.
 Permission: `event:write` (note: **not** `event:admin`, unlike event archive). Soft-delete;
 idempotent (already-archived ⇒ `204`). Response `204 No Content`. Emits `action.archived`.
 
+### 3.12 `GET|PUT /api/v1/events/:id/apps` — apps enabled for the event
+
+Each event chooses which launcher apps it uses (イベント設定 > 使うアプリ). Types:
+`event.EventAppsResponse` / `event.SaveEventAppsRequest`; helpers `event.resolveEnabledApps`,
+`EVENT_DEFAULT_ENABLED_APPS`, `EVENT_ALWAYS_ENABLED_APPS`; validator
+`@dub/validation validateSaveEventAppsRequest`. Storage: `event_event_apps` (migration 0007).
+
+```json
+{ "eventId": "evt_01J9Z...", "enabledApps": ["events", "gantt", "admin"], "customized": true, "updatedAt": "2026-11-27T00:00:00Z" }
+```
+
+- **GET** — `event:read`. An event with no stored setting (every event created before this
+  feature) ⇒ `customized: false` and **every app** enabled (backward compatible, no backfill).
+- **PUT** — `event:write`, re-checked **with the event scope** (an organizer grant scoped to
+  another event ⇒ `403`). Body `{ "enabledApps": [...] }` is the FULL set (replace, last write
+  wins). Unknown id ⇒ `400 VALIDATION_FAILED`; `events` is always kept on; archived event ⇒
+  `409 EVENT_ARCHIVED_IMMUTABLE`.
+- This is a **UX setting, not authorization**: the shell greys (never removes) launcher tiles
+  of apps not enabled for the current event (admins too). App RBAC stays with ロール管理.
+- Only **event-scoped** apps are switches (`event.EVENT_TOGGLEABLE_APPS` / `isEventToggleableApp`:
+  イベント・マイタスク・ガントチャート・運営メンバー・参加届・LP管理・スポンサー・ロール管理).
+  Org-wide apps (メール・チャット・通知・カレンダー・Drive共有・人事・目標管理・会計 …) are
+  **always** in `enabledApps`, whatever is stored or sent.
+
+#### Related: 運営メンバー per event (member-service)
+
+One org-wide roster (`member_people`) and 班 list (`member_teams`); an event **selects** its
+staff / 班 from them (`member_event_people` / `member_event_teams`, member migration 0029 —
+nothing is duplicated, roles stay org-wide). Type `member.EventStaff`
+(`{ eventId, personIds, teamIds }`), helper `member.scopeOverviewToEvent`, validator
+`@dub/validation parseEventScopeId`.
+
+| Route | Permission | |
+|---|---|---|
+| `GET /api/v1/members/events/:eventId/staff` | 運営メンバー 閲覧 | `EventStaff` (ids only; read rows via overview / org-overview) |
+| `PUT\|DELETE /api/v1/members/events/:eventId/people/:personId` | 運営メンバー 編集 | add / remove one roster person (idempotent) ⇒ `EventStaff` |
+| `PUT\|DELETE /api/v1/members/events/:eventId/teams/:teamId` | 運営メンバー 編集 | use / stop using one 班 (idempotent) ⇒ `EventStaff` |
+| `POST /api/v1/members/events/:eventId/invitations` | 運営メンバー 編集 | `InviteEventStaffRequest { personId, eventTitle? }` ⇒ `InviteEventStaffResponse { staff, notified }`. Only a person with an account (`identity_user_id`); no account ⇒ `400 no_account`, already staff ⇒ `409 MEMBER_EVENT_ALREADY_STAFF`. Joins at once (no accept step yet) and the person gets an in-app `member.event_invited` 「〇〇の運営に招待されました」 (`resourceType: "event"` ⇒ `/events/:id`; best-effort, `notified: false` if it failed) |
+
+How a person joins an event's 運営メンバー:
+1. **参加届 for that event** — the public form URL carries it (`/participate?event=<id>` ⇒
+   `SubmitParticipationRequest.eventId` ⇒ `member_participations.event_id`, member migration 0030).
+   When an admin reflects the 届 (`resolve` link / create) the person joins that event; `resolve`
+   `eventId` overrides it (`null` = none). A person already reflected who submits again for
+   another event joins it directly.
+2. **招待** — the invitations route above, for people who already have an account.
+
+The メール名簿 (identity users) stays org-wide and is never scoped to an event.
+
+Optional `eventId` on `POST /members/people`, `POST /members/teams`,
+`POST /members/participation/:id/resolve` (link / create) and `POST /members/hr/applicants/:id/join`
+also selects the new / joined person (or team) for that event. Malformed event id ⇒ `400`;
+unknown person / team ⇒ `404`.
+
 ---
 
 ## 4. Phase state machine
@@ -357,6 +415,8 @@ All permission keys are from the frozen catalog (`auth.md` §9). Resource-scoped
 | `GET /events/:id/participants` | `event:read` | event/:id |
 | `GET /events/:id/actions` | `event:read` | event/:id |
 | `POST /events/:id/actions` | `event:write` | event/:id |
+| `GET /events/:id/apps` | `event:read` | event/:id |
+| `PUT /events/:id/apps` | `event:write` | event/:id |
 | `GET /actions/:id` | `event:read` | (action → event) |
 | `PATCH /actions/:id` | `event:write` | (action → event) |
 | `DELETE /actions/:id` | `event:write` | (action → event) |
@@ -441,6 +501,7 @@ Every write also records an audit entry to the audit queue (`auditLog.AuditRecor
 | update event (fields) | `event.event.updated` | `event` |
 | update event (phase) | `event.event.phase_changed` | `event` |
 | archive event | `event.event.archived` | `event` |
+| save enabled apps | `event.event.apps_updated` (`details: { before, after }`) | `event` |
 | create action | `event.action.created` | `action` |
 | update action | `event.action.updated` | `action` |
 | archive action | `event.action.archived` | `action` |

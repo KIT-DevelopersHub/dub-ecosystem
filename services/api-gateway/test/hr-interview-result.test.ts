@@ -85,7 +85,7 @@ describe("POST /api/v1/admin/hr/applicants/:id/interview-result", () => {
 
   it("pass with team and leader: forwards them to claim (checked before issuing) and link (used when the roster row is made)", async () => {
     const s = setup();
-    const placement = { teamIds: ["team_a", "team_b"], leaderId: "mem_lead" };
+    const placement = { teamIds: ["team_a", "team_b"], leaderId: "mem_lead", eventId: "evt_1" };
     const res = await s.send({ decision: "pass", reason: "良い", localPart: "taro.yamada", ...placement });
     expect(res.status).toBe(201);
     expect(await hit(s.mem, `${BASE}/claim`)[0]!.json()).toMatchObject(placement);

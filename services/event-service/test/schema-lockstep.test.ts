@@ -12,6 +12,7 @@ import {
   EVENT_PAGE_LAYOUT_SCHEMA_MIGRATION,
   EVENT_VENUE_CAPACITY_SCHEMA_MIGRATION,
   EVENT_AI_DIGEST_SCHEMA_MIGRATION,
+  EVENT_ENABLED_APPS_SCHEMA_MIGRATION,
 } from "../src/schema";
 
 // From services/event-service/ up to the repo root, then into infra.
@@ -73,5 +74,10 @@ describe("schema.ts <-> physical migration lockstep", () => {
   it("ai-digest schema const equals infra/d1/migrations/event/0006_event_ai_digest.sql", () => {
     const physical = readFileSync(new URL("../../../infra/d1/migrations/event/0006_event_ai_digest.sql", import.meta.url), "utf8");
     expect(normalizeDdl(EVENT_AI_DIGEST_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
+  });
+
+  it("enabled-apps schema const equals infra/d1/migrations/event/0007_event_enabled_apps.sql", () => {
+    const physical = readFileSync(new URL("../../../infra/d1/migrations/event/0007_event_enabled_apps.sql", import.meta.url), "utf8");
+    expect(normalizeDdl(EVENT_ENABLED_APPS_SCHEMA_MIGRATION.up)).toBe(normalizeDdl(physical));
   });
 });

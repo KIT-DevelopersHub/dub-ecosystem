@@ -146,6 +146,14 @@ function HubBody({ eventId }: { eventId: string }) {
               >
                 チャット
               </Button>
+              <Button
+                iconLeft={<Icon name="settings" />}
+                variant="secondary"
+                onClick={() => nav.navigate(eventRoutes.settings(eventId))}
+                testId="fe3-hub-open-settings"
+              >
+                設定・使うアプリ
+              </Button>
             </div>
           </div>
         )}

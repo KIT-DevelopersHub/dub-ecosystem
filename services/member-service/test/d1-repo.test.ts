@@ -35,7 +35,7 @@ const person = (): PersonRow => ({
 });
 const participation = (): ParticipationRow => ({
   ...base, ...sentinelProfile(), schoolEmail: "v_schoolEmail", gmail: "v_gmail", memberId: null, normalizedName: "n",
-  nameKana: null, nameRomaji: null, contact: null, desiredTeamId: null, position: "organizer", status: "submitted", matchKind: "created_new",
+  nameKana: null, nameRomaji: null, contact: null, desiredTeamId: null, eventId: null, position: "organizer", status: "submitted", matchKind: "created_new",
   reviewState: "pending", submittedBy: "u", submittedAt: "t",
 });
 

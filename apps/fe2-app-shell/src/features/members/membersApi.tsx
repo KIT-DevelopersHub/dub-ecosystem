@@ -39,6 +39,14 @@ export interface MembersApi {
   sendAccountMail(identityUserId: string): Promise<auth.AdminSendAccountMailResponse>;
   /** 情報が足りない本人へ入力を催促する (app:members:edit)。 */
   sendProfileReminder(id: string): Promise<member.SendProfileReminderResponse>;
+  /** このイベントの運営メンバー・班 (全体の名簿から選んだ id)。 */
+  getEventStaff(eventId: string): Promise<member.EventStaff>;
+  /** 全体の名簿の 1 人をこのイベントの運営メンバーに入れる (on) / 外す (off)。 */
+  setEventPerson(eventId: string, personId: string, on: boolean): Promise<member.EventStaff>;
+  /** アカウントのある名簿の人をこのイベントの運営に招待 (すぐ入る＋本人へ通知)。 */
+  inviteToEvent(eventId: string, body: member.InviteEventStaffRequest): Promise<member.InviteEventStaffResponse>;
+  /** 全体のチーム 1 つをこのイベントの班として使う (on) / 使わない (off)。 */
+  setEventTeam(eventId: string, teamId: string, on: boolean): Promise<member.EventStaff>;
 }
 
 const BASE = "/api/v1/members";
@@ -73,6 +81,24 @@ export function createMembersApi(api: ApiClient): MembersApi {
         method: "POST",
         path: `/api/v1/admin/users/${encodeURIComponent(identityUserId)}/account-mail`,
         body: {},
+      }),
+    getEventStaff: (eventId) =>
+      api.request<member.EventStaff>({ method: "GET", path: `${BASE}/events/${encodeURIComponent(eventId)}/staff` }),
+    setEventPerson: (eventId, personId, on) =>
+      api.request<member.EventStaff>({
+        method: on ? "PUT" : "DELETE",
+        path: `${BASE}/events/${encodeURIComponent(eventId)}/people/${encodeURIComponent(personId)}`,
+      }),
+    inviteToEvent: (eventId, body) =>
+      api.request<member.InviteEventStaffResponse>({
+        method: "POST",
+        path: `${BASE}/events/${encodeURIComponent(eventId)}/invitations`,
+        body,
+      }),
+    setEventTeam: (eventId, teamId, on) =>
+      api.request<member.EventStaff>({
+        method: on ? "PUT" : "DELETE",
+        path: `${BASE}/events/${encodeURIComponent(eventId)}/teams/${encodeURIComponent(teamId)}`,
       }),
     sendProfileReminder: (id) =>
       api.request<member.SendProfileReminderResponse>({

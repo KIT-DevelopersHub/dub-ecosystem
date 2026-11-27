@@ -16,6 +16,7 @@ export default defineConfig({
       [
         pkg("@dub/types"),
         pkg("@dub/errors"),
+        pkg("@dub/validation"),
         pkg("@dub/observability"),
         pkg("@dub/http"),
         pkg("@dub/db"),
