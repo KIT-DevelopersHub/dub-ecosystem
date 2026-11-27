@@ -17,6 +17,8 @@ const OPTIONS: mail.MailSendAsOption[] = [
   { address: INFO, kind: "shared", displayName: "北陸ITカンファレンス 実行委員会", signature: SIG },
 ];
 
+const TEAM: mail.MailSendAsOption = { address: "design@developershub.jp", kind: "team_list", displayName: "デザインチーム", signature: "--\nデザインチーム\ndesign@developershub.jp" };
+
 function fakeApi(over: Partial<MailApi> = {}): MailApi {
   return {
     send: vi.fn().mockResolvedValue({ messageId: "m", provider: "resend", acceptedAt: "t" }),
@@ -144,5 +146,51 @@ describe("差出人 in compose", () => {
     await waitFor(() => expect(api.schedule).toHaveBeenCalledTimes(1));
     const req = (api.schedule as ReturnType<typeof vi.fn>).mock.calls[0]![0] as mail.ScheduleMailRequest;
     expect(req.fromAddress).toBe(INFO);
+    expect(req.cc).toEqual([{ email: "me@developershub.jp" }]);
+  });
+
+  it("a team mailing list is offered with the team name and signature", async () => {
+    const api = fakeApi({ listSendAs: vi.fn().mockResolvedValue([...OPTIONS, TEAM]) });
+    render(wrap(<GmailApp />, api));
+    await openCompose();
+    const select = await screen.findByTestId("fe2-mail-compose-from");
+    expect(select).toHaveTextContent("デザインチーム <design@developershub.jp>");
+    await userEvent.selectOptions(select, TEAM.address);
+    expect(body()).toBe(`\n\n${TEAM.signature}`);
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-to"), "vendor@example.com");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-subject"), "入稿");
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    const req = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0] as mail.SendMailRequest;
+    expect(req.fromAddress).toBe(TEAM.address);
+    expect(req.cc).toEqual([{ email: "me@developershub.jp" }]);
+  });
+});
+
+describe("自分の Cc (差出人が自分以外の時)", () => {
+  it("shows the user's own address on Cc, fixed, only while the From is not theirs", async () => {
+    const api = fakeApi({ listSendAs: vi.fn().mockResolvedValue(OPTIONS) });
+    render(wrap(<GmailApp />, api));
+    await openCompose();
+    const select = await screen.findByTestId("fe2-mail-compose-from");
+    expect(screen.queryByTestId("fe2-mail-compose-cc-locked")).not.toBeInTheDocument();
+    await userEvent.selectOptions(select, INFO);
+    const chip = await screen.findByTestId("fe2-mail-compose-cc-locked");
+    expect(chip).toHaveTextContent("me@developershub.jp");
+    expect(chip.querySelector("button")).toBeNull();
+    await userEvent.selectOptions(select, "me@developershub.jp");
+    expect(screen.queryByTestId("fe2-mail-compose-cc-locked")).not.toBeInTheDocument();
+  });
+
+  it("does not add a second copy when the user typed themselves on Cc", async () => {
+    const api = fakeApi({ listSendAs: vi.fn().mockResolvedValue(OPTIONS) });
+    render(wrap(<GmailApp />, api));
+    await openCompose();
+    await userEvent.selectOptions(await screen.findByTestId("fe2-mail-compose-from"), INFO);
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-cc"), "me@developershub.jp,");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-to"), "speaker@example.com");
+    await userEvent.type(screen.getByTestId("fe2-mail-compose-subject"), "s");
+    await userEvent.click(screen.getByTestId("fe2-mail-compose-send"));
+    const req = (api.send as ReturnType<typeof vi.fn>).mock.calls[0]![0] as mail.SendMailRequest;
+    expect(req.cc).toEqual([{ email: "me@developershub.jp" }]);
   });
 });

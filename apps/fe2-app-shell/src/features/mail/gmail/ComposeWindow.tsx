@@ -87,6 +87,14 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     const body = swapSignature(compose.body, compose.mode !== "new", prev?.signature, next.signature);
     patch({ fromAddress: next.kind === "self" ? undefined : next.address, body });
   };
+  // A From that is not the user's own Cc's them, fixed (the gateway forces it too).
+  const selfAddress = fromChoices?.find((o) => o.kind === "self")?.address;
+  const lockedCc = selfAddress && compose.fromAddress && !compose.inReplyTo && compose.fromAddress !== selfAddress ? [{ email: selfAddress }] : undefined;
+  const withLockedCc = (to: mail.MailAddress[], cc: mail.MailAddress[]): mail.MailAddress[] => {
+    const me = lockedCc?.[0]?.email;
+    if (!me || [...to, ...cc].some((a) => a.email.toLowerCase() === me)) return cc;
+    return [...cc, { email: me }];
+  };
 
   // Attachments live in the shared compose-attachment hook (Gmail parity): clip-pick OR
   // drag-and-drop, forbidden-type/size/count rules with explicit errors, per-file read
@@ -265,7 +273,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     // must not post the same mail twice.
     if (submitted.current) return;
     const to = parseRecipients(compose.to).recipients;
-    const cc = parseRecipients(compose.cc).recipients;
+    const cc = withLockedCc(to, parseRecipients(compose.cc).recipients);
     const bcc = parseRecipients(compose.bcc).recipients;
     const draftSettled = server.stop();
     draft.clear(); // restored from the PendingSend snapshot if the send fails
@@ -291,7 +299,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   // attachments — the gateway parks the files in R2 and attaches them at delivery.
   const scheduleSend = (when: Date): string | null => {
     const to = parseRecipients(compose.to).recipients;
-    const cc = parseRecipients(compose.cc).recipients;
+    const cc = withLockedCc(to, parseRecipients(compose.cc).recipients);
     const bcc = parseRecipients(compose.bcc).recipients;
     if (to.length === 0) return "宛先を入力してください";
     if (att.hasPending || seeding) return "添付ファイルを処理中です…";
@@ -453,7 +461,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             testId="fe2-mail-compose-to"
             extra={
               <span style={{ display: "flex", gap: 8 }}>
-                {!compose.showCc ? (
+                {!compose.showCc && !lockedCc ? (
                   <button type="button" onClick={() => patch({ showCc: true })} style={ccBtn}>Cc</button>
                 ) : null}
                 {!compose.showBcc ? (
@@ -462,8 +470,19 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
               </span>
             }
           />
-          {compose.showCc ? (
-            <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-cc" />
+          {compose.showCc || lockedCc ? (
+            <EmailAddressSelect
+              variant="flush"
+              label="Cc"
+              value={compose.cc}
+              onChange={(v) => patch({ cc: v })}
+              parse={parseRecipients}
+              candidates={candidates}
+              removeIcon={removeIcon}
+              renderTokenIcon={recipientIcon}
+              testId="fe2-mail-compose-cc"
+              {...(lockedCc ? { lockedTokens: lockedCc, lockedHint: "差出人を自分以外にした時は、自分にも必ず届きます（外せません）" } : {})}
+            />
           ) : null}
           {compose.showBcc ? (
             <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-bcc" />

@@ -866,6 +866,8 @@ const DEMO_ARCHIVE_CC = "archive@developershub.jp";
 /** 共用アドレス the demo offers in compose (mirrors the 0027 seed for info@). */
 const DEMO_SEND_AS: mail.MailSendAsOption[] = [
   { address: "info@developershub.jp", kind: "shared", displayName: "北陸ITカンファレンス 実行委員会", signature: "--\n北陸ITカンファレンス 実行委員会\ninfo@developershub.jp" },
+  // A team mailing list the demo account belongs to (0024), named and signed after the team.
+  { address: "design@developershub.jp", kind: "team_list", displayName: "デザインチーム", signature: "--\nデザインチーム\ndesign@developershub.jp" },
 ];
 
 function hideArchiveCc<T extends { cc?: mail.MailAddress[] }>(item: T): T {
@@ -1512,10 +1514,14 @@ function createMailStore() {
         return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
       });
       // Auto-CC the archive address (dedup against To/Cc) — mirrors MAIL_ARCHIVE_CC.
-      const baseCc = req.cc ?? [];
+      const sharedPick = DEMO_SEND_AS.find((o) => o.address === req.fromAddress);
+      // Like the gateway: a From that is not the sender's own always Cc's the sender.
+      const meLower = me.email.toLowerCase();
+      const ccIn = req.cc ?? [];
+      const baseCc = sharedPick && ![...(req.to ?? []), ...ccIn].some((a) => a.email?.trim().toLowerCase() === meLower) ? [...ccIn, { email: meLower }] : ccIn;
       const alreadyArchived = [...(req.to ?? []), ...baseCc].some((a) => a.email?.trim().toLowerCase() === DEMO_ARCHIVE_CC);
       const cc = alreadyArchived ? baseCc : [...baseCc, { email: DEMO_ARCHIVE_CC }];
-      const sharedFrom = DEMO_SEND_AS.find((o) => o.address === req.fromAddress);
+      const sharedFrom = sharedPick;
       const detail: mail.MailSentDetail = {
         id,
         from: sharedFrom ? { email: sharedFrom.address, name: sharedFrom.displayName ?? sharedFrom.address } : { email: me.email, name: me.displayName },
