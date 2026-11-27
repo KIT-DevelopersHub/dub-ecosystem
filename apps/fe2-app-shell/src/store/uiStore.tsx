@@ -9,11 +9,16 @@ export type ThemeValue = "light" | "dark" | "system";
 
 const THEME_KEY = "dub.ui.theme";
 const SIDEBAR_KEY = "dub.ui.sidebar";
+// 右側の AI パネルの開閉 (既定は閉じる)。
+const AI_PANEL_KEY = "dub.ui.aiPanel";
 
 export interface UiStore {
   sidebarOpen: boolean;
   theme: ThemeValue;
+  aiPanelOpen: boolean;
   toggleSidebar(): void;
+  toggleAiPanel(): void;
+  setAiPanelOpen(open: boolean): void;
   setSidebarOpen(open: boolean): void;
   setTheme(t: ThemeValue): void;
 }
@@ -36,6 +41,14 @@ function readSidebar(): boolean {
   }
 }
 
+function readAiPanel(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(AI_PANEL_KEY) === "open";
+  } catch {
+    return false;
+  }
+}
+
 function persist(key: string, value: string): void {
   try {
     globalThis.localStorage?.setItem(key, value);
@@ -47,6 +60,16 @@ function persist(key: string, value: string): void {
 export const useUiStore = create<UiStore>((set, get) => ({
   sidebarOpen: readSidebar(),
   theme: readTheme(),
+  aiPanelOpen: readAiPanel(),
+  toggleAiPanel: () => {
+    const next = !get().aiPanelOpen;
+    persist(AI_PANEL_KEY, next ? "open" : "closed");
+    set({ aiPanelOpen: next });
+  },
+  setAiPanelOpen: (open: boolean) => {
+    persist(AI_PANEL_KEY, open ? "open" : "closed");
+    set({ aiPanelOpen: open });
+  },
   toggleSidebar: () => {
     const next = !get().sidebarOpen;
     persist(SIDEBAR_KEY, next ? "open" : "closed");

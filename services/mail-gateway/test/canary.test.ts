@@ -141,17 +141,20 @@ describe("canary probes", () => {
     const canaryAudit = () => auditActions(sends.audit).filter((a) => a.startsWith("mail.canary."));
     const tick = (t: number) => runCanary(env, t, t);
 
-    // probe 1 @T0 times out @T0+10
+    // probe 1 @T0 times out @T0+10 -> a confirmation probe goes out on the same tick
     await tick(T0);
     await tick(T0 + 5 * MIN);
     let r = await tick(T0 + 10 * MIN);
-    expect(r.alerts).toBe(0);
-    // probe 2 @T0+15 times out @T0+25 -> ALERT
-    await tick(T0 + 15 * MIN);
-    await tick(T0 + 20 * MIN);
-    r = await tick(T0 + 25 * MIN);
+    expect(r).toMatchObject({ alerts: 0, sent: true });
+    // probe 2 (confirmation) @T0+10 times out @T0+20 -> ALERT (no waiting for the next slot)
+    r = await tick(T0 + 15 * MIN);
+    expect(r.sent).toBe(false); // slot, but the confirmation probe is still pending
+    r = await tick(T0 + 20 * MIN);
     expect(r.alerts).toBe(1);
     expect(canaryAudit()).toEqual(["mail.canary.alert"]);
+    // already alerted: no extra confirmation probes, back to the normal interval
+    r = await tick(T0 + 25 * MIN);
+    expect(r.sent).toBe(false);
     // probe 3 @T0+30 times out @T0+40 -> still failing, no re-alert
     await tick(T0 + 30 * MIN);
     await tick(T0 + 35 * MIN);

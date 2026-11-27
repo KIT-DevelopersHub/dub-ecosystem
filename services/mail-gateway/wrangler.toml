@@ -115,6 +115,12 @@ CF_EMAIL_ROUTING_WORKER_NAME = "dub-mail-gateway"
 # MAIL_CANARY_EXPECT_CC = "false"     # "true" once the per-recipient (Cc) ingest fix ships
 # MAIL_CANARY_INTERVAL_MIN = "15"     # multiple of 5; each probe = 1 Resend send
 # MAIL_CANARY_DEADLINE_MIN = "10"
+# Production mail monitor (src/monitor.ts, #898; needs migration 0029). Optional Slack secret:
+# wrangler secret put MAIL_ALERT_SLACK_WEBHOOK_URL
+# MAIL_MONITOR_ENABLED = "true"
+# MAIL_MONITOR_INTERVAL_MIN = "15"
+# MAIL_MONITOR_USER_ID: Workers Secret (not a var). Roster user that owns MAIL_CANARY_TO,
+#   with メール閲覧 + mail:read only (list/thread API check).
 
 # Cron: every 5 minutes (ONE trigger — the Workers Free plan caps the account at 5 cron
 # triggers, so we keep mail-gateway's single trigger and just make it tick more often).

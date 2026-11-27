@@ -92,7 +92,9 @@ export type IconName =
   | "moon"
   | "monitor"
   // カラー設定 (fe2 設定メニュー → カラー設定ダイアログのエントリ). Additive, closed-union preserved.
-  | "palette";
+  | "palette"
+  // AI アシスタント (fe2 右側の AI パネルの開閉ボタン). Additive, closed-union preserved.
+  | "sparkles";
 
 export interface IconProps extends TestableProps {
   name: IconName;
@@ -504,6 +506,9 @@ export interface AppShellProps extends TestableProps {
   // sidebar in favour of the header AppLauncher, so mail/chat get the full canvas.
   sidebar?: ReactNode;
   header?: ReactNode;
+  // Optional right rail (FE2 の AI パネル). Rendered beside the main column at full
+  // height so opening it narrows the content instead of covering it. Omitted = no rail.
+  aside?: ReactNode;
   children: ReactNode; // main content
 }
 

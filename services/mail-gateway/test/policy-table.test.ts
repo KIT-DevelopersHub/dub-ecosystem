@@ -119,6 +119,7 @@ const READS = [
   "GET /mail/messages/:id/attachments/:attId",
   "GET /mail/scheduled",
   "GET /mail/scheduled/:id",
+  "GET /mail/send-as",
   "GET /mail/sent",
   "GET /mail/sent/:id",
   "GET /mail/sent/:id/attachments/:attId",
@@ -152,10 +153,12 @@ const EMAIL_ROUTING_ADMIN = [
   "DELETE /mail/admin/email-routing/addresses/:id",
   "DELETE /mail/admin/email-routing/issued-addresses/:id",
   "DELETE /mail/admin/email-routing/rules/:id",
+  "DELETE /mail/admin/email-routing/suppressions/:email",
   "GET /mail/admin/email-routing/addresses",
   "GET /mail/admin/email-routing/issued-addresses",
   "GET /mail/admin/email-routing/roster-addresses",
   "GET /mail/admin/email-routing/rules",
+  "GET /mail/admin/email-routing/suppressions",
   "PATCH /mail/admin/email-routing/issued-addresses/:id",
   "PATCH /mail/admin/email-routing/rules/:id",
   "POST /mail/admin/email-routing/addresses",
@@ -169,12 +172,17 @@ const ADMIN = [
   "POST /mail/mailboxes/:id",
   "GET /mail/status",
   "GET /mail/admin/canary/probes",
+  "GET /mail/admin/monitor",
   "GET /mail/admin/lists",
   "POST /mail/admin/lists",
   "DELETE /mail/admin/lists/:id",
+  "GET /mail/admin/shared-mailboxes",
+  "POST /mail/admin/shared-mailboxes",
+  "PATCH /mail/admin/shared-mailboxes/:id",
+  "DELETE /mail/admin/shared-mailboxes/:id",
 ].sort();
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
-const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/status", "POST /internal/email-routing/issued-addresses", "POST /internal/email-routing/issued-addresses/lookup", "POST /internal/email-routing/issued-addresses/revoke", "POST /internal/sponsor/contacts", "POST /internal/webhooks/resend", "POST /send"];
+const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET /internal/monitor/heartbeat", "GET /internal/status", "POST /internal/email-routing/issued-addresses", "POST /internal/email-routing/issued-addresses/lookup", "POST /internal/email-routing/issued-addresses/revoke", "POST /internal/sponsor/contacts", "POST /internal/webhooks/resend", "POST /send"];
 // The one PUBLIC route, hence in EVERY row below including the empty-key one. Stated rather
 // than hidden: that is the fact a matrix is for.
 const PUBLIC_ROUTES = ["GET /internal/health"];
@@ -209,7 +217,7 @@ describe("role x endpoint matrix (frozen)", () => {
     const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(65);
+    expect(everyRoute).toHaveLength(74);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing
@@ -229,6 +237,8 @@ describe("role x endpoint matrix (frozen)", () => {
       expect(reachable).not.toContain("GET /mail/admin/canary/probes");
       // A list decides who receives mail, so it sits behind the same key.
       expect(reachable).not.toContain("POST /mail/admin/lists");
+      // So does deciding who may send as a shared address.
+      expect(reachable).not.toContain("PATCH /mail/admin/shared-mailboxes/:id");
     }
     // ...and the holder does reach all of them, so the assertion above is not vacuous.
     expect(allowedRoutes(["mail:admin"])).toEqual(ADMIN_ONLY);
