@@ -35,13 +35,15 @@ import { effectiveTuning, providerReadiness } from "./config-check";
 import { emailRoutingReadiness } from "./email-routing";
 import { registerEmailRoutingAdmin, registerEmailRoutingInternal } from "./email-routing-routes";
 import { registerTeamListAdmin } from "./team-list-routes";
+import { registerSharedMailboxes } from "./shared-mailbox-routes";
 import { registerDrafts } from "./drafts";
 import { registerTemplates } from "./templates";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
+import { heartbeat } from "./monitor";
 import { handleResendWebhook } from "./resend-webhook";
 import { buildAuditEnv, buildBlobs, buildDb, buildSendDeps } from "./deps";
 import { attachmentsFor, parkScheduledAttachments, releaseScheduledAttachments } from "./attachments";
-import { isCompanyAddress, resolveReplyFromAddress, resolveUserFromAddress } from "./from";
+import { isCompanyAddress, requiredSelfCc, resolveSendIdentity, withSelfCc } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
 import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, setInboundReadState, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
@@ -242,12 +244,13 @@ export function createApp() {
     //    identity AND their reply returns to that Worker-routed address (loop closes).
     //  - a fresh compose uses the logged-in user's own @developershub.jp address, with a
     //    safe info@ fallback for non-roster / non-company callers. See from.ts.
-    const fromAddress = req.inReplyTo
-      ? await resolveReplyFromAddress(c.env, ctx, dbOf(c), req.inReplyTo, userId)
-      : await resolveUserFromAddress(c.env, ctx, userId);
+    //  - a From the composer picked (req.fromAddress) wins: their own address, or a shared
+    //    mailbox (共用アドレス, 0027) they may send as — checked here on every send (else 403).
+    const identity = await resolveSendIdentity(c.env, ctx, dbOf(c), userId, req);
     // Owner = the signed-in user so this send shows only in THEIR Sent folder (#169).
-    const deps = buildSendDeps(c.env, ctx, undefined, fromAddress, userId);
-    const { response, status } = await sendMail(deps, req, idempotencyKey, requester);
+    const deps = buildSendDeps(c.env, ctx, undefined, identity.fromAddress, userId, identity);
+    // A From that is not the sender's own always Cc's the sender (必須, whatever the client sent).
+    const { response, status } = await sendMail(deps, withSelfCc(req, identity.selfCc), idempotencyKey, requester);
     return c.json(response satisfies mail.SendMailResponse, status === "duplicate" ? 200 : 202);
   });
 
@@ -359,13 +362,14 @@ export function createApp() {
   ext.post("/scheduled", async (c) => {
     const ctx = ctxOf(c);
     const userId = ownerOf(c);
-    const req = parseScheduleMailRequest(await c.req.json().catch(() => null));
-    assertAttachmentsSupported(c, req);
+    const parsed = parseScheduleMailRequest(await c.req.json().catch(() => null));
+    assertAttachmentsSupported(c, parsed);
     // Resolve the envelope From now (same rules as /outbox) so the Scheduled list shows the
-    // real From and the drain need not resolve later.
-    const fromAddress = req.inReplyTo
-      ? await resolveReplyFromAddress(c.env, ctx, dbOf(c), req.inReplyTo, userId)
-      : await resolveUserFromAddress(c.env, ctx, userId);
+    // real From and the drain need not resolve later. A picked shared mailbox is checked now
+    // and again by the drain (the right can be gone by then).
+    const { fromAddress, picked, selfCc } = await resolveSendIdentity(c.env, ctx, dbOf(c), userId, parsed);
+    // Same forced Cc as /outbox, stored on the row (the drain and PATCH keep it there).
+    const req = withSelfCc(parsed, selfCc);
     const id = newScheduledId();
     // Park the files FIRST (R2 bytes + metadata keyed to the pre-minted id): a storage
     // failure 503s before any row exists, so a schedule can never go out file-less.
@@ -385,6 +389,7 @@ export function createApp() {
       inReplyTo: req.inReplyTo ?? null,
       fromAddress,
       scheduledAt: req.scheduledAt,
+      sharedMailbox: picked,
     });
     return c.json({ id, scheduledAt: req.scheduledAt, status: "scheduled" } satisfies mail.ScheduleMailResponse, 202);
   });
@@ -407,9 +412,20 @@ export function createApp() {
     const id = c.req.param("id");
     const owner = ownerOf(c);
     const patch = parseScheduleMailPatch(await c.req.json().catch(() => null));
+    // Sent as a shared address / team list: an edit of To or Cc cannot drop the sender's Cc.
+    let ccJson = patch.cc !== undefined ? JSON.stringify(patch.cc) : undefined;
+    if (patch.to !== undefined || patch.cc !== undefined) {
+      const row = await findScheduledRow(dbOf(c), id, owner);
+      if (row?.shared_mailbox && row.owner_user_id) {
+        const self = await requiredSelfCc(c.env, ctxOf(c), row.owner_user_id);
+        const to = patch.to ?? (JSON.parse(row.to_json) as mail.MailAddress[]);
+        const cc = patch.cc ?? (row.cc_json ? (JSON.parse(row.cc_json) as mail.MailAddress[]) : []);
+        ccJson = JSON.stringify(withSelfCc({ to, cc }, self).cc ?? []);
+      }
+    }
     const changed = await updateScheduled(dbOf(c), id, owner, {
       ...(patch.to !== undefined ? { toJson: JSON.stringify(patch.to) } : {}),
-      ...(patch.cc !== undefined ? { ccJson: JSON.stringify(patch.cc) } : {}),
+      ...(ccJson !== undefined ? { ccJson } : {}),
       ...(patch.subject !== undefined ? { subject: patch.subject } : {}),
       ...(patch.textBody !== undefined ? { textBody: patch.textBody } : {}),
       ...(patch.htmlBody !== undefined ? { htmlBody: patch.htmlBody } : {}),
@@ -616,6 +632,7 @@ export function createApp() {
   // route added in that file without a table line is denied and turns coverage red.
   registerEmailRoutingAdmin(ext);
   registerTeamListAdmin(ext);
+  registerSharedMailboxes(ext);
   registerDrafts(ext);
   registerTemplates(ext);
 
@@ -632,8 +649,18 @@ export function createApp() {
     return c.json({ config: canaryConfig(c.env), items: rows.map(toProbeView) });
   });
 
+  // ---- production mail monitor state (#898; `mail:admin` in the table). One row per check.
+  ext.get("/admin/monitor", async (c) => c.json(await heartbeat(c.env, dbOf(c))));
+
   app.route("/mail", ext);
   registerEmailRoutingInternal(app);
+
+  // ---- monitor heartbeat (INTERNAL in the table). 200 while the cron-driven monitor keeps
+  // running (or it is off), 503 when it went stale — app-health-monitor alerts on that.
+  app.get("/internal/monitor/heartbeat", async (c) => {
+    const view = await heartbeat(c.env, dbOf(c));
+    return c.json(view, view.fresh ? 200 : 503);
+  });
 
   // ---- status: live send-health self-report (INTERNAL in the table). Derives "directly
   // rate-limited" from the send-log so an operator dashboard (fe7 admin) can surface it. The
