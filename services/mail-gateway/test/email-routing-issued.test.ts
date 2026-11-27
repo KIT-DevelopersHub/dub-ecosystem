@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { createApp } from "../src/app";
 import { makeEnv } from "./helpers";
 import type { Env } from "../src/env";
+import { runScheduledSendDrain } from "../src/scheduled-send";
 
 const app = createApp();
 
@@ -91,16 +92,27 @@ describe("issued-addresses — list", () => {
 });
 
 describe("issued-addresses — issue (create rule + confirmation mail)", () => {
-  it("issues an address: creates a worker rule, audits success, sends a confirmation mail (201)", async () => {
+  it("issues an address: creates a worker rule, audits success, QUEUES the confirmation mail (201)", async () => {
     const calls = stubCf({ list: [], onCreate: (body) => ok({ id: "r_new", ...(body as object), priority: 0 }) });
-    const { env, sends } = wiredEnv();
+    const { env, sends, raw } = wiredEnv();
+    const before = Date.now();
     const res = await app.fetch(
       new Request("https://svc/mail/admin/email-routing/issued-addresses", { method: "POST", headers: adminHeaders(), body: JSON.stringify({ localPart: "team" }) }),
       env,
     );
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { id: string; address: string; destination: string; enabled: boolean; confirmationEmailSent: boolean; createdAt: string };
+    const body = (await res.json()) as {
+      id: string;
+      address: string;
+      destination: string;
+      enabled: boolean;
+      confirmationEmailSent: boolean;
+      confirmationEmailScheduledAt: string | null;
+      suppressionCleared: boolean | null;
+      createdAt: string;
+    };
     expect(body).toMatchObject({ id: "r_new", address: "team@developershub.jp", destination: "mail-gateway (Worker)", enabled: true, confirmationEmailSent: true });
+    expect(body.suppressionCleared).toBeNull(); // mock provider: no suppression list to look at
     expect(body.createdAt).not.toBe("");
 
     // The CF create call carried a literal to-matcher in our zone + a worker action.
@@ -109,10 +121,79 @@ describe("issued-addresses — issue (create rule + confirmation mail)", () => {
       matchers: [{ type: "literal", field: "to", value: "team@developershub.jp" }],
       actions: [{ type: "worker", value: ["dub-mail-gateway"] }],
     });
-
-    // Issue audit success + the confirmation mail's own send audit + a mail.message.sent event.
     expect(sends.audit.some((a) => (a.payload as { action?: string }).action === "mail.email_routing.address.issue" && (a.payload as { result?: string }).result === "success")).toBe(true);
+
+    // Regression (2026-11-27): NOT sent inline — a mail that beats the new rule to the MX
+    // hard-bounces and Resend suppresses the address for good. It is parked ~5 min out.
+    expect(sends.notif.some((e) => (e as { name?: string }).name === "mail.message.sent")).toBe(false);
+    const row = raw.prepare(`SELECT owner_user_id, to_json, subject, scheduled_at, status FROM mail_scheduled`).get() as {
+      owner_user_id: string | null;
+      to_json: string;
+      subject: string;
+      scheduled_at: string;
+      status: string;
+    };
+    expect(row).toMatchObject({ owner_user_id: null, subject: "メールアドレスを発行しました", status: "scheduled" });
+    expect(JSON.parse(row.to_json)).toEqual([{ email: "team@developershub.jp" }]);
+    expect(row.scheduled_at).toBe(body.confirmationEmailScheduledAt);
+    const delayMs = Date.parse(row.scheduled_at) - before;
+    expect(delayMs).toBeGreaterThanOrEqual(5 * 60_000 - 1000);
+    expect(delayMs).toBeLessThanOrEqual(5 * 60_000 + 5000);
+
+    // The drain sends it once due, marked auto-generated (system row).
+    expect((await runScheduledSendDrain(env, Date.now())).sent).toBe(0);
+    const later = await runScheduledSendDrain(env, Date.now() + 6 * 60_000);
+    expect(later.sent).toBe(1);
     expect(sends.notif.some((e) => (e as { name?: string }).name === "mail.message.sent")).toBe(true);
+    const log = raw.prepare(`SELECT to_json, owner_user_id FROM mail_send_log WHERE subject = 'メールアドレスを発行しました'`).get() as { to_json: string; owner_user_id: string | null };
+    expect(JSON.parse(log.to_json)).toEqual([{ email: "team@developershub.jp" }]);
+    expect(log.owner_user_id).toBeNull();
+  });
+
+  it("MAIL_ISSUE_CONFIRM_DELAY_MIN sets the wait (0 = next cron tick)", async () => {
+    stubCf({ list: [], onCreate: (body) => ok({ id: "r_d", ...(body as object), priority: 0 }) });
+    const { env } = wiredEnv({ MAIL_ISSUE_CONFIRM_DELAY_MIN: "0" } as Partial<Env>);
+    const before = Date.now();
+    const res = await app.fetch(
+      new Request("https://svc/mail/admin/email-routing/issued-addresses", { method: "POST", headers: adminHeaders(), body: JSON.stringify({ localPart: "quick" }) }),
+      env,
+    );
+    const at = ((await res.json()) as { confirmationEmailScheduledAt: string }).confirmationEmailScheduledAt;
+    expect(Date.parse(at) - before).toBeLessThan(5000);
+  });
+
+  it("re-issuing a previously bounced address clears its Resend suppression (audited, recorded)", async () => {
+    const cfCalls = stubCf({ list: [], onCreate: (body) => ok({ id: "r_re", ...(body as object), priority: 0 }) });
+    const cfFetch = globalThis.fetch as unknown as (url: string, init: RequestInit) => Promise<Response>;
+    const resendCalls: Array<{ method: string; url: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        if (!url.startsWith("https://api.resend.com/")) return cfFetch(url, init);
+        const method = (init.method ?? "GET").toUpperCase();
+        resendCalls.push({ method, url });
+        if (method === "GET") {
+          return new Response(
+            JSON.stringify({ object: "suppression", id: "sup_1", email: "back@developershub.jp", origin: "bounce", source_id: "em_1", created_at: "2026-11-27 10:48:14.9+00" }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ object: "suppression", id: "sup_1", deleted: true }), { status: 200 });
+      }),
+    );
+    const { env, sends, raw } = wiredEnv({ MAIL_OUTBOUND_PROVIDER: "resend", RESEND_API_KEY: "re_test" } as Partial<Env>);
+    const res = await app.fetch(
+      new Request("https://svc/mail/admin/email-routing/issued-addresses", { method: "POST", headers: adminHeaders(), body: JSON.stringify({ localPart: "back" }) }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { suppressionCleared: boolean | null }).suppressionCleared).toBe(true);
+    expect(cfCalls.some((c) => c.method === "POST")).toBe(true);
+    expect(resendCalls.map((c) => c.method)).toEqual(["GET", "DELETE"]);
+    expect(resendCalls[1]!.url).toBe("https://api.resend.com/suppressions/back%40developershub.jp");
+    expect(sends.audit.some((a) => (a.payload as { action?: string }).action === "mail.suppression.remove" && (a.payload as { result?: string }).result === "success")).toBe(true);
+    const ev = raw.prepare(`SELECT event_type, recipient_key FROM mail_provider_event`).get() as { event_type: string; recipient_key: string };
+    expect(ev).toEqual({ event_type: "dub.suppression_removed", recipient_key: "back@developershub.jp" });
   });
 
   it("rejects a duplicate address with 409 (no create call)", async () => {
@@ -140,13 +221,26 @@ describe("issued-addresses — issue (create rule + confirmation mail)", () => {
     expect(sends.audit).toHaveLength(0);
   });
 
-  it("still issues (201) when the confirmation mail cannot be sent — best-effort, flag=false", async () => {
-    // provider=resend with NO api key => loud stub throws => confirmation send fails, but
-    // the rule was already created, so the issue must still succeed.
+  it("still issues (201) when the suppression list cannot be checked — best-effort, flag=null", async () => {
+    // provider=resend with NO api key => no suppressions client; the issue and the queued
+    // confirmation are unaffected.
     stubCf({ list: [], onCreate: (body) => ok({ id: "r_ok", ...(body as object), priority: 0 }) });
     const { env } = wiredEnv({ MAIL_OUTBOUND_PROVIDER: "resend", RESEND_API_KEY: undefined } as Partial<Env>);
     const res = await app.fetch(
       new Request("https://svc/mail/admin/email-routing/issued-addresses", { method: "POST", headers: adminHeaders(), body: JSON.stringify({ localPart: "noconfirm" }) }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { confirmationEmailSent: boolean; suppressionCleared: boolean | null };
+    expect(body).toMatchObject({ confirmationEmailSent: true, suppressionCleared: null });
+  });
+
+  it("still issues (201) when the confirmation cannot be queued — best-effort, flag=false", async () => {
+    stubCf({ list: [], onCreate: (body) => ok({ id: "r_nq", ...(body as object), priority: 0 }) });
+    const { env, raw } = wiredEnv();
+    raw.exec("DROP TABLE mail_scheduled");
+    const res = await app.fetch(
+      new Request("https://svc/mail/admin/email-routing/issued-addresses", { method: "POST", headers: adminHeaders(), body: JSON.stringify({ localPart: "noqueue" }) }),
       env,
     );
     expect(res.status).toBe(201);

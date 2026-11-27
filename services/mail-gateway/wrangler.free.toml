@@ -84,14 +84,29 @@ MAIL_ARCHIVE_CC = "archive@developershub.jp"
 MAIL_SEND_MAX_ATTEMPTS = "3"
 MAIL_SEND_TIMEOUT_MS = "15000"
 MAIL_RATE_LIMIT_COOLDOWN_SEC = "60"
-# 外形監視（canary）: qa-a / qa-b の受け口は Email Routing で dub-mail-gateway 宛に作成済み（2026-10-30）。
+# 外形監視（canary）: 受け口は Email Routing で dub-mail-gateway 宛に作成済み（qa-b は 2026-10-30）。
+# To は監視用アカウント dev-monitor@（名簿にいる・ログイン不可）。届いた試験メールはその人の受信箱に入り、
+# 監視は mail:read だけで一覧/スレッドを確かめられる（mail:read_all は要らない）。Cc の qa-b は名簿に入れない。
 # Resend 無料枠（100通/日）を圧迫しないよう 60 分おき（24通/日）。
 MAIL_CANARY_ENABLED = "true"
-MAIL_CANARY_TO = "qa-a@developershub.jp"
+MAIL_CANARY_TO = "dev-monitor@developershub.jp"
 MAIL_CANARY_CC = "qa-b@developershub.jp"
 MAIL_CANARY_EXPECT_CC = "true"
 MAIL_CANARY_INTERVAL_MIN = "60"
 MAIL_CANARY_DEADLINE_MIN = "10"
+# メールの本番監視（#898・src/monitor.ts）: 送信・受信（canary の結果）・一覧/スレッド API・
+# メンバーの送信失敗を確認し、2 回続けて失敗したらアプリ内通知（管理者向け・スマホ通知も）+
+# Slack（MAIL_ALERT_SLACK_WEBHOOK_URL を secret で入れた時だけ）に 1 回だけ知らせ、直ったら「復旧」を送る。
+# 先に migration infra/d1/migrations/mail/0029_mail_monitor_state.sql を dub-core に適用すること。
+# 手順: docs/runbooks/12-mail-incident.md
+MAIL_MONITOR_ENABLED = "true"
+MAIL_MONITOR_INTERVAL_MIN = "15"
+# Resend の送信停止リスト（resend-suppressions.ts）: 自ゾーンで受信ルールが有効なのに bounce で
+# 止まったアドレスを毎時外す（同じアドレスは 7 日に 1 回まで）。発行確認メールは 5 分待ってから送る。
+MAIL_SUPPRESSION_AUTOHEAL = "true"
+MAIL_ISSUE_CONFIRM_DELAY_MIN = "5"
+# 一覧/スレッド API を試す名簿ユーザー MAIL_MONITOR_USER_ID は vars に書かず Workers Secret で入れる
+# （wrangler secret put MAIL_MONITOR_USER_ID）。dev-monitor@ のユーザー id。未設定なら API 確認は止まる。
 # Email Routing admin (address issuance). The token is a Workers Secret set out-of-band
 # (wrangler secret put CF_EMAIL_ROUTING_TOKEN); the ids/zone/worker below are non-secret.
 # CF_EMAIL_ROUTING_ZONE_ID / CF_EMAIL_ROUTING_ACCOUNT_ID are provisioned on the worker

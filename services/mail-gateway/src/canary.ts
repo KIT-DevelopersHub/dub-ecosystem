@@ -29,6 +29,8 @@ import { SERVICE_NAME } from "./config";
 import { buildAuditEnv, buildDb, buildSendDeps } from "./deps";
 import { parseAddress } from "./mime";
 import { sendMail } from "./send";
+import { recordFromCanary } from "./monitor";
+import { suppressionNote } from "./resend-suppressions";
 import type { Env } from "./env";
 
 export const CANARY_SUBJECT_PREFIX = "[dub-canary]";
@@ -36,6 +38,8 @@ export const CANARY_ALERT_AFTER = 2; // consecutive failed probes before alertin
 const DEFAULT_INTERVAL_MIN = 15;
 const DEFAULT_DEADLINE_MIN = 10;
 const MINUTE = 60_000;
+// Earliest re-probe after a single failure (one cron tick).
+const CONFIRM_GAP_MIN = 5;
 
 export interface CanaryConfig {
   to: string;
@@ -145,6 +149,7 @@ export async function listProbes(db: DbClient, limit: number): Promise<ProbeRow[
 
 interface InboundHit {
   created_at: string;
+  thread_id?: string | null;
   header_meta_json: string | null;
   /** Envelope recipient of this copy (mail_inbound_delivery, 0018). Wins over header_meta. */
   delivered_to?: string | null;
@@ -154,11 +159,11 @@ interface InboundHit {
  *  within the probe's window (Resend may replace our Message-ID). */
 async function findInbound(db: DbClient, p: ProbeRow): Promise<InboundHit[]> {
   const byId = p.message_id
-    ? await db.all<InboundHit & { id: string }>(`SELECT id, created_at, header_meta_json FROM mail_inbound WHERE message_id = ?`, p.message_id)
+    ? await db.all<InboundHit & { id: string }>(`SELECT id, thread_id, created_at, header_meta_json FROM mail_inbound WHERE message_id = ?`, p.message_id)
     : [];
   const since = new Date(Date.parse(p.sent_at) - MINUTE).toISOString();
   const bySubject = await db.all<InboundHit & { id: string; message_id: string }>(
-    `SELECT id, message_id, created_at, header_meta_json FROM mail_inbound WHERE created_at >= ? AND subject = ?`,
+    `SELECT id, message_id, thread_id, created_at, header_meta_json FROM mail_inbound WHERE created_at >= ? AND subject = ?`,
     since,
     p.subject,
   );
@@ -171,8 +176,8 @@ async function findInbound(db: DbClient, p: ProbeRow): Promise<InboundHit[]> {
       `SELECT envelope_to, created_at FROM mail_inbound_delivery WHERE inbound_id = ?`,
       r.id,
     );
-    if (deliveries.length === 0) hits.push({ created_at: r.created_at, header_meta_json: r.header_meta_json });
-    for (const d of deliveries) hits.push({ created_at: d.created_at, header_meta_json: null, delivered_to: d.envelope_to || null });
+    if (deliveries.length === 0) hits.push({ created_at: r.created_at, thread_id: r.thread_id ?? null, header_meta_json: r.header_meta_json });
+    for (const d of deliveries) hits.push({ created_at: d.created_at, thread_id: r.thread_id ?? null, header_meta_json: null, delivered_to: d.envelope_to || null });
   }
   return hits;
 }
@@ -222,6 +227,7 @@ export async function runCanary(env: Env, scheduledTime: number = Date.now(), no
   try {
     await checkPending(env, ctx, db, cfg, now, out);
     if (isSendSlot(scheduledTime, cfg.intervalMin)) out.sent = await sendProbe(env, ctx, db, cfg, now, out);
+    else if (await needsConfirmProbe(db, now)) out.sent = await sendProbe(env, ctx, db, cfg, now, out, true);
   } catch (err) {
     log("error", "mail-gateway canary: tick failed", ctx, { error: err instanceof Error ? err.message : String(err) });
   }
@@ -231,7 +237,8 @@ export async function runCanary(env: Env, scheduledTime: number = Date.now(), no
 async function checkPending(env: Env, ctx: RequestContext, db: DbClient, cfg: CanaryConfig, now: number, out: CanaryTickResult): Promise<void> {
   const pending = await db.all<ProbeRow>(`SELECT * FROM mail_canary_probe WHERE status = 'pending' ORDER BY sent_at ASC LIMIT 20`);
   for (const p of pending) {
-    const { toMs, ccMs } = evaluateArrivals(p, await findInbound(db, p));
+    const hits = await findInbound(db, p);
+    const { toMs, ccMs } = evaluateArrivals(p, hits);
     const expired = now - Date.parse(p.sent_at) >= cfg.deadlineMin * MINUTE;
     if (!(toMs !== null && ccMs !== null) && !expired) continue; // keep waiting
     const healthy = cfg.expectCc ? toMs !== null && ccMs !== null : toMs !== null || ccMs !== null;
@@ -249,14 +256,46 @@ async function checkPending(env: Env, ctx: RequestContext, db: DbClient, cfg: Ca
     );
     out.finalized++;
     await evaluateAlert(env, ctx, db, p.id, healthy, out);
+    const threadId = hits.find((h) => h.thread_id)?.thread_id ?? null;
+    await recordFromCanary(
+      env,
+      "receive",
+      healthy
+        ? { ok: true, detail: `到着 To ${fmtMs(toMs)} / Cc ${fmtMs(ccMs)}`, ...(threadId ? { ref: threadId } : {}) }
+        : {
+            ok: false,
+            detail:
+              `${cfg.deadlineMin}分以内に届かない（To ${toMs !== null ? "着" : "未着"} / Cc ${ccMs !== null ? "着" : "未着"}）` +
+              // To 未着 / Cc 着 は Resend の送信停止リストが典型 (2026-11-27 dev-monitor@)。分かれば理由を添える。
+              (toMs === null ? await suppressionNote(env, p.to_address) : ""),
+          },
+      now,
+    );
   }
 }
 
-async function sendProbe(env: Env, ctx: RequestContext, db: DbClient, cfg: CanaryConfig, now: number, out: CanaryTickResult): Promise<boolean> {
-  // Guard against a double-fired tick: at most one probe per interval.
+function fmtMs(ms: number | null): string {
+  return ms === null ? "未着" : `${Math.round(ms / 1000)}秒`;
+}
+
+/** After a single failed probe (and only then), send the next one right away instead of
+ *  waiting a full interval, so a real outage is confirmed — and alerted — within minutes.
+ *  Once the streak is 2 (alerted) the normal interval resumes, which caps the extra sends. */
+export async function needsConfirmProbe(db: DbClient, now: number): Promise<boolean> {
+  const last = await db.all<{ status: string; sent_at: string }>(`SELECT status, sent_at FROM mail_canary_probe ORDER BY sent_at DESC LIMIT 2`);
+  const [a, b] = last;
+  if (!a || a.status !== "failed") return false;
+  if (b && b.status === "failed") return false;
+  return now - Date.parse(a.sent_at) >= CONFIRM_GAP_MIN * MINUTE;
+}
+
+async function sendProbe(env: Env, ctx: RequestContext, db: DbClient, cfg: CanaryConfig, now: number, out: CanaryTickResult, confirm = false): Promise<boolean> {
+  // Guard against a double-fired tick: at most one probe per interval (per confirm gap for
+  // a confirmation probe).
+  const gapMin = confirm ? CONFIRM_GAP_MIN : cfg.intervalMin;
   const recent = await db.first<{ c: number }>(
     `SELECT COUNT(*) AS c FROM mail_canary_probe WHERE sent_at > ?`,
-    new Date(now - (cfg.intervalMin * MINUTE - 2 * MINUTE)).toISOString(),
+    new Date(now - (gapMin * MINUTE - 2 * MINUTE)).toISOString(),
   );
   if ((recent?.c ?? 0) > 0) return false;
 
@@ -306,6 +345,7 @@ async function sendProbe(env: Env, ctx: RequestContext, db: DbClient, cfg: Canar
     out.finalized++;
     await evaluateAlert(env, ctx, db, id, false, out);
   }
+  await recordFromCanary(env, "send", sendError ? { ok: false, detail: `送信できない（${sendError}）` } : { ok: true, detail: "送信を受け付けた" }, now);
   return true;
 }
 

@@ -17,7 +17,7 @@ import type { Registry, ResolvedRoute } from "../modules/types.tsx";
 import { RequireAuth, RequirePermission, usePermissions } from "../auth/AuthProvider.tsx";
 import { isReleaseGatedFor } from "../lib/releaseGate.ts";
 import type { FeatureModuleId, NavEntry } from "../modules/types.tsx";
-import { AppShellLayout } from "./AppShellLayout.tsx";
+import { AppShellLayout, type AppShellLayoutProps } from "./AppShellLayout.tsx";
 import { RouteLoadingBar } from "./RouteLoadingBar.tsx";
 import { MemberRosterSubnav, activeSectionId } from "../features/members/MemberRosterNav.tsx";
 import { RosterContentSkeleton } from "../features/members/RosterContentSkeleton.tsx";
@@ -58,6 +58,12 @@ function lazyRoute(load: () => Promise<{ Component: ComponentType }>): Component
 }
 
 /** Convert design `:param` segments to TanStack Router `$param`. */
+/** AppShellLayout fed the current path (the AI panel reads it to know what is on screen). */
+function RoutedShellLayout(props: Omit<AppShellLayoutProps, "pathname">): JSX.Element {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  return <AppShellLayout {...props} pathname={pathname} />;
+}
+
 export function toTanstackPath(path: string): string {
   return path.replace(/:([A-Za-z0-9_]+)/g, "$$$1").replace(/\/\*$/, "/$");
 }
@@ -186,7 +192,7 @@ export function createShellRouter(
     getParentRoute: () => rootRoute,
     id: "shell",
     component: () => (
-      <AppShellLayout
+      <RoutedShellLayout
         navEntries={registry.nav}
         headerWidgets={registry.headerWidgets}
         leadingHeaderWidgets={registry.leadingHeaderWidgets}
@@ -197,7 +203,7 @@ export function createShellRouter(
         <RequireAuth loadingFallback={<RouteLoadingBar active />}>
           <ShellRouteContent navEntries={registry.nav} api={api} />
         </RequireAuth>
-      </AppShellLayout>
+      </RoutedShellLayout>
     ),
   });
 

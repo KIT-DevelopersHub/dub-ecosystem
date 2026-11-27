@@ -892,6 +892,12 @@ const LEAD_INBOX: mail.MailMessageDetail[] = [
 // behavior). Stored on the sent row like the gateway, but hidden from the read responses
 // (hideArchiveCc) exactly as the gateway does — it is an internal mailbox, not a person.
 const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+/** 共用アドレス the demo offers in compose (mirrors the 0027 seed for info@). */
+const DEMO_SEND_AS: mail.MailSendAsOption[] = [
+  { address: "info@developershub.jp", kind: "shared", displayName: "北陸ITカンファレンス 実行委員会", signature: "--\n北陸ITカンファレンス 実行委員会\ninfo@developershub.jp" },
+  // A team mailing list the demo account belongs to (0024), named and signed after the team.
+  { address: "design@developershub.jp", kind: "team_list", displayName: "デザインチーム", signature: "--\nデザインチーム\ndesign@developershub.jp" },
+];
 
 function hideArchiveCc<T extends { cc?: mail.MailAddress[] }>(item: T): T {
   if (!item.cc) return item;
@@ -1490,6 +1496,10 @@ function createMailStore() {
       }
       return json({ updated: hit.length });
     }
+    // 共用アドレス (0027): every demo account may send as info@ (運営メンバー全員, like the real seed).
+    if (pathname === "/api/v1/mail/send-as" && method === "GET") {
+      return json({ items: [{ address: me.email.toLowerCase(), kind: "self" }, ...DEMO_SEND_AS.filter((o) => o.address !== me.email.toLowerCase())] } satisfies mail.MailSendAsList);
+    }
     // 定型文 (#867): per-account, in-session; one sample so the picker is not empty in the demo.
     {
       const list = (templatesByAccount[me.id] ??= [
@@ -1576,12 +1586,17 @@ function createMailStore() {
         return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
       });
       // Auto-CC the archive address (dedup against To/Cc) — mirrors MAIL_ARCHIVE_CC.
-      const baseCc = req.cc ?? [];
+      const sharedPick = DEMO_SEND_AS.find((o) => o.address === req.fromAddress);
+      // Like the gateway: a From that is not the sender's own always Cc's the sender.
+      const meLower = me.email.toLowerCase();
+      const ccIn = req.cc ?? [];
+      const baseCc = sharedPick && ![...(req.to ?? []), ...ccIn].some((a) => a.email?.trim().toLowerCase() === meLower) ? [...ccIn, { email: meLower }] : ccIn;
       const alreadyArchived = [...(req.to ?? []), ...baseCc].some((a) => a.email?.trim().toLowerCase() === DEMO_ARCHIVE_CC);
       const cc = alreadyArchived ? baseCc : [...baseCc, { email: DEMO_ARCHIVE_CC }];
+      const sharedFrom = sharedPick;
       const detail: mail.MailSentDetail = {
         id,
-        from: { email: me.email, name: me.displayName },
+        from: sharedFrom ? { email: sharedFrom.address, name: sharedFrom.displayName ?? sharedFrom.address } : { email: me.email, name: me.displayName },
         to: req.to ?? [],
         ...(cc.length > 0 ? { cc } : {}),
         subject: req.subject ?? "(件名なし)",

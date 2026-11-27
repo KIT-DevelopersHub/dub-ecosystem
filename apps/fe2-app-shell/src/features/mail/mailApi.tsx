@@ -92,6 +92,9 @@ export interface MailApi {
   saveTemplate(id: string, input: mail.MailTemplateInput): Promise<mail.MailTemplate>;
   /** Idempotent (mail:send). */
   deleteTemplate(id: string): Promise<void>;
+  /** 共用アドレス (0027): the Froms the user may pick, own address first (mail:read). Optional so
+   *  fakes without it simply offer no choice. */
+  listSendAs?(): Promise<mail.MailSendAsOption[]>;
   /** List sent messages, newest first (mail:read). */
   listSent(query?: SentQuery): Promise<Paginated<MailSentListItem>>;
   /** Fetch one sent message's full detail — body + recipients (mail:read). */
@@ -185,6 +188,7 @@ export function createMailApi(api: ApiClient): MailApi {
     deleteTemplate: async (id) => {
       await api.request({ method: "DELETE", path: `${MAIL}/templates/${encodeURIComponent(id)}` });
     },
+    listSendAs: () => api.request<mail.MailSendAsList>({ method: "GET", path: `${MAIL}/send-as` }).then((r) => r.items),
     listSent: (query) => {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;

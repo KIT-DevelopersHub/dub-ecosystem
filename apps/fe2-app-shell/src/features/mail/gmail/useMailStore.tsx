@@ -28,6 +28,8 @@ export interface ComposeState {
    *  SendMailRequest.inReplyTo so In-Reply-To/References are stamped and the thread links.
    *  Undefined for a brand-new compose or a forward. */
   inReplyTo?: string;
+  /** The From picked in compose (共用アドレス). Undefined = the default (the user's own address). */
+  fromAddress?: string;
   /** True when this window edits a draft already on the server. */
   persisted?: boolean;
   /** Stored files to pull in on open: a forward's originals, or a reopened draft's. */

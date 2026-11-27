@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { event } from "@dub/types";
-import { EventAiDigestPanel } from "../src/components/EventAiDigestPanel";
+import { EventAiDigestPanel, EventAiDigestSummary } from "../src/components/EventAiDigestPanel";
 import { parseCapacityInput } from "../src/components/EventEditForm";
 import { createMockEventApi } from "../src/api/mockData";
 import type { EventApi } from "../src/api/eventApi";
@@ -134,5 +134,23 @@ describe("parseCapacityInput", () => {
     expect(parseCapacityInput("1.5")).toBe("invalid");
     expect(parseCapacityInput("三百")).toBe("invalid");
     expect(parseCapacityInput("100001")).toBe("invalid");
+  });
+});
+
+describe("EventAiDigestSummary (shell AI panel)", () => {
+  const PREVIEW: event.EventDigestPreview = {
+    lines: [{ text: "イベント「北陸ITカンファレンス」・定員 300人", source: "event", link: "/events?eventId=evt_1" }],
+    discrepancies: [],
+    collectedAt: "2026-11-26T00:00:00.000Z",
+  };
+  const OFF = { enabled: false, provider: { id: "offline", status: "disabled" as const }, digest: null };
+
+  it("shows the no-AI preview under its own testids, without the run button or the ask box", async () => {
+    setAuth(["event:read"]);
+    renderWithProviders(<EventAiDigestSummary eventId="evt_1" idPrefix="side" />, { api: apiWith({ ...OFF, preview: PREVIEW }) });
+    await waitFor(() => expect(screen.getByTestId("side-preview-lines").textContent).toContain("定員 300人"));
+    expect(screen.getByTestId("side-preview-meta").textContent).toContain("12/3 公開予定です。");
+    expect(screen.queryByTestId("fe3-ai-run")).toBeNull();
+    expect(screen.queryByTestId("fe3-ai-ask")).toBeNull();
   });
 });

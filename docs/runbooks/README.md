@@ -17,6 +17,8 @@ DevHub (Dub) エコシステムの運用手順書。**手順のみ** をまと�
 | [07-slack-history-import.md](./07-slack-history-import.md) | Slack履歴→fe6-chat D1移行。マッピング表・冪等性(処理済みtsレジャー)・必要トークンscope/対象ch・パイロット手順(`pnpm slack:import`) |
 | [08-visual-screens.md](./08-visual-screens.md) | 画面ビジュアル回帰（fe2 demo ビルドを Playwright で撮って pixel diff）。Phase 1 は警告のみ・PR コメントの読み方・ベースライン seed/更新・必須化計画 |
 | [09-lp-tickets-cutover.md](./09-lp-tickets-cutover.md) | LP チケット販売を dub-lp-tickets / D1 dub-tickets へ切り替える手順。販売停止・データコピー・デプロイ順・ロールバック |
+| [10-ticket-flow-e2e-and-rollback.md](./10-ticket-flow-e2e-and-rollback.md) | チケット購入→決済→発券→当日受付の E2E（API 版・ブラウザ版・CI）と、壊れた時の戻し方（注文の補正・Worker の rollback・当日受付の代替手段） |
+| [12-mail-incident.md](./12-mail-incident.md) | メールが止まったとき。監視アラート（送信・受信・画面 API・監視の稼働）の読み方・切り分け・ロールバック・別経路で送る/読む手順 |
 
 ## 前提知識（3 runbook 共通）
 
