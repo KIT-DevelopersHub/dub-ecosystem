@@ -24,6 +24,7 @@ import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENTS_TOTAL_BYTES, MAX_ATTACHMEN
 import { resolveInboundOwner } from "./owner";
 import { archiveRawEml } from "./raw-eml";
 import { deliverToTeam, findActiveTeamList } from "./team-list";
+import { sharedSendersFor } from "./shared-mailbox";
 import { loadMatcher } from "./blocks";
 import type { InboundDeps, OwnerAddressPolicy, ParsedInbound } from "./types";
 import type { RawInbound } from "./mime";
@@ -210,7 +211,37 @@ export async function handleInbound(deps: InboundDeps, raw: RawInbound): Promise
   // Last, and on both the first-copy and already-stored paths: a mail To one member and Cc
   // the list usually reaches the list second. Throws on failure, like a failed publish.
   if (list) await deliverToTeam(deps, list, result.message);
+  else await deliverToSharedSenders(deps, raw, result.message);
   return result;
+}
+
+/**
+ * 共用アドレス (0027): a reply to a mail a member sent as a shared address (info@) also lands in
+ * that member's inbox. The shared mailbox keeps its own copy (the delivery made above); the
+ * sender's copy uses the shared address as its envelope, so answering it goes out as info@
+ * again. Unmatched mail stays with the shared mailbox only. Best-effort: never fails ingest.
+ */
+async function deliverToSharedSenders(deps: InboundDeps, raw: RawInbound, message: mail.MailMessage): Promise<void> {
+  const envelope = parseAddress(raw.to).email.trim().toLowerCase();
+  const refs = [...allRefs(raw.headers["references"]), ...allRefs(raw.headers["in-reply-to"])];
+  if (!envelope || refs.length === 0) return;
+  try {
+    const senders = await sharedSendersFor(deps.db, envelope, refs);
+    for (const owner of senders) {
+      const added = await insertDelivery(deps.db, { inboundId: message.id, ownerUserId: owner, envelopeTo: envelope });
+      if (added > 0 && deps.newMailNotify) {
+        await maybeNotifyNewMail(deps, raw, message, owner, await blockedFor(deps, owner, message.from.email));
+      }
+    }
+  } catch (err) {
+    consoleSink({
+      level: "warn",
+      message: "mail-gateway: could not deliver a shared-address reply to its sender",
+      service: SERVICE_NAME,
+      requestId: deps.ctx.requestId,
+      fields: { inboundId: message.id, error: err instanceof Error ? err.message : String(err) },
+    });
+  }
 }
 
 /** Fail-open: a broken block list must never cost a delivery its normal handling. */

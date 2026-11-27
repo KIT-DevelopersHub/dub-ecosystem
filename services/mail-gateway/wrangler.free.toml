@@ -101,6 +101,10 @@ MAIL_CANARY_DEADLINE_MIN = "10"
 # 手順: docs/runbooks/12-mail-incident.md
 MAIL_MONITOR_ENABLED = "true"
 MAIL_MONITOR_INTERVAL_MIN = "15"
+# Resend の送信停止リスト（resend-suppressions.ts）: 自ゾーンで受信ルールが有効なのに bounce で
+# 止まったアドレスを毎時外す（同じアドレスは 7 日に 1 回まで）。発行確認メールは 5 分待ってから送る。
+MAIL_SUPPRESSION_AUTOHEAL = "true"
+MAIL_ISSUE_CONFIRM_DELAY_MIN = "5"
 # 一覧/スレッド API を試す名簿ユーザー MAIL_MONITOR_USER_ID は vars に書かず Workers Secret で入れる
 # （wrangler secret put MAIL_MONITOR_USER_ID）。dev-monitor@ のユーザー id。未設定なら API 確認は止まる。
 # Email Routing admin (address issuance). The token is a Workers Secret set out-of-band
