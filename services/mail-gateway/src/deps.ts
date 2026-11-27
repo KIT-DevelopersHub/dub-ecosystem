@@ -58,6 +58,8 @@ export function buildSendDeps(
   // Owner (Sent-folder account scope): the signed-in user's id for a user-facing send,
   // or null for a pure system/automation send.
   ownerUserId: string | null = null,
+  // 共用アドレス (0027): the From's display name and the shared address it goes out as.
+  identity: { fromName?: string | null; sharedMailbox?: string | null } = {},
 ): SendDeps {
   const blobs = buildBlobs(env);
   return {
@@ -67,6 +69,8 @@ export function buildSendDeps(
     audit: buildAuditEnv(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     fromAddress: fromOverride ?? env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
+    ...(identity.fromName ? { fromName: identity.fromName } : {}),
+    ...(identity.sharedMailbox ? { sharedMailbox: identity.sharedMailbox } : {}),
     ctx,
     ownerUserId,
     // Archive CC: env override, else the frozen default. An explicit empty string
