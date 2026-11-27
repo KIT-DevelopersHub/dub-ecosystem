@@ -65,7 +65,9 @@ export function ComposeScreen(): JSX.Element {
       // Invalidate the Sent list so the just-sent mail shows on arrival (defeats the
       // 30s staleTime after a prior empty visit), then land in the Sent folder.
       void queryClient.invalidateQueries({ queryKey: queryKeys.feature("mail", "sent-list") });
-      void navigate({ to: "/mail/sent" });
+      // The cleared fields haven't re-rendered yet, so the leave guard still sees the
+      // form as dirty. The mail is sent, so this navigation skips the guard (#929).
+      void navigate({ to: "/mail/sent", ignoreBlocker: true });
     },
     onError: (e: unknown) => {
       const message = ApiError.isApiError(e) ? toDisplayableError(e).message : "メールを送信できませんでした。";
