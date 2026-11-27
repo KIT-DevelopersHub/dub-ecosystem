@@ -27,6 +27,8 @@ interface UserDb {
   updated_at: string;
 }
 const ROLE_ID_CHUNK = 50;
+/** Above this many keys a narrowed role read falls back to whole bundles (bind limit: 50 ids + 40 keys < 100). */
+const MAX_ONLY_PERMISSIONS = 40;
 
 interface RoleDb {
   id: string;
@@ -255,19 +257,26 @@ export class D1IdentityRepo implements IdentityRepo {
     if (!r) return null;
     return this.toRole(r, await this.permissionsOf(roleId));
   }
-  async getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]> {
+  async getRolesByIds(roleIds: readonly string[], onlyPermissions?: readonly string[]): Promise<RoleRow[]> {
     // One query per chunk (roles LEFT JOIN permissions) instead of getRole + permissionsOf per
     // role — loadEvalContext runs on every authz check. Chunked to stay under D1's bind limit.
+    // With `onlyPermissions` the join is narrowed inside ON (roles without a match still come
+    // back, with no permissions), so the PK (role_id, permission_key) is probed per key
+    // instead of reading the role's whole bundle.
     const ids = [...new Set(roleIds)];
+    const only = onlyPermissions ? [...new Set(onlyPermissions)] : null;
+    if (only && only.length > MAX_ONLY_PERMISSIONS) return this.getRolesByIds(ids);
+    const onlySql = !only ? "" : only.length === 0 ? " AND 0" : ` AND rp.permission_key IN (${only.map(() => "?").join(", ")})`;
     const byId = new Map<string, RoleRow>();
     for (let i = 0; i < ids.length; i += ROLE_ID_CHUNK) {
       const chunk = ids.slice(i, i + ROLE_ID_CHUNK);
       const rows = await this.db.all<RoleDb & { permission_key: string | null }>(
         `SELECT r.id, r.org_id, r.name, r.is_system, r.created_at, r.updated_at, rp.permission_key
            FROM identity_roles r
-           LEFT JOIN identity_role_permissions rp ON rp.role_id = r.id
+           LEFT JOIN identity_role_permissions rp ON rp.role_id = r.id${onlySql}
           WHERE r.id IN (${chunk.map(() => "?").join(", ")})
           ORDER BY r.id, rp.permission_key`,
+        ...(only ?? []),
         ...chunk,
       );
       for (const r of rows) {
@@ -347,6 +356,23 @@ export class D1IdentityRepo implements IdentityRepo {
       orgId,
     );
     return new Map(rows.map((r) => [r.role_id, Number(r.n)]));
+  }
+  async rolesWithPermission(orgId: string, permission: identity.PermissionKey) {
+    // CROSS JOIN pins the order: each org role probes the (role_id, permission_key) PK once, and
+    // only the matching roles' assignments are counted (idx_identity_role_assignments_role).
+    // Was: every role + its whole bundle + a GROUP BY over every assignment in the org.
+    const rows = await this.db.all<{ id: string; name: string; n: number }>(
+      `SELECT r.id, r.name,
+              (SELECT COUNT(DISTINCT a.user_id) FROM identity_role_assignments a
+                WHERE a.role_id = r.id AND a.org_id = r.org_id) AS n
+         FROM identity_roles r
+         CROSS JOIN identity_role_permissions rp ON rp.role_id = r.id AND rp.permission_key = ?
+        WHERE r.org_id = ?
+        ORDER BY r.id`,
+      permission,
+      orgId,
+    );
+    return rows.map((r) => ({ id: r.id, name: r.name, memberCount: Number(r.n) }));
   }
 
   async listAssignmentsByUser(userId: string, orgId: string): Promise<AssignmentRow[]> {
