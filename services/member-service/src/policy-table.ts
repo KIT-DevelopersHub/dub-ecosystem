@@ -55,6 +55,10 @@ export const POLICY_TABLE = definePolicyTable({
   // identity:read of the poster would break @team mentions for ordinary members.
   "GET /members/internal/team-members": INTERNAL,
 
+  // チーム名, mail-gateway -> member-service. A team mailing list picked as the From goes out as
+  // `チーム名 <list@…>`; the scheduled drain asks with no user, so key-free like team-members.
+  "GET /members/internal/team-names": INTERNAL,
+
   // 名簿の Gmail 逆引き, drive-share-service -> member-service. カレンダー > ミーティングの招待先
   // (and the shared calendar ACL) are each member's 名簿 Gmail. Key-free like team-members: the
   // reconcile runs hourly as a system actor (no user), and the edge 404s /members/internal/.

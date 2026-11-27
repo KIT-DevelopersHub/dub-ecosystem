@@ -48,6 +48,18 @@
 .chip[data-has-icon="true"] {
   padding-left: 2px;
 }
+.chip[data-locked="true"] {
+  padding-right: var(--dub-space-2);
+  cursor: default;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .chip[data-invalid="true"] {
   border-color: var(--dub-color-danger-300);
   color: var(--dub-color-danger-700);

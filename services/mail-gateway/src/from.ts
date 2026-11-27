@@ -6,12 +6,14 @@
 // email when it is a verified @developershub.jp address. Anything else — user not in
 // the roster, a non-company domain, or an identity lookup failure — safely falls back
 // to the system default so a send never fails just because the From could not resolve.
+import { DubError, errors } from "@dub/errors";
 import { createServiceClient } from "@dub/http";
 import type { RequestContext } from "@dub/http";
 import type { DbClient } from "@dub/db";
 import type { identity, mail } from "@dub/types";
 import type { Env } from "./env";
 import { DEFAULT_FROM_ADDRESS, SERVICE_NAME } from "./config";
+import { findSendableMailbox, memberMaySend } from "./shared-mailbox";
 import { findDeliveryEnvelope, findInboundByMessageId, findSendLogById, LIST_ENVELOPE_PREFIX, wasDeliveredByList } from "./repo";
 
 /** Verified sending domain (Resend). Only addresses on this domain may be a From. */
@@ -40,12 +42,56 @@ export async function resolveUserFromAddress(env: Env, ctx: RequestContext, user
   const fallback = fallbackFromAddress(env);
   if (!userId) return fallback;
   try {
-    const client = createServiceClient(env.SVC_IDENTITY, { service: "identity-roster", caller: SERVICE_NAME });
-    const user = await client.get<identity.IdentityUser>(ctx, `/users/${encodeURIComponent(userId)}`);
-    return isCompanyAddress(user?.email) ? user.email.trim() : fallback;
+    const email = await rosterEmail(env, ctx, userId);
+    return isCompanyAddress(email) ? email.trim() : fallback;
   } catch {
     return fallback;
   }
+}
+
+/** The roster email of `userId` (any domain), or null. Throws when identity cannot answer. */
+async function rosterEmail(env: Env, ctx: RequestContext, userId: string): Promise<string | null> {
+  const client = createServiceClient(env.SVC_IDENTITY, { service: "identity-roster", caller: SERVICE_NAME });
+  const user = await client.get<identity.IdentityUser>(ctx, `/users/${encodeURIComponent(userId)}`);
+  const email = user?.email?.trim().toLowerCase();
+  return email && EMAIL_RE.test(email) ? email : null;
+}
+
+/**
+ * The address the sender is Cc'd at when the From is not their own (必須: a member sending as
+ * info@ or a team list always gets the copy). Their company address, else their roster email.
+ * Refuses rather than sending without it: 502 when identity cannot answer, 403 when the
+ * sender has no address at all.
+ */
+export async function requiredSelfCc(env: Env, ctx: RequestContext, userId: string): Promise<string> {
+  let email: string | null;
+  try {
+    email = await rosterEmail(env, ctx, userId);
+  } catch (err) {
+    // A user identity does not know is someone with no address, not an outage.
+    if (!(err instanceof DubError && err.status === 404)) throw errors.upstreamUnavailable("identity-roster", err);
+    email = null;
+  }
+  if (!email) throw errors.forbidden("the sender has no address to Cc");
+  return email;
+}
+
+/**
+ * Put `self` on the Cc (once): nothing changes when it is already on To or Cc; a Bcc copy of it
+ * moves to the Cc so the copy is visible to everyone, as required.
+ */
+export function withSelfCc<T extends { to: mail.MailAddress[]; cc?: mail.MailAddress[]; bcc?: mail.MailAddress[] }>(req: T, self: string | null): T {
+  if (!self) return req;
+  const me = self.trim().toLowerCase();
+  const is = (a: mail.MailAddress) => a.email.trim().toLowerCase() === me;
+  if (req.to.some(is) || (req.cc ?? []).some(is)) return req;
+  const out: T = { ...req, cc: [...(req.cc ?? []), { email: me }] };
+  if (req.bcc) {
+    const bcc = req.bcc.filter((a) => !is(a));
+    if (bcc.length > 0) out.bcc = bcc;
+    else delete out.bcc;
+  }
+  return out;
 }
 
 /** Angle-bracket-strip a Message-Id ("<x@y>" -> "x@y") so it matches the stored value. */
@@ -95,4 +141,72 @@ export async function resolveReplyFromAddress(
     /* fall through to the per-user resolution */
   }
   return resolveUserFromAddress(env, ctx, userId);
+}
+
+/** The From of one user-facing send, plus what the send log and the header need about it. */
+export interface SendIdentity {
+  fromAddress: string;
+  /** Display name for the From header (a shared mailbox's), null = the bare address. */
+  fromName: string | null;
+  /** Shared address the send goes out as, recorded on the send log so the recipient's reply
+   *  also reaches the sender. null for a person's own address or a system send. */
+  sharedMailbox: string | null;
+  /** The shared address / team list the composer explicitly picked (re-checked by the drain). */
+  picked: string | null;
+  /** Where the sender must be Cc'd: set exactly when `picked` is (the From is not theirs). */
+  selfCc: string | null;
+}
+
+/**
+ * Resolve the From of a user-facing send (/outbox, /scheduled).
+ *  - `fromAddress` picked: the caller's own address is always fine; a shared mailbox or a team
+ *    list only when member-service says the caller may send as it; anything else is 403. A pick
+ *    that is not their own address also yields `selfCc` (the caller must be Cc'd).
+ *  - not picked: the rules above (own address / the shared mailbox a reply answers / the
+ *    info@ fallback), unchanged, and no forced Cc.
+ * Either way, a From that is a shared mailbox (or a team list) gets its display name and is
+ * recorded as one.
+ */
+export async function resolveSendIdentity(
+  env: Env,
+  ctx: RequestContext,
+  db: DbClient,
+  userId: string | null,
+  req: { fromAddress?: string; inReplyTo?: string },
+): Promise<SendIdentity> {
+  const picked = req.fromAddress?.trim().toLowerCase();
+  let fromAddress: string;
+  let chosen: string | null = null;
+  let selfCc: string | null = null;
+  if (picked) {
+    const own = await resolveUserFromAddress(env, ctx, userId);
+    if (own.trim().toLowerCase() === picked) {
+      fromAddress = own;
+    } else {
+      const shared = await findSendableMailbox(db, env.SVC_MEMBER, ctx, picked);
+      if (!shared || !userId) throw errors.forbidden(`not allowed to send as ${picked}`);
+      let allowed: boolean;
+      try {
+        allowed = await memberMaySend(env.SVC_MEMBER, ctx, shared, userId);
+      } catch (err) {
+        throw errors.upstreamUnavailable("member-service", err);
+      }
+      if (!allowed) throw errors.forbidden(`not allowed to send as ${picked}`);
+      selfCc = await requiredSelfCc(env, ctx, userId);
+      fromAddress = shared.address;
+      chosen = shared.address;
+    }
+  } else {
+    fromAddress = req.inReplyTo
+      ? await resolveReplyFromAddress(env, ctx, db, req.inReplyTo, userId)
+      : await resolveUserFromAddress(env, ctx, userId);
+  }
+  const shared = await findSendableMailbox(db, env.SVC_MEMBER, ctx, fromAddress);
+  return {
+    fromAddress,
+    fromName: shared?.display_name || null,
+    sharedMailbox: shared && userId ? shared.address : null,
+    picked: chosen,
+    selfCc,
+  };
 }
