@@ -67,13 +67,19 @@ export function ActionBoard({
   onOpenAction?: (actionId: string) => void;
 }) {
   const [kindFilter, setKindFilter] = useState<string>("");
-  const query = useActionsQuery(eventId, kindFilter ? { kind: kindFilter } : undefined);
+  // Always load the whole list and filter here, so the kind options come from every
+  // action (#934) and the cache key matches the optimistic update's key.
+  const query = useActionsQuery(eventId);
   const update = useUpdateAction(eventId);
   const [createOpen, setCreateOpen] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  const items = query.data?.items ?? [];
-  const kinds = useMemo(() => [...new Set(items.map((a) => a.kind))], [items]);
+  const allItems = useMemo(() => query.data?.items ?? [], [query.data]);
+  const kinds = useMemo(() => [...new Set(allItems.map((a) => a.kind))], [allItems]);
+  const items = useMemo(
+    () => (kindFilter ? allItems.filter((a) => a.kind === kindFilter) : allItems),
+    [allItems, kindFilter],
+  );
 
   const onDragEnd = (e: DragEndEvent) => {
     const overId = e.over?.id;
