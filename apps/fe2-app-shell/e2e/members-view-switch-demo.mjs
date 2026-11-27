@@ -18,6 +18,25 @@ async function checkHeader(page, testId, view) {
   if (!text?.includes(`${view}で表示中。`)) fail(`${view}: description missing「${view}で表示中」`);
 }
 
+// タブ行はどの表示でもスクロールしない: タブ帯と、帯の中でスクロール領域になり得る要素の中身が枠に収まる。
+async function checkTabRowNoScroll(page, view) {
+  await page.waitForTimeout(400); // 下線の移動(rAF + transition)が落ち着くのを待つ
+  const bad = await page.evaluate(() => {
+    const tablist = document.querySelector('[data-testid="member-roster-subnav"]');
+    const row = tablist?.closest('[data-testid="member-roster-app"]')?.firstElementChild;
+    if (!tablist || !row) return ["tab row not found"];
+    const scrollable = (el) => {
+      const cs = getComputedStyle(el);
+      return /auto|scroll/.test(cs.overflowX) || /auto|scroll/.test(cs.overflowY);
+    };
+    const targets = [row, tablist, ...row.querySelectorAll("*")].filter((el, i) => i < 2 || scrollable(el));
+    return targets
+      .filter((el) => el.scrollWidth > el.clientWidth || (scrollable(el) || el === row ? el.scrollHeight > el.clientHeight : false))
+      .map((el) => `${el.getAttribute("data-testid") ?? el.className} sw=${el.scrollWidth}/${el.clientWidth} sh=${el.scrollHeight}/${el.clientHeight}`);
+  });
+  if (bad.length) fail(`${view}: tab row scrolls: ${bad.join(", ")}`);
+}
+
 const browser = await chromium.launch();
 try {
   for (const [label, viewport] of [["desktop", { width: 1360, height: 900 }], ["mobile", { width: 390, height: 844 }]]) {
@@ -55,10 +74,14 @@ try {
     await page.getByTestId("member-roster-subnav").getByRole("tab", { name: "メール名簿" }).click();
     await page.waitForURL(/\/admin\/users/);
     if (await page.getByTestId("members-view-switch").count()) fail("switch shown on メール名簿");
+    await checkTabRowNoScroll(page, "メール名簿");
+    ok(`${label}: メール名簿 のタブ行はスクロールしない`);
     await page.screenshot({ path: join(OUT, `${label}-4-mail.png`) });
     await page.getByTestId("member-roster-subnav").getByRole("tab", { name: "運営メンバー" }).click();
     await page.getByTestId("members-orgchart-page").waitFor();
     ok(`${label}: タブを押し直すと最後の表示(組織図)に戻る`);
+    await checkTabRowNoScroll(page, "運営メンバー");
+    ok(`${label}: 運営メンバー のタブ行はスクロールしない`);
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     if (overflow) console.log(`  warn: ${label} horizontal overflow`);

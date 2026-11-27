@@ -100,9 +100,10 @@
   border-bottom: 1px solid var(--dub-color-border-default);
   margin-bottom: var(--dub-space-5);
 }
+/* スクロールさせない。狭い幅でのはみ出しは Tabs 自身(≤640px で横スクロール帯)に任せ、
+   ここで二重のスクロール領域を作らない。 */
 .rosterSubnavTabs {
   min-width: 0;
-  overflow-x: auto;
 }
 /* 運営メンバータブの表示切り替え（チーム別 / 一覧表 / 組織図）。狭い幅ではタブの下へ折り返す。 */
 .rosterViewSwitch {
