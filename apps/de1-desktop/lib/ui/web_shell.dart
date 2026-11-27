@@ -16,6 +16,7 @@ import '../feature_registry.dart';
 import '../mobile/download_bridge.dart';
 import '../mobile/file_saver.dart';
 import '../mobile/link_policy.dart';
+import '../mobile/logout_bridge.dart';
 import '../mobile/new_window_bridge.dart';
 import '../push/fcm_push.dart';
 import '../push/foreground_bridge.dart';
@@ -500,7 +501,7 @@ class _WebShellState extends ConsumerState<WebShell> {
             setReactValue(e, creds.email);
             setReactValue(p, creds.password);
             var btn = document.querySelector(SEL_SUBMIT);
-            if (btn) {
+            if (btn && creds.autoSubmit !== false) {
               setTimeout(function () { if (!btn.disabled) btn.click(); }, 200);
             }
           }
@@ -525,7 +526,23 @@ class _WebShellState extends ConsumerState<WebShell> {
   Future<dynamic> _onGetCredentials(List<dynamic> args) async {
     final creds = await ref.read(credentialStoreProvider).read();
     if (creds == null) return null;
-    return {'email': creds.email, 'password': creds.password};
+    return {
+      'email': creds.email,
+      'password': creds.password,
+      // After a logout, fill but let the person press the button (so they can
+      // stay logged out or switch accounts).
+      'autoSubmit': !_loggedOutThisSession,
+    };
+  }
+
+  /// The person logged out in this app session (see [_onBeforeLogout]).
+  bool _loggedOutThisSession = false;
+
+  /// JS -> native: the web app is about to log out (see [LogoutBridge]).
+  Future<dynamic> _onBeforeLogout(List<dynamic> args) async {
+    _loggedOutThisSession = true;
+    await _fcm.unregister();
+    return null;
   }
 
   Future<dynamic> _onCaptureCredentials(List<dynamic> args) async {
@@ -636,6 +653,10 @@ class _WebShellState extends ConsumerState<WebShell> {
                     source: ForegroundBridge.jsSource(),
                     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                   ),
+                  UserScript(
+                    source: LogoutBridge.jsSource(),
+                    injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                  ),
                   if (_isMobile)
                     UserScript(
                       source: NewWindowBridge.jsSource(),
@@ -678,6 +699,10 @@ class _WebShellState extends ConsumerState<WebShell> {
                   controller.addJavaScriptHandler(
                     handlerName: ForegroundBridge.handlerName,
                     callback: _onForegroundNotification,
+                  );
+                  controller.addJavaScriptHandler(
+                    handlerName: LogoutBridge.handlerName,
+                    callback: _onBeforeLogout,
                   );
                   controller.addJavaScriptHandler(
                     handlerName: NewWindowBridge.handlerName,
