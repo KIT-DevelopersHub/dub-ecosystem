@@ -61,8 +61,13 @@ typedef MobileBearerProvider = Future<String?> Function();
 ///   * SUPPRESS foreground FCM messages so they never double with the Phase 0
 ///     in-page watcher (the watcher owns foreground display).
 class FcmPush {
-  FcmPush({MobileBearerProvider? bearerProvider})
-      : _bearerProvider = bearerProvider ?? _defaultBearerProvider;
+  FcmPush({
+    MobileBearerProvider? bearerProvider,
+    http.Client? httpClient,
+    Future<String?> Function()? sessionCookieReader,
+  })  : _bearerProvider = bearerProvider ?? _defaultBearerProvider,
+        _http = httpClient ?? http.Client(),
+        _readSessionCookie = sessionCookieReader ?? readDubSessionCookie;
 
   static const _mobileBearerDefine =
       String.fromEnvironment('MOBILE_BEARER', defaultValue: '');
@@ -71,7 +76,14 @@ class FcmPush {
       _mobileBearerDefine.isEmpty ? null : _mobileBearerDefine;
 
   final MobileBearerProvider _bearerProvider;
+  final http.Client _http;
+  final Future<String?> Function() _readSessionCookie;
   String? _pendingToken; // token awaiting a bearer to register with
+
+  /// mo3's id for this device, from the last successful registration. Used to
+  /// unregister on logout.
+  String? _deviceId;
+  String? get deviceId => _deviceId;
 
   /// The last FCM registration token obtained via [init]/refresh, exposed for
   /// debug/testing surfaces (see [onTokenChanged] and `web_shell.dart`'s debug
@@ -159,31 +171,43 @@ class FcmPush {
   /// when supplied (testing), else the WebView's own `dub_session` cookie
   /// (see [readDubSessionCookie]) — either is deferred/retried if unavailable
   /// (e.g. before login).
-  Future<void> _register(String token) async {
-    final bearer = await _bearerProvider();
+  /// Auth headers for mo3 (bearer for testing, else the WebView session), or
+  /// null when not logged in yet.
+  Future<Map<String, String>?> _authHeaders() async {
     final headers = {
       'content-type': 'application/json',
       'accept': 'application/json',
     };
+    final bearer = await _bearerProvider();
     if (bearer != null && bearer.isNotEmpty) {
       headers['authorization'] = 'Bearer $bearer';
-    } else {
-      final sessionCookie = await readDubSessionCookie();
-      if (sessionCookie == null) {
-        _pendingToken = token; // cache; a later auth completes registration
-        debugPrint('[push] FCM token acquired but no mo3 auth yet — deferred');
-        return;
-      }
-      headers['cookie'] = 'dub_session=$sessionCookie';
+      return headers;
+    }
+    final sessionCookie = await _readSessionCookie();
+    if (sessionCookie == null) return null;
+    headers['cookie'] = 'dub_session=$sessionCookie';
+    return headers;
+  }
+
+  Future<void> _register(String token) async {
+    final headers = await _authHeaders();
+    if (headers == null) {
+      _pendingToken = token; // cache; a later auth completes registration
+      debugPrint('[push] FCM token acquired but no mo3 auth yet — deferred');
+      return;
     }
     try {
-      final res = await http.post(
+      final res = await _http.post(
         Uri.parse('${AppConfig.mo3BaseUrl}/m/v1/devices'),
         headers: headers,
         body: jsonEncode({'platform': _mobilePlatform, 'pushToken': token}),
       );
       if (res.statusCode == 201) {
         _pendingToken = null;
+        try {
+          final id = (jsonDecode(res.body) as Map<String, dynamic>)['deviceId'];
+          if (id is String && id.isNotEmpty) _deviceId = id;
+        } catch (_) {}
         debugPrint('[push] device registered with mo3');
       } else {
         _pendingToken = token;
@@ -193,6 +217,35 @@ class FcmPush {
       _pendingToken = token;
       debugPrint('[push] device registration error: $e');
     }
+  }
+
+  /// Called just before the web app logs out (the session is still valid):
+  /// stop pushes to this device for the leaving user, and queue the token so
+  /// the next login registers it for whoever signs in.
+  Future<void> unregister() async {
+    final id = _deviceId;
+    final token = _lastToken ?? _pendingToken;
+    _deviceId = null;
+    _pendingToken = token;
+    if (id == null) return;
+    final headers = await _authHeaders();
+    if (headers == null) return;
+    try {
+      final res = await _http.delete(
+        Uri.parse('${AppConfig.mo3BaseUrl}/m/v1/devices/${Uri.encodeComponent(id)}'),
+        headers: headers,
+      );
+      debugPrint('[push] device unregistered: ${res.statusCode}');
+    } catch (e) {
+      debugPrint('[push] device unregister error: $e');
+    }
+  }
+
+  /// Registers [token] as if FCM had just issued it. Test-only seam.
+  @visibleForTesting
+  Future<void> debugRegister(String token) {
+    _lastToken = token;
+    return _register(token);
   }
 
   /// Retry a deferred registration once a mo3 bearer becomes available (e.g.
