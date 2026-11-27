@@ -3,11 +3,12 @@
 // the send log keeps who actually sent it. When the recipient answers, the reply reaches the
 // shared address as always AND the member who sent the mail (matched by our Message-ID in its
 // In-Reply-To / References). Who may pick an address is checked on every send, against
-// member-service: every linked 運営メンバー, or one team's members.
+// member-service: every linked 運営メンバー (and any `mail:admin` holder), or one team's members.
 import type { Fetcher } from "@cloudflare/workers-types";
 import type { DbClient } from "@dub/db";
+import { createAuthClient } from "@dub/auth-client";
 import { createServiceClient, type RequestContext } from "@dub/http";
-import type { mail } from "@dub/types";
+import { common, type mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
 import { isMissingTable, TEAM_LIST_COLUMNS, type TeamListRow } from "./team-list";
 
@@ -126,11 +127,31 @@ export async function listSendableMailboxes(db: DbClient, member: Fetcher | unde
   return [...shared, ...lists.map((l) => teamListAsMailbox(l, names.get(l.team_id)))];
 }
 
+/** Holds `mail:admin`? Asked fresh each time (a dangerous key is never cached). An identity
+ *  outage answers false, so the roster check still decides. */
+async function isMailAdmin(identityBinding: Fetcher | undefined, ctx: RequestContext, userId: string): Promise<boolean> {
+  if (!identityBinding) return false;
+  try {
+    const client = createAuthClient({ identityBinding, serviceName: SERVICE_NAME });
+    return await client.hasPermission(userId, common.DUB_DEFAULT_ORG_ID, { permission: "mail:admin" }, { requestId: ctx.requestId });
+  } catch {
+    return false;
+  }
+}
+
 /**
- * May `userId` send as this shared mailbox? Asked of member-service on every send: leaving the
- * team (or 運営) removes the right at once. Without the member binding nobody may.
+ * May `userId` send as this shared mailbox? Asked on every send: leaving the team (or 運営, or
+ * losing `mail:admin`) removes the right at once. An `all_members` address is also open to a
+ * `mail:admin` holder with no 名簿 row (admin@); a `team` one stays that team's only.
  */
-export async function memberMaySend(member: Fetcher | undefined, ctx: RequestContext, row: SharedMailboxRow, userId: string): Promise<boolean> {
+export async function memberMaySend(
+  member: Fetcher | undefined,
+  ctx: RequestContext,
+  row: SharedMailboxRow,
+  userId: string,
+  identityBinding?: Fetcher,
+): Promise<boolean> {
+  if (row.allow !== "team" && (await isMailAdmin(identityBinding, ctx, userId))) return true;
   if (!member) return false;
   let query: string;
   if (row.allow === "team") {

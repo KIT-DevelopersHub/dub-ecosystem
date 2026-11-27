@@ -293,6 +293,8 @@ personal address (typically Gmail) — メール → 右上の歯車 → 「Gmai
 - **Who may pick it**: checked on every send (and again by the scheduled drain) against
   member-service: `allow = all_members` (every linked 運営メンバー, `?all=1`) or `team`
   (`?teamIds=`), declined left out. Anything else is 403; member-service down is 502.
+  A `mail:admin` holder (e.g. admin@, which has no 名簿 row) may also pick an `all_members`
+  address, asked of identity on every send; a `team` address stays that team's only.
 - **Replies**: a mail to the shared address whose In-Reply-To / References names one of these
   sends also gets a delivery for the sender (envelope = the shared address, so answering goes
   out as it again). Unmatched mail stays with the shared mailbox only. A provider that rewrites

@@ -71,7 +71,7 @@ async function scheduledIdentity(
   let selfCc: string | null = null;
   if (row.shared_mailbox) {
     const owner = row.owner_user_id;
-    const allowed = !!shared && !!owner && shared.address === row.shared_mailbox && (await memberMaySend(env.SVC_MEMBER, ctx, shared, owner));
+    const allowed = !!shared && !!owner && shared.address === row.shared_mailbox && (await memberMaySend(env.SVC_MEMBER, ctx, shared, owner, env.SVC_IDENTITY));
     if (!allowed || !owner) throw errors.forbidden(`not allowed to send as ${row.shared_mailbox}`);
     // The Cc stored at booking is enforced again (a row booked before this rule, or edited).
     selfCc = await requiredSelfCc(env, ctx, owner);
