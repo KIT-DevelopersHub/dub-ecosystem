@@ -41,7 +41,7 @@ export interface Env {
   // 本番のメール監視 (monitor.ts, #898)。"true" で有効 (migration 0029 が先)。
   MAIL_MONITOR_ENABLED?: string;
   MAIL_MONITOR_INTERVAL_MIN?: string; // 一覧API・送信失敗の確認間隔 (既定 15・5 の倍数)
-  MAIL_MONITOR_USER_ID?: string; // 一覧/スレッド API を試す名簿ユーザー (mail:read + mail:read_all)。未設定なら API 確認なし
+  MAIL_MONITOR_USER_ID?: string; // Workers Secret。一覧/スレッド API を試す名簿ユーザー (MAIL_CANARY_TO の持ち主・メール閲覧 + mail:read)。未設定なら API 確認なし
   MAIL_MONITOR_SEND_ERROR_MIN?: string; // 直近1時間の送信失敗がこの件数以上かつ成功以上で失敗扱い (既定 3)
   // Slack Incoming Webhook URL (Workers Secret)。未設定ならアプリ内通知 + audit のみ。
   MAIL_ALERT_SLACK_WEBHOOK_URL?: string;

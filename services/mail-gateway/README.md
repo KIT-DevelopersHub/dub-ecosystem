@@ -317,7 +317,7 @@ open the verification mail in that Gmail and click the link (status → *Verifie
   結果は `mail_canary_probe`（migration 0014）に1行ずつ記録。
 - 隔離: QA アドレス2つだけに送る / archive の自動 CC を付けない / system 送信（owner なし）なので、
   メンバーの受信箱・送信済みには出ない（`mail:read_all` の全件表示には出る）。受信コピーは archive 転送もしない。
-  QA アドレスは名簿（roster）に登録しないこと。
+  Cc の QA アドレスは名簿（roster）に登録しないこと。To は監視用アカウント（3.8）で、名簿にいるのはこの 1 つだけ。
 - 判定: 既定は「どちらかのコピーが `mail_inbound` に入れば OK」。現状は Message-ID ごとに1行しか持てず
   2通目（多くは Cc）が捨てられるため `cc_ok=0` が記録されるが、それではアラートしない。
   Cc の修正後に `MAIL_CANARY_EXPECT_CC="true"` にすると To と Cc の両方を必須にする。
@@ -378,7 +378,7 @@ canary（3.6）の結果と、追加の確認をまとめて「1 障害につき
 - 保存: `mail_monitor_state`（migration 0029）に確認ごと 1 行を上書き。主キーで読み書きするだけで、表を走査しない。試験メールごとの履歴は `mail_canary_probe` のまま。
 - 見る: `GET /api/v1/mail/admin/monitor`（`mail:admin`）。
 - D1 の読み取り: 15 分ごとに状態 1〜2 行・送信ログのインデックス範囲（直近 1 時間ぶん）・一覧 6 行・スレッドの数行。1 日あたり数千行程度。
-- 有効化: (1) migration `0029_mail_monitor_state.sql` を dub-core に適用 (2) `MAIL_MONITOR_ENABLED="true"`（wrangler.free.toml に設定済み）(3) `MAIL_MONITOR_USER_ID` に `mail:read` + `mail:read_all` + メール閲覧を持つ管理者の id を設定 (4) 任意: `wrangler secret put MAIL_ALERT_SLACK_WEBHOOK_URL`。
+- 有効化: (1) migration `0029_mail_monitor_state.sql` を dub-core に適用 (2) `MAIL_MONITOR_ENABLED="true"`（wrangler.free.toml に設定済み）(3) `MAIL_CANARY_TO` の持ち主（監視用アカウント・ログイン不可）の id を Workers Secret `MAIL_MONITOR_USER_ID` で入れる（`wrangler secret put MAIL_MONITOR_USER_ID`。公開リポの vars には書かない）。権限はメール閲覧 + `mail:read` だけでよい（試験メールは本人の受信箱に入るので `mail:read_all` は不要） (4) 任意: `wrangler secret put MAIL_ALERT_SLACK_WEBHOOK_URL`。
 
 ## 4. Workers free-tier verdict (9-E: is a paid plan required?)
 

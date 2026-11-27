@@ -22,7 +22,7 @@
 
 | 確認 | どうやって | 間隔 | アラートまで |
 |---|---|---|---|
-| 送信 | 試験メール（件名 `[dub-canary] <uuid>`）を Resend で qa-a@ / qa-b@ に送る | 60 分（`MAIL_CANARY_INTERVAL_MIN`） | 1 回失敗すると 5 分後にもう 1 通送って確かめ、2 回続けて失敗で通知 |
+| 送信 | 試験メール（件名 `[dub-canary] <uuid>`）を Resend で dev-monitor@（To）/ qa-b@（Cc）に送る | 60 分（`MAIL_CANARY_INTERVAL_MIN`） | 1 回失敗すると 5 分後にもう 1 通送って確かめ、2 回続けて失敗で通知 |
 | 受信 | その試験メールが Email Routing → mail-gateway を通って `mail_inbound` に入ったか | 送信ごと・10 分以内（`MAIL_CANARY_DEADLINE_MIN`） | 同上（最初の失敗から 20 分前後で通知） |
 | 画面の API | 監視用ユーザーとして `GET /mail/messages` と `GET /mail/threads/:id`（最後に届いた試験メールのスレッド）を呼ぶ | 15 分（`MAIL_MONITOR_INTERVAL_MIN`） | 2 回続けて失敗（30 分） |
 | メンバーの送信 | 直近 60 分の `mail_send_log` で失敗が 3 件以上かつ成功以上 | 15 分 | 2 回続けて（30 分） |
@@ -68,7 +68,7 @@
 ## 4. 受信が止まった
 
 1. Cloudflare ダッシュボード → developershub.jp → **Email** → **Email Routing**:
-   - ルーティングが有効か、qa-a@ / qa-b@ と各アドレスのルールが「Send to a Worker: dub-mail-gateway」のままか。
+   - ルーティングが有効か、dev-monitor@ / qa-b@ と各アドレスのルールが「Send to a Worker: dub-mail-gateway」のままか。
    - **Activity log** に試験メールが来ているか（来ていない = 送信側か MX。来て `Dropped`/`Rejected` = Worker が例外）。
 2. MX / SPF の DNS が変わっていないか（Email Routing → Settings に警告が出る）。
 3. Worker が例外を出している時は、ログの `email` イベントを見る。受信の保存に失敗した時も **アーカイブ転送（`MAIL_ARCHIVE_FORWARD_TO`）は行われる**ので、その間のメールは Gmail のアーカイブに残っている（[8](#8-迂回して送る読むフォールバック)）。
@@ -76,9 +76,9 @@
 
 ## 5. 画面（一覧・スレッド API）が止まった
 
-1. `detail` が `HTTP 403` → 監視用ユーザー（`MAIL_MONITOR_USER_ID`）の権限が外れた（ロール管理で `mail:read` / `mail:read_all` / メール閲覧を確認）か、identity-roster の障害。
+1. `detail` が `HTTP 403` → 監視用ユーザー（`MAIL_MONITOR_USER_ID`＝dev-monitor@）の権限が外れた（ロール管理で監視用ロールの `mail:read` / メール閲覧、ユーザーが有効かを確認）か、identity-roster の障害。
 2. `HTTP 500` / 例外 → 直前のデプロイを疑い [7](#7-ロールバック)。D1 のエラーなら Cloudflare の D1 ダッシュボードで `dub-core` の状態と無料枠（rows read）を確認（usage-meter の通知も来ているはず）。
-3. 「スレッドに試験メールが表示されない」→ 受信は記録されたのに画面から見えない。スコープ（read_all）か一覧のクエリの退行。
+3. 「スレッドに試験メールが表示されない」→ 受信は記録されたのに画面から見えない。受信の持ち主の解決（宛先 dev-monitor@ → 名簿ユーザー）か、スコープ・一覧のクエリの退行。
 4. この確認は mail-gateway の中から呼ぶので、api-gateway とフロントは含まない。画面の白画面・チャンク欠けは app-health-monitor の「メール」行（`/mail`）が別に知らせる。
 
 ## 6. 監視そのものが止まった
