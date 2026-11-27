@@ -67,6 +67,10 @@
 
 ## 4. 受信が止まった
 
+0. **To だけ未着で Cc は着く**時は、まず Resend の送信停止リスト（Suppressions）を疑う。過去にハードバウンスした宛先は、Resend が送信を黙って捨てる（送信 API は成功のまま・バウンスも来ない）。
+   - 監視の詳細に「To は Resend の送信停止リストに登録」と出ていればこれ。
+   - `GET /api/v1/mail/admin/email-routing/suppressions` で一覧を見る。自ゾーンで `receivingRuleEnabled: true` のものは原因が解消済みなので、毎時の自動の戻し（`MAIL_SUPPRESSION_AUTOHEAL`）で外れる。急ぐ時は `DELETE /api/v1/mail/admin/email-routing/suppressions/<address>`。
+   - 典型の原因: アドレスの発行直後、ルールが行き渡る前に届いたメール（発行確認・アカウント発行の Cc）がバウンスした。発行確認は今は 5 分待ってから送る。
 1. Cloudflare ダッシュボード → developershub.jp → **Email** → **Email Routing**:
    - ルーティングが有効か、dev-monitor@ / qa-b@ と各アドレスのルールが「Send to a Worker: dub-mail-gateway」のままか。
    - **Activity log** に試験メールが来ているか（来ていない = 送信側か MX。来て `Dropped`/`Rejected` = Worker が例外）。

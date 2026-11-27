@@ -1,9 +1,6 @@
-// Release state of the event AI digest (#879). The panel is shown to every member who can
-// see the event. The AI chat stays closed until the release date below; change the date
-// here only, and flip AI_CHAT_AVAILABLE when the Mac mini is live.
-export const AI_RELEASE_DATE_LABEL = "12/3";
-export const AI_CHAT_AVAILABLE = false;
-export const AI_UNAVAILABLE_MESSAGE = `現在は利用できません。${AI_RELEASE_DATE_LABEL} 公開予定です。`;
+// Release state of the event AI digest (#879). The date / flag / 文言 live in @dub/app-ui
+// (shared with the shell's AI side panel) — change them there, not here.
+export { AI_RELEASE_DATE_LABEL, AI_CHAT_AVAILABLE, AI_UNAVAILABLE_MESSAGE } from "@dub/app-ui";
 
 const SOURCE_LABELS: Record<string, string> = {
   event: "イベント",

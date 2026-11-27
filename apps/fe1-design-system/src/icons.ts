@@ -70,6 +70,8 @@ import {
   // メール: 送信者ブロック (fe2) + kebab menu trigger
   Ban,
   EllipsisVertical,
+  // AI アシスタント (fe2 右側の AI パネル)
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { IconName } from "./types";
@@ -147,6 +149,8 @@ export const iconRegistry: Record<IconName, LucideIcon> = {
   monitor: Monitor,
   // カラー設定エントリ (fe2 設定メニュー)
   palette: Palette,
+  // AI アシスタント (fe2 右側の AI パネル)
+  sparkles: Sparkles,
 };
 
 // Direct re-export of Lucide for advanced callers (still tree-shakable).

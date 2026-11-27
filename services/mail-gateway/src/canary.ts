@@ -30,6 +30,7 @@ import { buildAuditEnv, buildDb, buildSendDeps } from "./deps";
 import { parseAddress } from "./mime";
 import { sendMail } from "./send";
 import { recordFromCanary } from "./monitor";
+import { suppressionNote } from "./resend-suppressions";
 import type { Env } from "./env";
 
 export const CANARY_SUBJECT_PREFIX = "[dub-canary]";
@@ -261,7 +262,13 @@ async function checkPending(env: Env, ctx: RequestContext, db: DbClient, cfg: Ca
       "receive",
       healthy
         ? { ok: true, detail: `到着 To ${fmtMs(toMs)} / Cc ${fmtMs(ccMs)}`, ...(threadId ? { ref: threadId } : {}) }
-        : { ok: false, detail: `${cfg.deadlineMin}分以内に届かない（To ${toMs !== null ? "着" : "未着"} / Cc ${ccMs !== null ? "着" : "未着"}）` },
+        : {
+            ok: false,
+            detail:
+              `${cfg.deadlineMin}分以内に届かない（To ${toMs !== null ? "着" : "未着"} / Cc ${ccMs !== null ? "着" : "未着"}）` +
+              // To 未着 / Cc 着 は Resend の送信停止リストが典型 (2026-11-27 dev-monitor@)。分かれば理由を添える。
+              (toMs === null ? await suppressionNote(env, p.to_address) : ""),
+          },
       now,
     );
   }
