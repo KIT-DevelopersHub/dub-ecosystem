@@ -3,6 +3,7 @@
 import { type DbClient, newId, nowIso } from "@dub/db";
 import { errors } from "@dub/errors";
 import type { common, mail } from "@dub/types";
+import { inboundLegacyFilter, sentFilter } from "./filters";
 
 // ---- row shapes ----
 export interface SendLogRow {
@@ -350,6 +351,7 @@ export async function listSent(
     q?: string;
     /** The viewer's inbound scope: when given, each row gets its conversation summary. */
     inboundScope?: InboundScope;
+    filters?: mail.MailListFilters;
   },
 ): Promise<common.Paginated<mail.MailSentListItem>> {
   // Fail-closed account scope: only the signed-in user's own delivered sends. A NULL
@@ -367,6 +369,11 @@ export async function listSent(
     const s = searchClause(q.q, ["subject", "snippet", "text_body"], [], ["to_json", "cc_json"]);
     where.push(s.sql);
     binds.push(...s.binds);
+  }
+  const f = q.filters ? sentFilter(q.filters, q.viewer) : null;
+  if (f) {
+    where.push(f.sql);
+    binds.push(...f.binds);
   }
   if (q.cursor !== undefined) {
     where.push("id < ?");
@@ -816,7 +823,7 @@ export async function setInboundReadState(db: DbClient, ids: string[], self: str
 
 export async function listInbound(
   db: DbClient,
-  q: { ownerUserId: InboundScope; viewer?: string; threadId?: string; cursor?: string; limit: number; q?: string },
+  q: { ownerUserId: InboundScope; viewer?: string; threadId?: string; cursor?: string; limit: number; q?: string; filters?: mail.MailListFilters },
 ): Promise<common.Paginated<mail.MailMessageListItem>> {
   // Fail-closed account scope: only messages delivered to the signed-in user (plus role-
   // sharing peers). A NULL owner_user_id (unassigned / legacy row) never matches, so it
@@ -836,6 +843,11 @@ export async function listInbound(
     const s = inboundSearchClause(q.q);
     where.push(s.sql);
     binds.push(...s.binds);
+  }
+  const f = q.filters ? inboundLegacyFilter(q.filters, q.viewer ?? "") : null;
+  if (f) {
+    where.push(f.sql);
+    binds.push(...f.binds);
   }
   if (q.cursor !== undefined) {
     where.push("id < ?");

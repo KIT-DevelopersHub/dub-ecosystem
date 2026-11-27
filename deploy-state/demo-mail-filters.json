@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "mail-filters",
+  "worker": "dub-demo-mail-filters",
+  "url": "https://dub-demo-mail-filters.developershub-site.workers.dev",
+  "deployedSha": "5a9876c2",
+  "branch": "feat/mail-filters-899",
+  "actor": "ko-tarou",
+  "markers": ["fe2-mail-filter-toggle"],
+  "live": true,
+  "verifiedAt": "2026-11-27T09:58:38Z",
+  "updatedAt": "2026-11-27T09:58:38Z",
+  "note": ""
+}

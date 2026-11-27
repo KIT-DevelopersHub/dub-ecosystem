@@ -9,6 +9,7 @@
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from "react";
 import type { mail } from "@dub/types";
 import type { AttachmentSource } from "../mailApi.tsx";
+import { NO_FILTERS, filterKey, filtersActive, type MailFilters } from "./filters/mailFilters.ts";
 import { SELF, hasSharedMail, inFolder, lastSentAt, matchesQuery, partitionNudged, pendingReplyIds, senderMatcher, threadBlocked, threadUnread, type FolderId, type Label, type MailMsg, type MailPerson, type MailThreadModel } from "./mailModel.ts";
 
 export interface ComposeState {
@@ -116,7 +117,7 @@ const MAIL_VIEW_FOLDERS = ["inbox", "mine", "others", "starred", "trash", "block
 /** 全件選択 needs a server view that is exactly the list on screen: a label is client-only, a
  *  search is a subset, and 送信済み / 下書き / 予約済み are not folder views at all. */
 export function canSelectAllInView(state: MailState): boolean {
-  return !state.labelFilter && state.search.trim().length === 0 && (MAIL_VIEW_FOLDERS as readonly string[]).includes(state.folder);
+  return !state.labelFilter && !queryActive(state) && (MAIL_VIEW_FOLDERS as readonly string[]).includes(state.folder);
 }
 /** Search spans everything but Trash / ブロック済み, which stay scoped to themselves. */
 export function searchViewOf(folder: FolderId, labelFilter: string | null): mail.MailFolderView {
@@ -160,12 +161,24 @@ export function folderUnread(state: MailState, folder: FolderId): number {
  *  NOT in the hydrated list (dropped again when the search is cleared/changed, and carried
  *  over a background HYDRATE while the search stays active). */
 export interface SearchState {
+  /** queryKeyOf(search text, filters) the results belong to. */
   query: string;
   status: "idle" | "loading" | "loadingMore" | "done" | "failed";
   ids: Set<string>;
   added: Set<string>;
   next: Record<PageSource, string | null>;
 }
+/** Identity of a server query: the search text, plus the filters when any are set (a bare
+ *  text search keeps the text itself as its key). "" = no query. */
+export function queryKeyOf(search: string, filters: MailFilters): string {
+  const q = search.trim();
+  return filtersActive(filters) ? `${q}\u0000${filterKey(filters)}` : q;
+}
+/** A search or a filter narrows the list (server results replace the folder page). */
+export function queryActive(state: Pick<MailState, "search" | "filters">): boolean {
+  return state.search.trim().length > 0 || filtersActive(state.filters);
+}
+
 const NO_SEARCH: SearchState = { query: "", status: "idle", ids: new Set(), added: new Set(), next: { inbox: null, sent: null } };
 
 export interface MailState {
@@ -182,6 +195,8 @@ export interface MailState {
    *  page. Any change to `checked` ends it (see reducer). */
   allInView: boolean;
   search: string;
+  /** #899 list filters (unread / from / to / …), mirrored in the URL by useFilterUrlSync. */
+  filters: MailFilters;
   composes: ComposeState[];
   undo: UndoState | null;
   /** Bottom-left send status bar (送信中… / 送信しました / 送信できませんでした). */
@@ -227,6 +242,7 @@ export type MailAction =
   | { type: "SET_FOLDER"; folder: FolderId }
   | { type: "SET_LABEL"; label: string }
   | { type: "SET_SEARCH"; search: string }
+  | { type: "SET_FILTERS"; filters: MailFilters }
   | { type: "SEARCH_RESULTS"; query: string; threads: MailThreadModel[]; next: Record<PageSource, string | null>; append?: boolean }
   | { type: "SEARCH_FAILED"; query: string }
   | { type: "SEARCH_MORE" } // ask useMailSync for the next page of search results
@@ -308,8 +324,11 @@ export function selectVisible(state: MailState): MailThreadModel[] {
   const q = state.search.trim();
   const scoped = (t: MailThreadModel): boolean =>
     state.labelFilter ? t.labels.includes(state.labelFilter) && t.folder !== "trash" : inFolder(t, state.folder);
-  if (q.length === 0) return state.threads.filter((t) => !t.purged && scoped(t));
-  const ids = state.searchResults.query === q ? state.searchResults.ids : new Set<string>();
+  if (!queryActive(state)) return state.threads.filter((t) => !t.purged && scoped(t));
+  const ids = state.searchResults.query === queryKeyOf(state.search, state.filters) ? state.searchResults.ids : new Set<string>();
+  // Filters have no client pre-filter: only what the server matched (it knows read state,
+  // attachments and dates the loaded snippets don't).
+  const matches = filtersActive(state.filters) ? (t: MailThreadModel) => ids.has(t.id) : (t: MailThreadModel) => ids.has(t.id) || matchesQuery(t, q);
   // Search spans every folder except Trash and ブロック済み (each stays scoped to itself).
   const inScope = (t: MailThreadModel): boolean =>
     state.labelFilter
@@ -320,7 +339,7 @@ export function selectVisible(state: MailState): MailThreadModel[] {
           ? inFolder(t, "blocked")
           : t.folder !== "trash" && !t.blocked;
   return state.threads
-    .filter((t) => !t.purged && inScope(t) && (ids.has(t.id) || matchesQuery(t, q)))
+    .filter((t) => !t.purged && inScope(t) && matches(t))
     .sort((a, b) => latest(b).localeCompare(latest(a)));
 }
 
@@ -328,7 +347,7 @@ export function selectVisible(state: MailState): MailThreadModel[] {
  *  and Sent / すべてのメール (which merge two server lists) newest first. */
 export function selectOrdered(state: MailState, now: Date = new Date()): MailThreadModel[] {
   const visible = selectVisible(state);
-  if (state.labelFilter || state.search.trim().length > 0) return visible;
+  if (state.labelFilter || queryActive(state)) return visible;
   if (state.folder === "sent") return [...visible].sort((a, b) => lastSentAt(b).localeCompare(lastSentAt(a)));
   if (state.folder === "all") return [...visible].sort((a, b) => latest(b).localeCompare(latest(a)));
   if (state.folder !== "inbox") return visible;
@@ -356,6 +375,15 @@ export function reducer(state: MailState, action: MailAction): MailState {
   return next.allInView && next.checked !== state.checked ? { ...next, allInView: false } : next;
 }
 
+/** Apply a new search text and/or filter set: a changed query forgets the previous matches
+ *  (useMailSync fetches the new ones); an unchanged one only updates the inputs. */
+function withQuery(state: MailState, search: string, filters: MailFilters): MailState {
+  const key = queryKeyOf(search, filters);
+  if (key === state.searchResults.query) return { ...state, search, filters, openThreadId: null };
+  const next: SearchState = key.length === 0 ? NO_SEARCH : { ...NO_SEARCH, query: key, status: "loading" };
+  return { ...state, ...clearSearch(state, next), search, filters, openThreadId: null };
+}
+
 function baseReducer(state: MailState, action: MailAction): MailState {
   switch (action.type) {
     case "SET_FOLDER": {
@@ -372,6 +400,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
         openThreadId: null,
         cursorId: null,
         search: "",
+        filters: NO_FILTERS,
         checked: new Set(),
         ...(paged
           ? { pager: { inbox: { ...state.pager.inbox, stack: [] }, sent: { ...state.pager.sent, stack: [] } }, listLoading: true }
@@ -410,20 +439,18 @@ function baseReducer(state: MailState, action: MailAction): MailState {
         labelFilter: action.label,
         openThreadId: null,
         search: "",
+        filters: NO_FILTERS,
         checked: new Set(),
         ...(viewChanged ? { pager: { ...state.pager, inbox: FIRST_PAGE }, listLoading: true } : {}),
       };
     }
-    case "SET_SEARCH": {
-      const q = action.search.trim();
-      if (q === state.searchResults.query) return { ...state, search: action.search, openThreadId: null };
-      // New (or cleared) query: forget the previous matches; useMailSync fetches the new ones.
-      const next: SearchState = q.length === 0 ? NO_SEARCH : { ...NO_SEARCH, query: q, status: "loading" };
-      return { ...state, ...clearSearch(state, next), search: action.search, openThreadId: null };
-    }
+    case "SET_SEARCH":
+      return withQuery(state, action.search, state.filters);
+    case "SET_FILTERS":
+      return { ...withQuery(state, state.search, action.filters), checked: new Set() };
     case "SEARCH_RESULTS": {
       const cur = state.searchResults;
-      if (action.query !== state.search.trim() || action.query !== cur.query) return state; // stale response
+      if (action.query !== queryKeyOf(state.search, state.filters) || action.query !== cur.query) return state; // stale response
       const base = action.append ? state : { ...state, ...clearSearch(state, cur) };
       const have = new Set(base.threads.map((t) => t.id));
       const fresh = action.threads.filter((t) => !have.has(t.id));
@@ -768,6 +795,7 @@ export const initialMailState: MailState = {
   checked: new Set(),
   allInView: false,
   search: "",
+  filters: NO_FILTERS,
   composes: [],
   undo: null,
   sendNotice: null,

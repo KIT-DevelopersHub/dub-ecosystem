@@ -26,6 +26,7 @@ import {
   type InboundRow,
   type InboundScope,
 } from "./repo";
+import { inboundMessageFilter, threadFilterSql } from "./filters";
 
 type View = mail.MailFolderView;
 
@@ -48,7 +49,7 @@ function blockedSenderSql(viewer: string): Sql {
 }
 
 /** Per-thread attributes over the viewer's in-scope inbound rows (optionally search-narrowed). */
-function threadAttrsSql(scope: InboundScope, viewer: string, q: string | undefined): Sql {
+function threadAttrsSql(scope: InboundScope, viewer: string, q: string | undefined, filters?: mail.MailListFilters): Sql {
   const blk = blockedSenderSql(viewer);
   const own = "EXISTS (SELECT 1 FROM mail_inbound_delivery vd WHERE vd.inbound_id = mail_inbound.id AND vd.owner_user_id = ?)";
   const ownRead = "EXISTS (SELECT 1 FROM mail_inbound_delivery vr WHERE vr.inbound_id = mail_inbound.id AND vr.owner_user_id = ? AND vr.read_at IS NOT NULL)";
@@ -74,6 +75,11 @@ function threadAttrsSql(scope: InboundScope, viewer: string, q: string | undefin
     where.push(s.sql);
     binds.push(...s.binds);
   }
+  const f = filters ? inboundMessageFilter(filters) : null;
+  if (f) {
+    where.push(f.sql);
+    binds.push(...f.binds);
+  }
   return { sql: `${select}${where.length > 0 ? ` WHERE ${where.join(" AND ")}` : ""} GROUP BY thread_id`, binds };
 }
 
@@ -97,8 +103,8 @@ export const VIEW_PREDICATE: Record<View, string> = {
   all: `${live} AND ${notTrashed} AND ${unblockedThread}`,
 };
 
-function viewFrom(scope: InboundScope, viewer: string, q: string | undefined): Sql {
-  const attrs = threadAttrsSql(scope, viewer, q);
+function viewFrom(scope: InboundScope, viewer: string, q: string | undefined, filters?: mail.MailListFilters): Sql {
+  const attrs = threadAttrsSql(scope, viewer, q, filters);
   return {
     sql: `FROM (${attrs.sql}) t LEFT JOIN mail_user_flags uf ON uf.owner_user_id = ? AND uf.thread_id = t.thread_id`,
     binds: [...attrs.binds, viewer],
@@ -109,10 +115,11 @@ function viewFrom(scope: InboundScope, viewer: string, q: string | undefined): S
  *  (fewer only on the last page), newest conversation first, plus the view's total. */
 export async function listInboundFolder(
   db: DbClient,
-  q: { scope: InboundScope; viewer: string; folder: View; cursor?: string; limit: number; q?: string; withTotal?: boolean },
+  q: { scope: InboundScope; viewer: string; folder: View; cursor?: string; limit: number; q?: string; withTotal?: boolean; filters?: mail.MailListFilters },
 ): Promise<mail.MailMessagePage> {
-  const from = viewFrom(q.scope, q.viewer, q.q);
-  const pred = VIEW_PREDICATE[q.folder];
+  const from = viewFrom(q.scope, q.viewer, q.q, q.filters);
+  // Unread / starred are per conversation (any unread message / the viewer's star).
+  const pred = `${VIEW_PREDICATE[q.folder]}${q.filters ? threadFilterSql(q.filters) : ""}`;
   const cursorSql = q.cursor !== undefined ? " AND t.last_id < ?" : "";
   const cursorBinds = q.cursor !== undefined ? [decodeCursor(q.cursor)] : [];
   const threads = await db.all<{ thread_id: string; last_id: string }>(
@@ -144,6 +151,11 @@ export async function listInboundFolder(
     const s = inboundSearchClause(q.q);
     where.push(s.sql);
     binds.push(...s.binds);
+  }
+  const mf = q.filters ? inboundMessageFilter(q.filters) : null;
+  if (mf) {
+    where.push(mf.sql);
+    binds.push(...mf.binds);
   }
   const rows = await db.all<InboundRow>(`${sel.sql} WHERE ${where.join(" AND ")} ORDER BY id DESC`, ...sel.binds, ...binds);
   const last = page[page.length - 1]!;

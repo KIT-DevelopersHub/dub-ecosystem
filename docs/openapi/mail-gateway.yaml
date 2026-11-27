@@ -148,6 +148,61 @@ paths:
           schema:
             type: string
             enum: ['0', 'false']
+        - name: unread
+          in: query
+          description: >-
+            Filter (#899). `1` = only unread, `0` = only read. In a folder view this is per
+            conversation (any unread message). GET /sent: `1` matches nothing (sent mail is read).
+          schema:
+            type: string
+            enum: ['1', '0']
+        - name: from
+          in: query
+          description: Filter (#899). Sender address, exact and case-insensitive (GET /sent — the From we sent as).
+          schema:
+            type: string
+            format: email
+            maxLength: 320
+        - name: to
+          in: query
+          description: Filter (#899). A To or Cc recipient address, exact and case-insensitive.
+          schema:
+            type: string
+            format: email
+            maxLength: 320
+        - name: starred
+          in: query
+          description: Filter (#899). `1` = only conversations the caller starred.
+          schema:
+            type: string
+            enum: ['1']
+        - name: hasAttachment
+          in: query
+          description: Filter (#899). `1` = only messages with a file attachment (inline images excluded).
+          schema:
+            type: string
+            enum: ['1']
+        - name: after
+          in: query
+          description: Filter (#899). Received (GET /sent — sent) at or after this instant.
+          schema:
+            type: string
+            format: date-time
+        - name: before
+          in: query
+          description: Filter (#899). Received (GET /sent — sent) strictly before this instant.
+          schema:
+            type: string
+            format: date-time
+        - name: mailbox
+          in: query
+          description: >-
+            Filter (#899). The address the mail arrived at (a delivery envelope or a team list).
+            GET /sent — the From address.
+          schema:
+            type: string
+            format: email
+            maxLength: 320
       responses:
         '200':
           description: Page of messages

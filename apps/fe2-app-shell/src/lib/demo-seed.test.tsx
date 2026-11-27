@@ -928,3 +928,22 @@ describe("event AI digest (#879, demo = production default: flag OFF)", () => {
     expect(ev.capacity).toBe(300);
   });
 });
+
+describe("demo mail filters (#899, gateway parity)", () => {
+  type Page = { items: { id: string; threadId: string }[] };
+  const ids = async (query: Record<string, string>) =>
+    (await api().request<Page>({ method: "GET", path: "/api/v1/mail/messages", query: { folder: "all", ...query } })).items.map((m) => m.id).sort();
+
+  it("narrows by unread / from / attachment / mailbox / dates, and combines them", async () => {
+    const unread = await ids({ unread: "1" });
+    expect(unread).toContain("msg_9");
+    expect(unread).not.toContain("msg_8");
+    expect(await ids({ from: "hanako@example.com" })).toEqual(["msg_1", "msg_8"]);
+    expect(await ids({ from: "hanako@example.com", unread: "0" })).toEqual(["msg_8"]);
+    expect(await ids({ mailbox: "info@developershub.jp" })).toEqual(["msg_7", "msg_9"]);
+    expect(await ids({ mailbox: "info@developershub.jp", hasAttachment: "1", unread: "1" })).toEqual(["msg_9"]);
+    // The inline cid logo of the HTML mail is not an attachment.
+    expect(await ids({ hasAttachment: "1" })).not.toContain("msg_html");
+    expect(await ids({ before: new Date(Date.now() - 30 * 86_400_000).toISOString(), mailbox: "info@developershub.jp" })).toEqual(["msg_9"]);
+  });
+});

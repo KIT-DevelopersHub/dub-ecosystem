@@ -316,6 +316,25 @@ Query parameters:
 | `threadId` | string | Optional filter to one thread. |
 | `cursor` | string | Opaque; from a prior `nextCursor` (base64url of the last row id). Bad value → `400 VALIDATION_FAILED` (`reason: "invalid_cursor"`). |
 | `limit` | number | Default 50, max 200. Out of range → `400 MAIL_INVALID_REQUEST` (`reason: "invalid_range"` / `"too_large"`). |
+| `q` / `folder` / `withTotal` | | Free-text search and folder views — see `mail.ListMailMessagesQuery` and the OpenAPI spec. |
+
+Filters (#899). All optional, ANDed with each other and with `q` / `folder`; they only narrow
+the caller's scope. `GET /sent` takes the same keys. A bad value → `400 MAIL_INVALID_REQUEST`.
+
+| Param | Values | `/messages` | `/sent` |
+|---|---|---|---|
+| `unread` | `1` / `0` | unread / read for the caller (per conversation in a folder view) | `1` = nothing, `0` = all |
+| `from` | address | sender, exact, case-insensitive | the From we sent as |
+| `to` | address | a To or Cc recipient | a To or Cc recipient (never Bcc) |
+| `starred` | `1` | conversations the caller starred | same (thread id / send id / RFC id) |
+| `hasAttachment` | `1` | a file attachment (inline images with a Content-ID excluded) | a file attachment |
+| `after` / `before` | ISO8601 | `received_at` ≥ after, < before | `created_at` |
+| `mailbox` | address | arrived at that address (any delivery envelope, or `list:<address>` for a team list) | the From |
+
+Every probe is an index lookup on an existing index (no migration): `mail_attachments
+(message_kind, message_id)`, `mail_inbound_delivery (inbound_id, envelope_to)`, the
+`mail_user_flags` primary key, and on Sent `(owner_user_id, status, created_at, id)` for the
+date bounds. `services/mail-gateway/test/filters.test.ts` asserts the plans.
 
 Response `200` — `common.Paginated<mail.MailMessage>`:
 

@@ -731,6 +731,32 @@ MAIL_DETAIL.msg_5 = {
   textBody: "いつもご利用ありがとうございます。\n\n今週末限定のセール情報をお届けします。全品50%オフ、送料無料キャンペーンも実施中です。\n\n配信停止はこちらから…",
 };
 
+// #899 絞り込み demo: more senders, the shared info@ mailbox (so 受信アドレス shows), older
+// dates and file attachments, so every filter — and combinations — narrows to something.
+MAIL_DETAIL.msg_7 = {
+  id: "msg_7", messageId: "<m7@demo>", threadId: "thr_7", from: { email: "billing@globex.co.jp", name: "Globex 経理部" },
+  to: [{ email: "info@developershub.jp" }], subject: "協賛金のご請求書（info@ 宛て）", snippet: "協賛金の請求書を添付します。",
+  receivedAt: daysAgoIso(20), read: true, mine: true,
+  textBody: "Globex 経理部です。\n\n協賛金の請求書を添付します。お手数ですがご確認ください。",
+  headerMeta: { deliveredTo: "info@developershub.jp" },
+  attachments: [seedMailBlob("mailatt_demo_invoice", "請求書.pdf", "application/pdf", "請求書（デモ用サンプル）")],
+};
+MAIL_DETAIL.msg_8 = {
+  id: "msg_8", messageId: "<m8@demo>", threadId: "thr_8", from: { email: "hanako@example.com", name: "山田 花子" },
+  to: [{ email: "demo@developershub.jp" }], cc: [{ email: "staff@developershub.jp", name: "運営スタッフ" }],
+  subject: "登壇資料の差し替え", snippet: "先日の資料を一部差し替えました。",
+  receivedAt: daysAgoIso(9), read: true, mine: true,
+  textBody: "山田です。\n\n先日の登壇資料を一部差し替えました。運営スタッフの方にも共有しています。",
+};
+MAIL_DETAIL.msg_9 = {
+  id: "msg_9", messageId: "<m9@demo>", threadId: "thr_9", from: { email: "kenji@example.com", name: "高橋 健二" },
+  to: [{ email: "info@developershub.jp" }], subject: "参加者名簿（info@ 宛て）", snippet: "懇親会の参加者名簿を添付します。",
+  receivedAt: daysAgoIso(35), read: false, mine: true,
+  textBody: "高橋です。\n\n懇親会の参加者名簿を添付します。",
+  headerMeta: { deliveredTo: "info@developershub.jp" },
+  attachments: [seedMailBlob("mailatt_demo_roster", "参加者名簿.csv", "text/csv", "名前,所属\n高橋,KIT")],
+};
+
 // HTML mail: layout from the sender, an inline cid: image from its own attachments, a remote
 // image that stays off until 画像を表示, plus markup the sanitizer has to take out.
 const MSG_HTML: mail.MailMessageListItem = {
@@ -795,6 +821,9 @@ const MAIL_THREAD: Record<string, mail.MailThread> = {
   thr_3: { id: "thr_3", messages: [MAIL_DETAIL.msg_3!] },
   thr_4: { id: "thr_4", messages: [MAIL_DETAIL.msg_4!] },
   thr_5: { id: "thr_5", messages: [MAIL_DETAIL.msg_5!] },
+  thr_7: { id: "thr_7", messages: [MAIL_DETAIL.msg_7!] },
+  thr_8: { id: "thr_8", messages: [MAIL_DETAIL.msg_8!] },
+  thr_9: { id: "thr_9", messages: [MAIL_DETAIL.msg_9!] },
 };
 
 // ── demo accounts (per-account mail scope) ────────────────────────────────────
@@ -1159,6 +1188,46 @@ function createMailStore() {
       return hit(m.subject) || hit(m.snippet) || hit(m.textBody) || addr(from) || m.to.some(addr) || (m.cc ?? []).some(addr);
     });
   }
+  // Gateway parity for the #899 filters (services/mail-gateway/src/filters.ts): message-level
+  // from / to / attachment / dates / mailbox, plus unread / starred per message on the plain
+  // lists (the folder view applies those two per conversation instead).
+  function filterBy<T extends mail.MailMessageDetail | mail.MailSentDetail>(items: T[], url: URL, perMessage: { readState: boolean; starredIds?: Set<string> }): T[] {
+    const p = url.searchParams;
+    const lc = (v: string | null) => v?.trim().toLowerCase() || null;
+    const from = lc(p.get("from"));
+    const to = lc(p.get("to"));
+    const mailbox = lc(p.get("mailbox"));
+    const after = p.get("after");
+    const before = p.get("before");
+    const unread = p.get("unread");
+    const has = (list: mail.MailAddress[] | undefined, a: string) => (list ?? []).some((x) => x.email.toLowerCase() === a);
+    const fileAttached = (m: T) => (m.attachments ?? []).some((a) => !(a.contentId && a.contentType.startsWith("image/")));
+    return items.filter((m) => {
+      const inbound = "receivedAt" in m;
+      const at = inbound ? m.receivedAt : m.sentAt;
+      const sender = (inbound ? m.from.email : m.from?.email ?? "").toLowerCase();
+      if (from && sender !== from) return false;
+      if (to && !has(m.to, to) && !has(m.cc, to)) return false;
+      if (mailbox) {
+        if (inbound) {
+          const envelope = (m as mail.MailMessageDetail).headerMeta?.deliveredTo?.toLowerCase();
+          if (envelope ? envelope !== mailbox : !has(m.to, mailbox)) return false;
+        } else if (sender !== mailbox) return false;
+      }
+      if (p.get("hasAttachment") === "1" && !fileAttached(m)) return false;
+      if (after && at < new Date(after).toISOString()) return false;
+      if (before && at >= new Date(before).toISOString()) return false;
+      if (perMessage.readState && unread !== null) {
+        const read = inbound ? (m as mail.MailMessageDetail).read : true;
+        if (read !== (unread === "0")) return false;
+      }
+      if (perMessage.starredIds && p.get("starred") === "1") {
+        const keys = inbound ? [(m as mail.MailMessageDetail).threadId] : [m.id, ...((m as mail.MailSentDetail).threadId ? [(m as mail.MailSentDetail).threadId!] : [])];
+        if (!keys.some((k) => perMessage.starredIds!.has(k))) return false;
+      }
+      return true;
+    });
+  }
   // Gateway parity: honour ?limit/&cursor (id cursor, newest first as stored) when a limit
   // is given; without one the whole list is returned as before.
   function pageBy<T extends { id: string }>(items: T[], url: URL): { items: T[]; nextCursor: string | null } {
@@ -1373,8 +1442,10 @@ function createMailStore() {
       const view = url.searchParams.get("folder")!;
       const limit = Math.max(1, Number(url.searchParams.get("limit")) || 50);
       const cursor = url.searchParams.get("cursor");
-      const ts = folderThreads(searchBy(readInbox, url))
+      const unreadQ = url.searchParams.get("unread");
+      const ts = folderThreads(filterBy(searchBy(readInbox, url), url, { readState: false }))
         .filter((t) => inView(t, view))
+        .filter((t) => (unreadQ === null || t.unread === (unreadQ === "1")) && (url.searchParams.get("starred") !== "1" || t.starred))
         .sort((a, b) => b.last.localeCompare(a.last) || b.threadId.localeCompare(a.threadId));
       const start = cursor ? ts.findIndex((t) => t.threadId === cursor) + 1 : 0;
       const slice = ts.slice(start, start + limit);
@@ -1388,7 +1459,8 @@ function createMailStore() {
       return json({ items, nextCursor: start + limit < ts.length ? (slice.at(-1)?.threadId ?? null) : null, total: ts.length } satisfies mail.MailMessagePage);
     }
     if (method === "GET" && pathname === "/api/v1/mail/messages") {
-      const items: mail.MailMessageListItem[] = searchBy(readInbox, url).map(({ textBody, htmlBody, ...li }) => {
+      const starredIds = new Set(loadFlags().filter((f) => f.starred).map((f) => f.threadId));
+      const items: mail.MailMessageListItem[] = filterBy(searchBy(readInbox, url), url, { readState: true, starredIds }).map(({ textBody, htmlBody, ...li }) => {
         void textBody;
         void htmlBody;
         return stampBlocked(li);
@@ -1545,7 +1617,8 @@ function createMailStore() {
       return json(res);
     }
     if (method === "GET" && pathname === "/api/v1/mail/sent") {
-      const items: mail.MailSentListItem[] = searchBy(readSent, url).map(({ textBody, htmlBody, ...listItem }) => {
+      const starredIds = new Set(loadFlags().filter((f) => f.starred).map((f) => f.threadId));
+      const items: mail.MailSentListItem[] = filterBy(searchBy(readSent, url), url, { readState: true, starredIds }).map(({ textBody, htmlBody, ...listItem }) => {
         void textBody;
         void htmlBody;
         return hideArchiveCc(listItem);

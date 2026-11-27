@@ -18,6 +18,8 @@ import {
 
 const HEADER_ALLOW: ReadonlySet<string> = new Set(OUTBOUND_HEADER_ALLOWLIST);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** RFC 5321 path limit: a filter address longer than this cannot match a stored one. */
+const MAX_FILTER_ADDRESS = 320;
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
@@ -357,9 +359,40 @@ export function parseListMessagesQuery(q: Record<string, string | undefined>): {
   q?: string;
   folder?: mail.MailFolderView;
   withTotal?: boolean;
+  filters: mail.MailListFilters;
 } {
   const fe: FieldError[] = [];
-  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView; withTotal?: boolean } = { limit: DEFAULT_QUERY_LIMIT };
+  const out: { threadId?: string; cursor?: string; limit: number; q?: string; folder?: mail.MailFolderView; withTotal?: boolean; filters: mail.MailListFilters } = {
+    limit: DEFAULT_QUERY_LIMIT,
+    filters: {},
+  };
+  const f = out.filters;
+
+  // #899 filters. Flags take "1" (unread also "0"); addresses are exact and lower-cased; the
+  // date bounds are any parseable instant, normalized to ISO8601 UTC like the stored stamps.
+  if (q.unread === "1" || q.unread === "0") f.unread = q.unread === "1";
+  else if (q.unread !== undefined && q.unread !== "") fe.push({ field: "unread", reason: "invalid_enum", message: "1|0" });
+  if (q.starred === "1") f.starred = true;
+  else if (q.starred !== undefined && q.starred !== "") fe.push({ field: "starred", reason: "invalid_enum", message: "1" });
+  if (q.hasAttachment === "1") f.hasAttachment = true;
+  else if (q.hasAttachment !== undefined && q.hasAttachment !== "") fe.push({ field: "hasAttachment", reason: "invalid_enum", message: "1" });
+  const address = (v: string | undefined, field: "from" | "to" | "mailbox"): void => {
+    if (v === undefined || v.trim() === "") return;
+    const a = v.trim().toLowerCase();
+    if (a.length > MAX_FILTER_ADDRESS || !EMAIL_RE.test(a)) fe.push({ field, reason: "invalid_email" });
+    else f[field] = a;
+  };
+  address(q.from, "from");
+  address(q.to, "to");
+  address(q.mailbox, "mailbox");
+  const instant = (v: string | undefined, field: "after" | "before"): void => {
+    if (v === undefined || v.trim() === "") return;
+    const t = Date.parse(v.trim());
+    if (Number.isNaN(t)) fe.push({ field, reason: "invalid_datetime", message: "ISO8601" });
+    else f[field] = new Date(t).toISOString();
+  };
+  instant(q.after, "after");
+  instant(q.before, "before");
 
   if (q.withTotal === "0" || q.withTotal === "false") out.withTotal = false;
 

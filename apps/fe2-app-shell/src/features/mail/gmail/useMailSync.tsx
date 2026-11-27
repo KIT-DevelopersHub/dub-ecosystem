@@ -10,7 +10,8 @@ import type { MailApi } from "../mailApi.tsx";
 import { useMailApi } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
 import { dedupeLoopback, hasUnloadedReplies, type MailMsg } from "./mailModel.ts";
-import { PAGE_SIZE, pageSourceOf, searchViewOf, selectVisible, serverViewOf, useMailStore } from "./useMailStore.tsx";
+import { PAGE_SIZE, pageSourceOf, queryActive, searchViewOf, selectVisible, serverViewOf, useMailStore } from "./useMailStore.tsx";
+import { toApiFilters } from "./filters/mailFilters.ts";
 
 /** What the server last knew per thread. noReplyAt is compared as-is; the POST sends only the
  *  boolean `noReply` (the server stamps its own time). */
@@ -166,24 +167,36 @@ export function useMailSync(): void {
   const searchView = searchViewOf(state.folder, state.labelFilter);
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
+  // The text + filters behind search.query (its key changes whenever either does).
+  const inputs = useRef({ text: state.search.trim(), filters: state.filters });
+  inputs.current = { text: state.search.trim(), filters: state.filters };
   useEffect(() => {
-    const q = search.query;
+    const key = search.query;
     const more = search.status === "loadingMore";
-    if (q.length === 0 || (search.status !== "loading" && !more)) return;
+    if (key.length === 0 || (search.status !== "loading" && !more)) return;
+    const { text, filters } = inputs.current;
+    // A list that cannot hold a match (受信のみ → no Sent, 送信のみ / 未読 → …) is not asked.
+    const lists = toApiFilters(filters);
+    const textQ = text.length > 0 ? { q: text } : {};
     let alive = true;
     const run = async (): Promise<void> => {
       try {
         const inboxCur = more ? search.next.inbox : undefined;
         const sentCur = more ? search.next.sent : undefined;
         const empty = { items: [], nextCursor: null };
+        const filterArg = (f: typeof lists.inbox) => (f && Object.keys(f).length > 0 ? { filters: f } : {});
         const [inbox, sent] = await Promise.all([
-          !more || inboxCur ? api.listInbox({ q, folder: searchView, limit: PAGE_SIZE, ...(inboxCur ? { cursor: inboxCur } : {}) }) : Promise.resolve(empty),
-          !more || sentCur ? api.listSent({ q, limit: PAGE_SIZE, ...(sentCur ? { cursor: sentCur } : {}) }) : Promise.resolve(empty),
+          lists.inbox && (!more || inboxCur)
+            ? api.listInbox({ ...textQ, folder: searchView, limit: PAGE_SIZE, ...(inboxCur ? { cursor: inboxCur } : {}), ...filterArg(lists.inbox) })
+            : Promise.resolve(empty),
+          lists.sent && (!more || sentCur)
+            ? api.listSent({ ...textQ, limit: PAGE_SIZE, ...(sentCur ? { cursor: sentCur } : {}), ...filterArg(lists.sent) })
+            : Promise.resolve(empty),
         ]);
         if (!alive) return;
         const found = combineThreads(inbox.items, sent.items, me);
         const known = new Set(threadsRef.current.map((t) => t.id));
-        dispatch({ type: "SEARCH_RESULTS", query: q, threads: found, next: { inbox: inbox.nextCursor, sent: sent.nextCursor }, append: more });
+        dispatch({ type: "SEARCH_RESULTS", query: key, threads: found, next: { inbox: inbox.nextCursor, sent: sent.nextCursor }, append: more });
         // Merged-in threads come from outside the hydrated page, so they never got their
         // persisted flags (star/archive/trash/purge). Apply only to those — already-loaded
         // threads keep their optimistic local state.
@@ -192,7 +205,7 @@ export function useMailSync(): void {
         const flags = await api.listFlags().catch(() => []);
         if (alive) dispatch({ type: "APPLY_FLAGS", flags: flags.filter((f) => fresh.has(f.threadId)) });
       } catch {
-        if (alive) dispatch({ type: "SEARCH_FAILED", query: q });
+        if (alive) dispatch({ type: "SEARCH_FAILED", query: key });
       }
     };
     const timer = setTimeout(() => void run(), more ? 0 : SEARCH_DEBOUNCE_MS);
@@ -248,7 +261,7 @@ export function useMailSync(): void {
   // Once the viewer is idle (no undo toast / selection), re-fetch the same page so the next
   // conversation moves up and the page is full again. `fullAt` is the visible count right
   // after the last hydrate; it only fires on a DROP below it, once per hydrate (no loop).
-  const visibleNow = state.search.trim() === "" && pageSourceOf(state.folder) === "inbox" ? selectVisible(state).length : -1;
+  const visibleNow = !queryActive(state) && pageSourceOf(state.folder) === "inbox" ? selectVisible(state).length : -1;
   const fullAt = useRef(-1);
   const pagerInbox = state.pager.inbox;
   useEffect(() => {
