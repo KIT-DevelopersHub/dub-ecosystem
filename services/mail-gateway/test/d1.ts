@@ -43,6 +43,7 @@ const SCHEMA_PATHS = [
   join(HERE, "../db/0025_drafts_inline_cid.sql"),
   join(HERE, "../db/0026_mail_templates.sql"),
   join(HERE, "../db/0027_shared_mailbox.sql"),
+  join(HERE, "../db/0029_mail_monitor_state.sql"),
 ];
 
 function norm(v: unknown): unknown {

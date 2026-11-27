@@ -47,6 +47,9 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /internal/health/ready": INTERNAL,
   "GET /internal/status": INTERNAL,
   "GET /health/quota": INTERNAL,
+  // Mail monitor heartbeat (#898): app-health-monitor reads it over its Service Binding
+  // (dead-man's switch for the cron-driven checks). Check states only, no secrets.
+  "GET /internal/monitor/heartbeat": INTERNAL,
 
   // ---- Resend delivery-problem webhook (bounce / suppressed / complained / failed / delayed)
   // INTERNAL, not PUBLIC: this Worker has no public hostname. Resend calls api-gateway's
@@ -176,6 +179,8 @@ export const POLICY_TABLE = definePolicyTable({
   "DELETE /mail/admin/shared-mailboxes/:id": ["mail:admin"],
   // Production canary probe results (read-only operational data, same admin console).
   "GET /mail/admin/canary/probes": ["mail:admin"],
+  // Production mail monitor state (send / receive / API / send errors), read-only (#898).
+  "GET /mail/admin/monitor": ["mail:admin"],
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────

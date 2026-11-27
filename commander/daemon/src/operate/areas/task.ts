@@ -12,6 +12,7 @@ const TASK_LABELS = {
   status: "状態",
   priority: "優先度",
   assigneeId: "担当者",
+  assigneeTeamId: "担当チーム",
   teamId: "チーム",
   parentTaskId: "親タスク",
   wbs: "WBS番号",
@@ -29,8 +30,8 @@ export const TASK: AreaSpec = {
       service: S,
       requires: VIEW,
       description: "タスクの一覧を取得する",
-      hint: "query.eventId が実質必須（無いと400）。teamId・assigneeId・status で API 側で絞れる。items[].id・title・status・priority・assigneeId・teamId・startAt・dueAt・version",
-      query: ["eventId", "assigneeId", "teamId", "createdById", "status", "limit", "cursor"],
+      hint: "query.eventId が実質必須（無いと400）。teamId・assigneeId・assigneeTeamId（カンマ区切り・assigneeId と OR）・status で API 側で絞れる。items[].id・title・status・priority・assigneeId・assigneeTeamId・teamId・startAt・dueAt・version",
+      query: ["eventId", "assigneeId", "assigneeTeamId", "teamId", "createdById", "status", "limit", "cursor"],
     }),
     read({
       id: "tasks.get",
@@ -39,7 +40,7 @@ export const TASK: AreaSpec = {
       service: S,
       requires: VIEW,
       description: "タスク1件の詳細を取得する",
-      hint: "title・description・status・priority・assigneeId・teamId・parentTaskId・startAt・dueAt・version。更新前に version を読む",
+      hint: "title・description・status・priority・assigneeId・assigneeTeamId・teamId・parentTaskId・startAt・dueAt・version。更新前に version を読む",
     }),
     read({
       id: "tasks.dependencies.list",
@@ -74,7 +75,7 @@ export const TASK: AreaSpec = {
       hint: "body.title 必須(1〜200字)。eventId 省略でイベントに紐づかないタスク。priority は low|medium|high|urgent（既定 medium）。状態は常に todo。日時は ISO8601。parentTaskId を付けるなら teamId は親と同じにする。応答の id が新タスクの id",
       impact: "{count}件のタスクが作られ、イベントの関係者のタスク一覧に表示されます。担当者を指定するとその人にメール通知が届きます。この画面からは削除できません（内容は後から更新できます）。",
       body: {
-        allowed: ["title", "eventId", "description", "priority", "assigneeId", "teamId", "parentTaskId", "wbs", "startAt", "dueAt"],
+        allowed: ["title", "eventId", "description", "priority", "assigneeId", "assigneeTeamId", "teamId", "parentTaskId", "wbs", "startAt", "dueAt"],
         required: ["title"],
       },
       fieldLabels: TASK_LABELS,
@@ -94,7 +95,7 @@ export const TASK: AreaSpec = {
       hint: "body.version は直前に tasks.get で読んだ値。status 遷移: todo→in_progress|blocked|done|cancelled / in_progress→todo|blocked|done|cancelled / blocked→todo|in_progress|cancelled / done→in_progress / cancelled→todo。origin=github のタスクは title・description・status・priority・assigneeId・dueAt を変えられない。null で項目を空にできる",
       impact: "{count}件のタスクが書き換わり、関係者の画面とガントチャートに反映されます。担当者を変えると新しい担当者にメール通知が届きます。変更前の値で再更新すれば元に戻せます。",
       body: {
-        allowed: ["title", "description", "status", "priority", "assigneeId", "teamId", "parentTaskId", "wbs", "startAt", "dueAt", "version"],
+        allowed: ["title", "description", "status", "priority", "assigneeId", "assigneeTeamId", "teamId", "parentTaskId", "wbs", "startAt", "dueAt", "version"],
         required: ["version"],
       },
       fieldLabels: TASK_LABELS,

@@ -28,6 +28,13 @@ export interface Task extends Versioned {
   status: TaskStatus;
   priority: TaskPriority;
   assigneeId: UserId | null;
+  /**
+   * Team assignee (担当チーム, #882). Additive/optional. Mutually exclusive with
+   * `assigneeId`: the server clears one side whenever the other is set, so a task is
+   * assigned to a person XOR a team XOR nobody. Distinct from `teamId` (the owning
+   * team / gantt scope).
+   */
+  assigneeTeamId?: TeamId | null;
   /** Owning team (canonical team.Team). Additive; null = unassigned to a team. */
   teamId?: TeamId | null;
   /** WBS parent (親タスク). Additive/optional; null/absent ⇒ a top-level row. The
@@ -76,6 +83,8 @@ export interface CreateTaskRequest {
   description?: string;
   priority?: TaskPriority; // default "medium"
   assigneeId?: UserId;
+  /** Team assignee (#882). Mutually exclusive with `assigneeId` (both set ⇒ 400). */
+  assigneeTeamId?: TeamId | null;
   teamId?: TeamId | null;
   /** Planned start (開始日). Additive/optional; omit ⇒ no explicit start. */
   startAt?: ISODateTime | null;
@@ -93,6 +102,9 @@ export interface UpdateTaskRequest extends Versioned {
   status?: TaskStatus; // validated against TASK_STATUS_TRANSITIONS
   priority?: TaskPriority;
   assigneeId?: UserId | null;
+  /** Team assignee (#882). Setting a non-null value clears `assigneeId` (and vice-versa);
+   *  both non-null in one request ⇒ 400 `assignee_conflict`. */
+  assigneeTeamId?: TeamId | null;
   teamId?: TeamId | null;
   /** Planned start (開始日). Additive/optional; omit ⇒ unchanged, null ⇒ clear. */
   startAt?: ISODateTime | null;
@@ -110,6 +122,12 @@ export interface ListTasksQuery extends CursorQuery {
   eventId?: EventId;
   status?: TaskStatus[];
   assigneeId?: UserId;
+  /**
+   * Team-assignee filter (#882): comma-separated team ids. Combined with `assigneeId` by
+   * OR — `?assigneeId=me&assigneeTeamId=t1,t2` = "assigned to me or to one of my teams"
+   * (the My Tasks 担当 lens). Alone it is a team scope like `teamId`.
+   */
+  assigneeTeamId?: string;
   /** Requester filter — tasks issued (created) by this user. Powers the "依頼" lens. */
   createdById?: UserId;
   teamId?: TeamId;

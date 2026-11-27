@@ -199,7 +199,10 @@ describe("read state", () => {
   });
 
   it("re-syncs when the server refuses, so the true state comes back", async () => {
-    const api = fakeApi({ setReadState: vi.fn().mockRejectedValue(new Error("500")) });
+    // A working counts(): with the default (rejecting) one a foreground sync re-asks the list for its total.
+    const view = { total: 0, unread: 0 };
+    const counts = vi.fn().mockResolvedValue({ inbox: view, mine: view, others: view, starred: view, archive: view, trash: view, blocked: view });
+    const api = fakeApi({ setReadState: vi.fn().mockRejectedValue(new Error("500")), counts });
     mount(api);
     const r = await row();
     fireEvent.mouseEnter(r);

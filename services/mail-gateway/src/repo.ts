@@ -453,15 +453,19 @@ export async function attachSentConversations(
     ...inBinds,
   );
   // Our sends in those threads: replies (thread_id) and the roots themselves (by id).
-  const sentWhere = ["status = 'sent'", "(thread_id IN (SELECT value FROM json_each(?)) OR id IN (SELECT value FROM json_each(?)))"];
-  const sentBinds: unknown[] = [keysJson, JSON.stringify(keys.map(localPart))];
-  if (!isReadAll(scope.sent)) {
-    sentWhere.push("owner_user_id = ?");
-    sentBinds.push(scope.sent);
-  }
+  // Two index lookups (thread_id / id) joined by UNION. An OR across the two columns made
+  // SQLite walk every sent row; CROSS JOIN pins json_each as the driving table so each key
+  // is an index probe (idx_mail_send_log_thread / the id PK).
+  const ownerSql = isReadAll(scope.sent) ? "" : " AND s.owner_user_id = ?";
+  const ownerBinds: unknown[] = isReadAll(scope.sent) ? [] : [scope.sent];
+  const sentBy = (col: "thread_id" | "id") =>
+    `SELECT s.id, s.thread_id, s.from_address, s.updated_at FROM json_each(?) j CROSS JOIN mail_send_log s ON s.${col} = j.value WHERE s.status = 'sent'${ownerSql}`;
   const sent = await db.all<{ id: string; thread_id: string | null; from_address: string | null; updated_at: string }>(
-    `SELECT id, thread_id, from_address, updated_at FROM mail_send_log WHERE ${sentWhere.join(" AND ")}`,
-    ...sentBinds,
+    `${sentBy("thread_id")} UNION ${sentBy("id")}`,
+    keysJson,
+    ...ownerBinds,
+    JSON.stringify(keys.map(localPart)),
+    ...ownerBinds,
   );
 
   const byKey = new Map<string, { sentIds: Set<string>; latestAt: string; inbound: typeof inbound }>();

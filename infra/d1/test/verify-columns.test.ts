@@ -37,8 +37,8 @@ describe("declaredColumns — DDL parser over the real migrations", () => {
     const cols = declared.get("task_tasks");
     // from the 0003 rebuild body
     expect(cols?.has("event_id")).toBe(true);
-    // from 0004 / 0005 ALTERs that come after the rebuild
-    for (const col of ["team_id", "parent_id", "wbs", "start_at"]) expect(cols?.has(col), col).toBe(true);
+    // from 0004 / 0005 / 0006 ALTERs that come after the rebuild
+    for (const col of ["team_id", "parent_id", "wbs", "start_at", "assignee_team_id"]) expect(cols?.has(col), col).toBe(true);
     // the rename-aside temp table is never a declared table
     expect(declared.has("task_tasks_old")).toBe(false);
   });

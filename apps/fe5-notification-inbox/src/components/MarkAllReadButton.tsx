@@ -8,11 +8,11 @@ export function MarkAllReadButton(props: {
   onClick: () => void;
   disabled?: boolean;
 }): ReactNode {
-  // The visible label (「すべて既読にする」) is the button's accessible name;
-  // @dub/ui Button takes no separate aria-label (see ButtonProps).
+  // The visible label is the accessible name (ButtonProps has no aria-label).
+  // secondary = the standard outlined page action (#900); ghost read as bare text.
   return (
     <Button
-      variant="ghost"
+      variant="secondary"
       onClick={props.onClick}
       disabled={props.disabled}
       testId="fe5-inbox-markall"

@@ -39,6 +39,7 @@ import { registerSharedMailboxes } from "./shared-mailbox-routes";
 import { registerDrafts } from "./drafts";
 import { registerTemplates } from "./templates";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
+import { heartbeat } from "./monitor";
 import { handleResendWebhook } from "./resend-webhook";
 import { buildAuditEnv, buildBlobs, buildDb, buildSendDeps } from "./deps";
 import { attachmentsFor, parkScheduledAttachments, releaseScheduledAttachments } from "./attachments";
@@ -634,8 +635,18 @@ export function createApp() {
     return c.json({ config: canaryConfig(c.env), items: rows.map(toProbeView) });
   });
 
+  // ---- production mail monitor state (#898; `mail:admin` in the table). One row per check.
+  ext.get("/admin/monitor", async (c) => c.json(await heartbeat(c.env, dbOf(c))));
+
   app.route("/mail", ext);
   registerEmailRoutingInternal(app);
+
+  // ---- monitor heartbeat (INTERNAL in the table). 200 while the cron-driven monitor keeps
+  // running (or it is off), 503 when it went stale — app-health-monitor alerts on that.
+  app.get("/internal/monitor/heartbeat", async (c) => {
+    const view = await heartbeat(c.env, dbOf(c));
+    return c.json(view, view.fresh ? 200 : 503);
+  });
 
   // ---- status: live send-health self-report (INTERNAL in the table). Derives "directly
   // rate-limited" from the send-log so an operator dashboard (fe7 admin) can surface it. The
