@@ -1,6 +1,6 @@
 // 統合アプリ「運営メンバー・名簿」共有サブナビの active 判定（最長前方一致）。
 import { describe, expect, it } from "vitest";
-import { MEMBER_VIEWS, activeMembersView, activeSectionId } from "./MemberRosterNav.tsx";
+import { MEMBERS_TITLE, MEMBER_VIEWS, activeMembersView, activeSectionId, membersViewDescription } from "./MemberRosterNav.tsx";
 
 describe("activeSectionId", () => {
   it("maps each section root path to its id", () => {
@@ -45,5 +45,14 @@ describe("activeSectionId", () => {
     expect(byId.get("table")).toContain("members:roster_view");
     expect(byId.get("teams")).toEqual(["app:members:view"]);
     expect(byId.get("org-chart")).toEqual(["app:members:view"]);
+  });
+});
+
+describe("membersViewDescription", () => {
+  it("見出しは揃え、説明文の先頭でどの表示かを伝える (#901)", () => {
+    expect(MEMBERS_TITLE).toBe("運営メンバー");
+    expect(membersViewDescription("teams", "本文")).toBe("チーム別で表示中。本文");
+    expect(membersViewDescription("table", "本文")).toBe("一覧表で表示中。本文");
+    expect(membersViewDescription("org-chart", "本文")).toBe("組織図で表示中。本文");
   });
 });

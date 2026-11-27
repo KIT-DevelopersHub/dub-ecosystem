@@ -6,6 +6,7 @@ import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { useScopedOverview } from "./hooks.ts";
 import { useEventTitle } from "../../lib/eventTarget.tsx";
 import { OrgChartView } from "./OrgChartView.tsx";
+import { MEMBERS_TITLE, membersViewDescription } from "./MemberRosterNav.tsx";
 import styles from "./members.module.css";
 
 export function MembersOrgChartPage(): JSX.Element {
@@ -29,12 +30,13 @@ export function MembersOrgChartPage(): JSX.Element {
     <div data-testid="members-orgchart-page">
       <div className={styles.noPrint}>
         <PageHeader
-          title="組織図"
-          description={
+          title={MEMBERS_TITLE}
+          description={membersViewDescription(
+            "org-chart",
             overview.eventId
-              ? `「${eventTitle ?? "選択中のイベント"}」の運営メンバーと班だけを表示しています（運営メンバー画面で全体の名簿から選べます）`
-              : "チームとリーダーの上下関係を一枚で表示します（組織図PDFの代替）"
-          }
+              ? `「${eventTitle ?? "選択中のイベント"}」の運営メンバーと班だけを表示しています（チーム別で全体の名簿から選べます）`
+              : "チームとリーダーの上下関係を一枚で表示します（組織図PDFの代替）",
+          )}
           actions={
             <Button variant="secondary" onClick={() => window.print()} testId="members-print">
               印刷 / PNG

@@ -28,6 +28,7 @@ import { EventStaffSection } from "./EventStaffPanel.tsx";
 import { useMembersApi } from "./MembersProvider.tsx";
 import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import { ListView } from "./ListView.tsx";
+import { MEMBERS_TITLE, membersViewDescription } from "./MemberRosterNav.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { OrgMember } from "./contracts.ts";
@@ -191,12 +192,13 @@ export function MemberRosterPage(): JSX.Element {
     <div data-testid="member-roster-page">
       {gate.dialog}
       <PageHeader
-        title="運営名簿"
-        description={
+        title={MEMBERS_TITLE}
+        description={membersViewDescription(
+          "table",
           canEdit
-            ? "運営メンバー全員の情報を一覧で表示します。行をクリックすると情報を編集できます"
-            : "運営メンバー全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
-        }
+            ? "全員の情報を一覧で表示します。行をクリックすると情報を編集できます"
+            : "全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）",
+        )}
         actions={
           <>
             <Menu

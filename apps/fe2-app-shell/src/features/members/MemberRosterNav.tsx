@@ -49,6 +49,14 @@ export const MEMBER_VIEWS: ViewOption[] = [
   { id: "org-chart", label: "組織図", path: "/members/org-chart", requiredPermissions: ["app:members:view"] },
 ];
 
+// 3 つの表示の見出しは「運営メンバー」で揃え、どの表示かは説明文の先頭で伝える（#901 決定）。
+export const MEMBERS_TITLE = "運営メンバー";
+/** 説明文に表示名を添える（例: 「一覧表で表示中。…」）。 */
+export function membersViewDescription(view: MembersView, text: string): string {
+  const label = MEMBER_VIEWS.find((v) => v.id === view)?.label ?? "";
+  return `${label}で表示中。${text}`;
+}
+
 // 順序 = 表示順。active 判定は「pathname が path で始まる最長一致」なので、より深い
 // パス（例: /admin/users/:id）は親タブにハイライトが乗る。
 // requiredPermissions は対応ルートの実効権限と一致させる（per-app view キー app:members:view が

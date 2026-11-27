@@ -9,6 +9,14 @@ const OUT = process.env.E2E_OUT ?? "/tmp/members-view-switch-e2e";
 mkdirSync(OUT, { recursive: true });
 const ok = (m) => console.log(`  ok: ${m}`);
 const fail = (m) => { throw new Error(m); };
+// 見出しは表示に関わらず「運営メンバー」、どの表示かは説明文の先頭で伝える。
+async function checkHeader(page, testId, view) {
+  const header = page.getByTestId(testId).locator("header").first();
+  const title = (await header.locator("h1").first().textContent())?.trim();
+  if (title !== "運営メンバー") fail(`${view}: heading = ${title}`);
+  const text = await header.textContent();
+  if (!text?.includes(`${view}で表示中。`)) fail(`${view}: description missing「${view}で表示中」`);
+}
 
 const browser = await chromium.launch();
 try {
@@ -23,6 +31,8 @@ try {
     const tabs = await page.getByTestId("member-roster-subnav").getByRole("tab").allTextContents();
     if (tabs.join("|") !== "運営メンバー|メール名簿") fail(`tabs: ${tabs.join("|")}`);
     ok(`${label}: tabs = ${tabs.join(" / ")}`);
+    await checkHeader(page, "members-page", "チーム別");
+    ok(`${label}: チーム別 heading = 運営メンバー`);
     await page.screenshot({ path: join(OUT, `${label}-1-teams.png`) });
 
     await page.getByTestId("members-view-switch-table").click();
@@ -30,11 +40,15 @@ try {
     if ((await page.getByTestId("members-view-switch-table").getAttribute("aria-selected")) !== "true") fail("table not selected");
     if (!page.url().endsWith("/members/roster")) fail(`url ${page.url()}`);
     ok(`${label}: 一覧表 → /members/roster`);
+    await checkHeader(page, "member-roster-page", "一覧表");
+    ok(`${label}: 一覧表 heading = 運営メンバー`);
     await page.screenshot({ path: join(OUT, `${label}-2-table.png`) });
 
     await page.getByTestId("members-view-switch-org-chart").click();
     await page.getByTestId("members-orgchart-page").waitFor();
     ok(`${label}: 組織図 → /members/org-chart`);
+    await checkHeader(page, "members-orgchart-page", "組織図");
+    ok(`${label}: 組織図 heading = 運営メンバー`);
     await page.screenshot({ path: join(OUT, `${label}-3-org.png`) });
 
     // メール名簿へ移って、運営メンバータブを押し直すと最後に選んだ表示(組織図)に戻る。

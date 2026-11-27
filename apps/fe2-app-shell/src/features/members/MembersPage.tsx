@@ -17,6 +17,7 @@ import {
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
+import { MEMBERS_TITLE, membersViewDescription } from "./MemberRosterNav.tsx";
 import { useAppCapability, usePermissions } from "../../auth/AuthProvider.tsx";
 import { usePermissionGate } from "../../auth/PermissionGate.tsx";
 import { useScopedOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
@@ -79,8 +80,8 @@ export function MembersPage(): JSX.Element {
     <div data-testid="members-page">
       <div className={styles.noPrint}>
         <PageHeader
-          title="運営メンバー"
-          description="運営メンバーの招待状況と所属チームを管理します"
+          title={MEMBERS_TITLE}
+          description={membersViewDescription("teams", "運営メンバーの招待状況と所属チームを管理します")}
           actions={
             <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "var(--dub-space-2)" }}>
               <Button variant="secondary" iconLeft={<span aria-hidden>👥</span>} onClick={gate.guard(openAddTeam)} testId="members-add-team">
