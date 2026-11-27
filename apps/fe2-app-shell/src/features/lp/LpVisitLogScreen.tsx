@@ -494,7 +494,7 @@ export function LpVisitLogScreen(): JSX.Element {
             testId="fe2-lp-kpi-uniques"
             label="一意訪問者(人)"
             value={totals.uniques}
-            hint="同じ端末からの再訪は1人として数えた推定人数"
+            hint="同じ端末からの再訪は1人として数えた推定人数。2026年11月末からは端末に ID を残さない計測に変えたため、それ以降の分は訪問の回数に近い値になります"
           />
           <KpiCard
             testId="fe2-lp-kpi-sources"

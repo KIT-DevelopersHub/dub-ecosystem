@@ -17,7 +17,7 @@ import type { GatewayEnv } from "../env";
 import type { GatewayVariables } from "../context";
 import { getRequestId } from "../context";
 import { createServices } from "../services";
-import { lpOrigins } from "./public-lp-visit";
+import { lpOrigins, optedOut } from "./public-lp-visit";
 
 const SYSTEM_ACTOR = "system:public-lp-visit";
 
@@ -39,7 +39,7 @@ export async function publicLpEventsHandler(
   const drop = c.body(null, 204);
   const origin = c.req.header("origin");
   if (!origin || !lpOrigins(c.env).includes(origin)) return drop;
-  if (c.req.header("dnt") === "1" || c.req.header("sec-gpc") === "1") return drop;
+  if (optedOut(c.req.header("dnt"), c.req.header("sec-gpc"))) return drop;
   if (Number(c.req.header("content-length") ?? 0) > lpInsights.LP_INSIGHT_BODY_MAX) return drop;
   const text = await c.req.text();
   if (text.length > lpInsights.LP_INSIGHT_BODY_MAX) return drop;
