@@ -507,8 +507,10 @@ export interface MailSharedMailboxCreateRequest extends MailSharedMailboxInput {
 /** One From the signed-in user may send as (GET /mail/send-as). */
 export interface MailSendAsOption {
   address: string;
-  /** "self" = the user's own address (the default); "shared" = a shared mailbox. */
-  kind: "self" | "shared";
+  /** "self" = the user's own address (the default); "shared" = a shared mailbox (0027);
+   *  "team_list" = the mailing list of a team the user belongs to (0024). Any kind but "self"
+   *  Cc's the sender on every send (forced by the gateway; compose shows it fixed). */
+  kind: "self" | "shared" | "team_list";
   displayName?: string;
   signature?: string;
 }

@@ -20,6 +20,7 @@ import { findActiveTeamList } from "./team-list";
 import {
   findActiveSharedMailbox,
   listActiveSharedMailboxes,
+  listSendableMailboxes,
   memberMaySend,
   SHARED_MAILBOX_COLUMNS,
   toSharedMailboxDto,
@@ -59,18 +60,25 @@ function parseSettings(body: unknown, partial: boolean): Partial<mail.MailShared
 export function registerSharedMailboxes(ext: Hono<AppBindings>): void {
   const dbOf = (c: Context<AppBindings>) => buildDb(c.env, c.get("dubCtx").requestId);
 
-  // The caller's own address first (the compose default), then each shared mailbox member-service
-  // says they may send as. A member-service failure only hides the shared ones.
+  // The caller's own address first (the compose default), then each shared mailbox and team
+  // mailing list member-service says they may send as. A member-service failure only hides the shared ones.
   ext.get("/send-as", async (c) => {
     const ctx = c.get("dubCtx");
     const userId = c.get("userId") ?? null;
     const own = await resolveUserFromAddress(c.env, ctx, userId);
     const items: mail.MailSendAsOption[] = [{ address: own.trim().toLowerCase(), kind: "self" }];
     if (userId) {
-      for (const row of await listActiveSharedMailboxes(dbOf(c))) {
+      for (const row of await listSendableMailboxes(dbOf(c), c.env.SVC_MEMBER, ctx)) {
         if (row.address === items[0]!.address) continue;
         const allowed = await memberMaySend(c.env.SVC_MEMBER, ctx, row, userId).catch(() => false);
-        if (allowed) items.push({ address: row.address, kind: "shared", displayName: row.display_name, ...(row.signature ? { signature: row.signature } : {}) });
+        if (allowed) {
+          items.push({
+            address: row.address,
+            kind: row.team_list ? "team_list" : "shared",
+            ...(row.display_name ? { displayName: row.display_name } : {}),
+            ...(row.signature ? { signature: row.signature } : {}),
+          });
+        }
       }
     }
     return c.json({ items } satisfies mail.MailSendAsList);

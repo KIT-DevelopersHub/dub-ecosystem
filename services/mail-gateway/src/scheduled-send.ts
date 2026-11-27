@@ -16,8 +16,8 @@ import { SERVICE_NAME } from "./config";
 import { loadScheduledAttachments, releaseScheduledAttachments } from "./attachments";
 import { buildBlobs, buildDb, buildSendDeps } from "./deps";
 import { buildProvider, type MailProvider } from "./provider";
-import { resolveReplyFromAddress, resolveUserFromAddress } from "./from";
-import { findActiveSharedMailbox, memberMaySend } from "./shared-mailbox";
+import { requiredSelfCc, resolveReplyFromAddress, resolveUserFromAddress, withSelfCc } from "./from";
+import { findSendableMailbox, memberMaySend } from "./shared-mailbox";
 import { errors } from "@dub/errors";
 import type { DbClient } from "@dub/db";
 import {
@@ -66,14 +66,17 @@ async function scheduledIdentity(
   db: DbClient,
   row: ScheduledRow,
   fromAddress: string,
-): Promise<{ fromName: string | null; sharedMailbox: string | null }> {
-  const shared = await findActiveSharedMailbox(db, fromAddress);
+): Promise<{ fromName: string | null; sharedMailbox: string | null; selfCc: string | null }> {
+  const shared = await findSendableMailbox(db, env.SVC_MEMBER, ctx, fromAddress);
+  let selfCc: string | null = null;
   if (row.shared_mailbox) {
     const owner = row.owner_user_id;
     const allowed = !!shared && !!owner && shared.address === row.shared_mailbox && (await memberMaySend(env.SVC_MEMBER, ctx, shared, owner));
-    if (!allowed) throw errors.forbidden(`not allowed to send as ${row.shared_mailbox}`);
+    if (!allowed || !owner) throw errors.forbidden(`not allowed to send as ${row.shared_mailbox}`);
+    // The Cc stored at booking is enforced again (a row booked before this rule, or edited).
+    selfCc = await requiredSelfCc(env, ctx, owner);
   }
-  return { fromName: shared?.display_name ?? null, sharedMailbox: shared && row.owner_user_id ? shared.address : null };
+  return { fromName: shared?.display_name || null, sharedMailbox: shared && row.owner_user_id ? shared.address : null, selfCc };
 }
 
 /** One drain pass over the due scheduled sends. Never throws — a per-row failure is
@@ -102,7 +105,7 @@ export async function runScheduledSendDrain(
           : await resolveUserFromAddress(env, ctx, row.owner_user_id));
       const identity = await scheduledIdentity(env, ctx, db, row, fromAddress);
       const deps = buildSendDeps(env, ctx, provider, fromAddress, row.owner_user_id, identity);
-      const { response } = await sendMail(deps, req, `sched:${row.id}`, row.owner_user_id ?? SERVICE_NAME);
+      const { response } = await sendMail(deps, withSelfCc(req, identity.selfCc), `sched:${row.id}`, row.owner_user_id ?? SERVICE_NAME);
       await markScheduledSent(db, row.id, response.messageId, attempts);
       // The send core already stored the Sent copy of each file; the parked bytes can go.
       if (req.attachments) await releaseScheduledAttachments({ db, blobs, ctx }, row.id);

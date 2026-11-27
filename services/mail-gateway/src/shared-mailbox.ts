@@ -9,7 +9,7 @@ import type { DbClient } from "@dub/db";
 import { createServiceClient, type RequestContext } from "@dub/http";
 import type { mail } from "@dub/types";
 import { SERVICE_NAME } from "./config";
-import { isMissingTable } from "./team-list";
+import { isMissingTable, TEAM_LIST_COLUMNS, type TeamListRow } from "./team-list";
 
 export interface SharedMailboxRow {
   id: string;
@@ -19,6 +19,8 @@ export interface SharedMailboxRow {
   allow: mail.MailSharedMailboxAllow;
   team_id: string | null;
   updated_at: string;
+  /** Set when the row is a team mailing list (0024) offered as a From, not a 0027 row. */
+  team_list?: true;
 }
 
 export const SHARED_MAILBOX_COLUMNS = `id, address, display_name, signature, allow, team_id, updated_at`;
@@ -54,6 +56,74 @@ export function toSharedMailboxDto(row: SharedMailboxRow): mail.MailSharedMailbo
     teamId: row.team_id,
     updatedAt: row.updated_at,
   };
+}
+
+// ---- team mailing lists as a From (チームのメーリングリストから送る) ----
+// A team list (mail_team_list, 0024) can be picked like a shared mailbox, by that team's members
+// only (the same per-send member-service check as a team-scoped shared mailbox). It has no
+// stored display name or signature: both come from the team's name, in info@'s format. A 0027
+// row and a team list never share an address (the admin routes refuse it), and a 0027 row wins.
+
+/** Team names from member-service. Never throws: without a name the From is the bare address. */
+async function teamNames(member: Fetcher | undefined, ctx: RequestContext, teamIds: readonly string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(teamIds)].filter(Boolean);
+  if (!member || ids.length === 0) return new Map();
+  try {
+    const client = createServiceClient(member, { service: "member-service", caller: SERVICE_NAME });
+    const { teams } = await client.get<{ teams: Array<{ id: string; name: string }> }>(ctx, `/members/internal/team-names?teamIds=${ids.map(encodeURIComponent).join(",")}`);
+    return new Map((Array.isArray(teams) ? teams : []).map((t) => [t.id, String(t.name ?? "").replace(/[\r\n]+/g, " ").trim()]));
+  } catch {
+    return new Map();
+  }
+}
+
+/** info@'s signature format (`--` / name / address) for a team list. */
+export function teamListSignature(name: string | undefined, address: string): string {
+  return name ? `--\n${name}\n${address}` : `--\n${address}`;
+}
+
+function teamListAsMailbox(row: TeamListRow, name: string | undefined): SharedMailboxRow {
+  return {
+    id: row.id,
+    address: row.address,
+    display_name: name ?? "",
+    signature: teamListSignature(name, row.address),
+    allow: "team",
+    team_id: row.team_id,
+    updated_at: row.created_at,
+    team_list: true,
+  };
+}
+
+async function activeTeamLists(db: DbClient, address?: string): Promise<TeamListRow[]> {
+  try {
+    return address
+      ? await db.all<TeamListRow>(`SELECT ${TEAM_LIST_COLUMNS} FROM mail_team_list WHERE address = ? AND deleted_at IS NULL`, address)
+      : await db.all<TeamListRow>(`SELECT ${TEAM_LIST_COLUMNS} FROM mail_team_list WHERE deleted_at IS NULL ORDER BY address`);
+  } catch (err) {
+    if (isMissingTable(err)) return [];
+    throw err;
+  }
+}
+
+/** A From a member may pick at this address: a shared mailbox (0027) or a team list (0024). */
+export async function findSendableMailbox(db: DbClient, member: Fetcher | undefined, ctx: RequestContext, address: string | null | undefined): Promise<SharedMailboxRow | null> {
+  const shared = await findActiveSharedMailbox(db, address);
+  if (shared) return shared;
+  const normalized = address?.trim().toLowerCase();
+  if (!normalized) return null;
+  const [list] = await activeTeamLists(db, normalized);
+  if (!list) return null;
+  return teamListAsMailbox(list, (await teamNames(member, ctx, [list.team_id])).get(list.team_id));
+}
+
+/** Every pickable From other than the user's own: shared mailboxes, then team lists. */
+export async function listSendableMailboxes(db: DbClient, member: Fetcher | undefined, ctx: RequestContext): Promise<SharedMailboxRow[]> {
+  const shared = await listActiveSharedMailboxes(db);
+  const taken = new Set(shared.map((r) => r.address));
+  const lists = (await activeTeamLists(db)).filter((l) => !taken.has(l.address));
+  const names = await teamNames(member, ctx, lists.map((l) => l.team_id));
+  return [...shared, ...lists.map((l) => teamListAsMailbox(l, names.get(l.team_id)))];
 }
 
 /**

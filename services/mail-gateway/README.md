@@ -300,6 +300,15 @@ personal address (typically Gmail) — メール → 右上の歯車 → 「Gmai
 - **Display name**: any user-facing send whose From is a shared mailbox gets its display name,
   including the existing "reply to info@ goes out as info@". System sends (`POST /send`) do not.
 - **Signature**: added in compose (client side) when the address is picked, editable.
+- **Team mailing lists** (0024 `mail_team_list`): also offered in the picker (`kind: "team_list"`)
+  to that team's members only (`?teamIds=<team>` on every send, like a team-scoped shared
+  mailbox). Display name = the team name, signature = `--` / team name / address, both from
+  member-service `GET /members/internal/team-names` (unavailable = the bare address).
+- **The sender is always Cc'd**: when a picked From is not the sender's own (a shared mailbox or
+  a team list), `/outbox`, `/scheduled` (booking and PATCH) and the scheduled drain put the
+  sender's address on Cc (once; a Bcc copy moves to Cc). If the sender's address cannot be read
+  the send is refused (identity down 502 / no address 403), never sent without it. Replies and
+  sends without a pick are unchanged.
 - **Admin**: `GET|POST /mail/admin/shared-mailboxes`, `PATCH|DELETE …/:id` (`mail:admin`), API
   only for now. 0027 seeds info@ (all_members, 北陸ITカンファレンス 実行委員会).
 - **Rollout**: apply `0027_shared_mailbox.sql` first. Before that the picker is empty and every
