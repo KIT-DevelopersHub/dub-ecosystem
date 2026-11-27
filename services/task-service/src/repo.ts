@@ -12,6 +12,7 @@ export interface TaskRow {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assignee_id: string | null;
+  assignee_team_id: string | null;
   team_id: string | null;
   parent_id: string | null;
   wbs: string | null;
@@ -36,6 +37,7 @@ export function rowToTask(r: TaskRow): task.Task {
     status: r.status,
     priority: r.priority,
     assigneeId: r.assignee_id,
+    assigneeTeamId: r.assignee_team_id ?? null,
     teamId: r.team_id,
     parentTaskId: r.parent_id,
     wbs: r.wbs,
@@ -59,6 +61,8 @@ export interface InsertTaskInput {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  /** Team assignee (#882). Exclusive with assigneeId (app.ts enforces). */
+  assigneeTeamId?: common.TeamId | null;
   teamId?: common.TeamId | null;
   parentId?: common.TaskId | null;
   wbs?: string | null;
@@ -78,6 +82,7 @@ export interface TaskPatch {
   status?: task.TaskStatus;
   priority?: task.TaskPriority;
   assigneeId?: common.UserId | null;
+  assigneeTeamId?: common.TeamId | null;
   requesterId?: common.UserId | null;
   teamId?: common.TeamId | null;
   parentId?: common.TaskId | null;
@@ -89,6 +94,8 @@ export interface TaskPatch {
 export interface ListFilter {
   eventId?: string;
   assigneeId?: string;
+  /** Team assignees (#882). With `assigneeId`, the two match by OR (me ∪ my teams). */
+  assigneeTeamIds?: string[];
   /** WBS/team scope (task_tasks.team_id). Powers the gantt team filter. */
   teamId?: string;
   /** Requester filter (task_tasks.created_by). Powers the "issued by me" lens. */
@@ -212,14 +219,14 @@ export function decodeCursor(cursor: string): string {
 }
 
 const ALL_COLUMNS =
-  "id, event_id, title, description, status, priority, assignee_id, team_id, parent_id, wbs, start_at, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at, requester_id";
+  "id, event_id, title, description, status, priority, assignee_id, assignee_team_id, team_id, parent_id, wbs, start_at, due_at, origin, version, due_soon_notified_at, created_by, created_at, updated_at, archived_at, requester_id";
 
 export function createD1TaskRepo(db: DbClient): TaskRepo {
   return {
     async insert(input: InsertTaskInput): Promise<task.Task> {
       await db.run(
         `INSERT INTO task_tasks (${ALL_COLUMNS})
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, NULL, ?)`,
         input.id,
         input.eventId,
         input.title,
@@ -227,6 +234,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         input.status,
         input.priority,
         input.assigneeId,
+        input.assigneeTeamId ?? null,
         input.teamId ?? null,
         input.parentId ?? null,
         input.wbs ?? null,
@@ -259,9 +267,16 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
         where.push("event_id = ?");
         binds.push(filter.eventId);
       }
-      if (filter.assigneeId) {
+      const teamIds = filter.assigneeTeamIds ?? [];
+      if (filter.assigneeId && teamIds.length > 0) {
+        where.push(`(assignee_id = ? OR assignee_team_id IN (${teamIds.map(() => "?").join(",")}))`);
+        binds.push(filter.assigneeId, ...teamIds);
+      } else if (filter.assigneeId) {
         where.push("assignee_id = ?");
         binds.push(filter.assigneeId);
+      } else if (teamIds.length > 0) {
+        where.push(`assignee_team_id IN (${teamIds.map(() => "?").join(",")})`);
+        binds.push(...teamIds);
       }
       if (filter.teamId) {
         where.push("team_id = ?");
@@ -306,6 +321,7 @@ export function createD1TaskRepo(db: DbClient): TaskRepo {
       if (patch.status !== undefined) col("status", patch.status);
       if (patch.priority !== undefined) col("priority", patch.priority);
       if (patch.assigneeId !== undefined) col("assignee_id", patch.assigneeId);
+      if (patch.assigneeTeamId !== undefined) col("assignee_team_id", patch.assigneeTeamId);
       if (patch.requesterId !== undefined) col("requester_id", patch.requesterId);
       if (patch.teamId !== undefined) col("team_id", patch.teamId);
       if (patch.parentId !== undefined) col("parent_id", patch.parentId);

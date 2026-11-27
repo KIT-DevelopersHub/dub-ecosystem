@@ -9,14 +9,16 @@ export interface FromToCellProps {
   fromId: common.UserId | null;
   /** assignee — task.assigneeId (the "to"). */
   toId: common.UserId | null;
+  /** 担当チーム名 (#882) — shown as the "to" when the task is assigned to a team. */
+  toTeamName?: string | null;
   users: UserCache;
   /** compact = avatars only (with names as tooltips); default shows names too. */
   compact?: boolean;
   testId?: string;
 }
 
-function Party({ id, users, compact }: { id: common.UserId | null; users: UserCache; compact?: boolean }) {
-  const name = displayName(users, id);
+function Party({ id, users, compact, teamName }: { id: common.UserId | null; users: UserCache; compact?: boolean; teamName?: string | null }) {
+  const name = !id && teamName ? `${teamName}（チーム）` : displayName(users, id);
   const src = id ? users.get(id)?.avatarUrl ?? undefined : undefined;
   return (
     <span className={styles.party}>
@@ -39,13 +41,14 @@ function Arrow() {
  * "誰から誰へ" — renders requester → assignee so a task's direction is legible at
  * a glance (design ask (b)). Screen readers get an explicit label.
  */
-export function FromToCell({ fromId, toId, users, compact, testId }: FromToCellProps) {
-  const label = `${displayName(users, fromId)} から ${displayName(users, toId)} へ`;
+export function FromToCell({ fromId, toId, toTeamName, users, compact, testId }: FromToCellProps) {
+  const toName = !toId && toTeamName ? `${toTeamName}（チーム）` : displayName(users, toId);
+  const label = `${displayName(users, fromId)} から ${toName} へ`;
   return (
     <span className={styles.fromTo} data-testid={testId} role="group" aria-label={label}>
       <Party id={fromId} users={users} compact={compact} />
       <Arrow />
-      <Party id={toId} users={users} compact={compact} />
+      <Party id={toId} users={users} compact={compact} teamName={toTeamName} />
     </span>
   );
 }

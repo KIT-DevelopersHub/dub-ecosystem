@@ -3,6 +3,7 @@ import type { meeting } from "@dub/types";
 import {
   emptyMeetingForm,
   isMeetingTargetVisible,
+  meetingFormForTab,
   meetingFormFromDraft,
   parseMeetingTargetChoices,
   toMeetingRequest,
@@ -104,6 +105,23 @@ describe("meetingFormFromDraft", () => {
   it("snaps the length to the nearest 所要時間 option", () => {
     expect(meetingFormFromDraft({ ...draft, endTime: "19:50" }, "weekly").durationMinutes).toBe(45);
     expect(meetingFormFromDraft({ ...draft, endTime: "23:00" }, "weekly").durationMinutes).toBe(120);
+  });
+});
+
+describe("meetingFormForTab", () => {
+  it("starts from the former 「ミーティングを設定」 defaults, keeping the title and day", () => {
+    expect(meetingFormForTab({ title: " 打ち合わせ ", startDate: "2026-12-03" })).toEqual({
+      ...emptyMeetingForm(),
+      title: "打ち合わせ",
+      date: "2026-12-03",
+    });
+    expect(meetingFormForTab({ title: "", startDate: "" })).toMatchObject({
+      targets: [{ kind: "all", id: "all" }],
+      date: emptyMeetingForm().date,
+      time: "21:00",
+      durationMinutes: 60,
+      recurrence: "weekly",
+    });
   });
 });
 

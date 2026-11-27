@@ -6,7 +6,11 @@ import { PRIORITY_LABEL, STATUS_LABEL, DATE_LABEL, dateInputFromIso, isoFromDate
 import { dependencyScopeOptions, pruneToScope, teamOf, type ScopeTask } from "../domain/task-hierarchy";
 import { DateField } from "./DateField";
 import { PredecessorPicker } from "./PredecessorPicker";
+import { AssigneePicker } from "./AssigneePicker";
 import { TaskStatusBadge } from "./TaskStatusBadge";
+import { TaskTeamBadge } from "./TaskTeamBadge";
+import { deriveTaskTeam } from "../domain/assignee";
+import { useUserTeams } from "../api/useUserTeams";
 import { TaskAttachmentsEditor } from "./TaskAttachmentsEditor";
 import styles from "../styles/app.module.css";
 
@@ -111,6 +115,9 @@ export function TaskDetailPanel({
   const [status, setStatus] = useState<task.TaskStatus>(t.status);
   const [priority, setPriority] = useState<task.TaskPriority>(t.priority);
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(t.assigneeId);
+  // 担当チーム (#882) — exclusive with assigneeId (the picker sets one and clears the other).
+  const curAssigneeTeam = t.assigneeTeamId ?? null;
+  const [assigneeTeamId, setAssigneeTeamId] = useState<common.TeamId | null>(curAssigneeTeam);
   // 依頼者 (#881). Only tracked when the row carries the field (undefined = not loaded/unknown).
   const curRequester = t.requesterId;
   const [requesterId, setRequesterId] = useState<common.UserId | null | undefined>(curRequester);
@@ -152,6 +159,7 @@ export function TaskDetailPanel({
   // 親の付け替えで親のチームへ追従する（下の親セレクトの onChange）。親なし＝トップレベルなら自由。
   // サーバも 422 TASK_PARENT_CHILD_TEAM_MISMATCH で担保。
   const teamLockedToParent = parentId != null;
+  const userTeams = useUserTeams();
   // 親タスク（子を持つ）のステータスは子孫タスクの内訳から自動集計される表示専用値
   // （親バーの色分け＝#374／再帰集計＝domain/child-progress）。手動で変えられると集計と
   // 食い違って挙動がおかしくなるため、子が1件以上ある間はステータス編集を無効化する。
@@ -190,6 +198,7 @@ export function TaskDetailPanel({
     status !== t.status ||
     priority !== t.priority ||
     assigneeId !== t.assigneeId ||
+    assigneeTeamId !== curAssigneeTeam ||
     requesterId !== curRequester ||
     teamId !== curTeam ||
     datesChanged ||
@@ -203,6 +212,7 @@ export function TaskDetailPanel({
     if (status !== t.status) patch.status = status;
     if (priority !== t.priority) patch.priority = priority;
     if (assigneeId !== t.assigneeId) patch.assigneeId = assigneeId;
+    if (assigneeTeamId !== curAssigneeTeam) patch.assigneeTeamId = assigneeTeamId;
     if (requesterId !== undefined && requesterId !== curRequester) patch.requesterId = requesterId;
     if (teamId !== curTeam) patch.teamId = teamId;
     // Any 開始日/期日 change materialises BOTH edges (startsAt↔startAt, endsAt↔dueAt) so the
@@ -233,6 +243,7 @@ export function TaskDetailPanel({
         status,
         priority,
         assigneeId,
+        assigneeTeamId,
         requesterId ?? null,
         teamId,
         start,
@@ -240,7 +251,7 @@ export function TaskDetailPanel({
         parentId,
         [...deps].sort(),
       ]),
-    [title, description, status, priority, assigneeId, requesterId, teamId, start, due, parentId, deps],
+    [title, description, status, priority, assigneeId, assigneeTeamId, requesterId, teamId, start, due, parentId, deps],
   );
   // The signature already handed to onSave. Seeded to the mount state (== server truth),
   // it guards against re-firing the same save after the confirmed task/props flow back in.
@@ -280,6 +291,7 @@ export function TaskDetailPanel({
       <div className={styles.detailPanelBody} aria-label="タスク詳細">
         <div className={styles.panelHeadInfo}>
           <TaskStatusBadge status={statusLockedToChildren ? displayStatus : t.status} />
+          <TaskTeamBadge name={teams.find((tm) => tm.id === teamId)?.name} testId="fe4-detail-team-badge" />
         </div>
         {readOnlyHint && (
           <p className={styles.readOnlyHint} role="note" data-testid="fe4-detail-readonly-hint">
@@ -337,12 +349,24 @@ export function TaskDetailPanel({
           <label className={styles.formLabel} htmlFor="fe4-detail-assignee">
             担当
           </label>
-          <Select
+          <AssigneePicker
             id="fe4-detail-assignee"
-            value={assigneeId ?? ""}
+            users={users}
+            teams={teams}
+            value={{ assigneeId, assigneeTeamId }}
             disabled={!canWrite}
-            onChange={(v) => setAssigneeId(v ? (v as common.UserId) : null)}
-            options={[{ value: "", label: "未割当" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+            onChange={(next) => {
+              setAssigneeId(next.assigneeId);
+              setAssigneeTeamId(next.assigneeTeamId);
+              // チームは担当に従う（親タスクがある間は親のチーム固定）。
+              if (teamLockedToParent) return;
+              const derived = deriveTaskTeam(next, teamId, userTeams, teams.map((tm) => tm.id));
+              if (derived !== teamId) {
+                setTeamId(derived);
+                // dependencies are same-team only (ADR-0007).
+                setDeps((d) => pruneToScope(scopeTasks, derived, d).filter((id) => id !== t.id));
+              }
+            }}
             testId="fe4-detail-assignee"
           />
         </div>
@@ -376,33 +400,6 @@ export function TaskDetailPanel({
             <DateField id="fe4-detail-due" value={due} disabled={!canWrite} onChange={setDue} testId="fe4-detail-due" />
           </div>
         </div>
-
-        {teams.length > 0 && (
-          <div className={styles.formField}>
-            <label className={styles.formLabel} htmlFor="fe4-detail-team">
-              チーム
-            </label>
-            <Select
-              id="fe4-detail-team"
-              value={teamId ?? ""}
-              disabled={!canWrite || teamLockedToParent}
-              onChange={(v) => {
-                const next = v ? (v as common.TeamId) : null;
-                setTeamId(next);
-                // dependencies are same-team only (ADR-0007) — drop predecessors that are
-                // now on another team.
-                setDeps((d) => pruneToScope(scopeTasks, next, d).filter((id) => id !== t.id));
-              }}
-              options={[{ value: "", label: "未割当" }, ...teams.map((tm) => ({ value: tm.id, label: tm.name }))]}
-              testId="fe4-detail-team"
-            />
-            {teamLockedToParent && (
-              <p className={styles.fieldHint} data-testid="fe4-detail-team-locked">
-                親タスクと同じチームです（子タスクのチームは変更できません）
-              </p>
-            )}
-          </div>
-        )}
 
         {/* 子タスク数: shown when this task is itself a work-package (親). */}
         {childCount > 0 && (

@@ -12,3 +12,8 @@ export function useApiClient(): ApiClient {
   if (!c) throw new Error("ApiClientProvider missing");
   return c;
 }
+
+/** Same client, or null outside an ApiClientProvider (optional, best-effort fetches). */
+export function useOptionalApiClient(): ApiClient | null {
+  return useContext(ApiClientContext);
+}

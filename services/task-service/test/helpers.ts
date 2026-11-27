@@ -28,6 +28,7 @@ export class InMemoryTaskRepo implements TaskRepo {
       status: input.status,
       priority: input.priority,
       assigneeId: input.assigneeId,
+      assigneeTeamId: input.assigneeTeamId ?? null,
       // WBS/team columns (mirror the D1 repo — the old in-memory fake dropped these,
       // so parent/team/wbs persistence went untested and #260's bug could slip by).
       teamId: input.teamId ?? null,
@@ -65,7 +66,14 @@ export class InMemoryTaskRepo implements TaskRepo {
     let recs = [...this.rows.values()];
     if (!filter.includeArchived) recs = recs.filter((r) => r.archivedAt === null);
     if (filter.eventId) recs = recs.filter((r) => r.eventId === filter.eventId);
-    if (filter.assigneeId) recs = recs.filter((r) => r.assigneeId === filter.assigneeId);
+    const teamIds = filter.assigneeTeamIds ?? [];
+    if (filter.assigneeId || teamIds.length > 0) {
+      recs = recs.filter(
+        (r) =>
+          (!!filter.assigneeId && r.assigneeId === filter.assigneeId) ||
+          (!!r.assigneeTeamId && teamIds.includes(r.assigneeTeamId)),
+      );
+    }
     if (filter.createdById) recs = recs.filter((r) => r.createdBy === filter.createdById);
     if (filter.teamId) recs = recs.filter((r) => r.teamId === filter.teamId);
     if (filter.statuses && filter.statuses.length > 0) {
@@ -92,6 +100,7 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (patch.status !== undefined) r.status = patch.status;
     if (patch.priority !== undefined) r.priority = patch.priority;
     if (patch.assigneeId !== undefined) r.assigneeId = patch.assigneeId;
+    if (patch.assigneeTeamId !== undefined) r.assigneeTeamId = patch.assigneeTeamId;
     if (patch.requesterId !== undefined) r.requesterId = patch.requesterId;
     if (patch.teamId !== undefined) r.teamId = patch.teamId;
     if (patch.parentId !== undefined) r.parentTaskId = patch.parentId;

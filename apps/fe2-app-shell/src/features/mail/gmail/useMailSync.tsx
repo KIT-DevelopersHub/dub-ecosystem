@@ -60,8 +60,9 @@ export function useMailSync(): void {
   const flagBaseline = useRef<Map<string, FlagState>>(new Map());
   const flagsReady = useRef(false);
 
-  // Set by the poll / refocus just before REQUEST_SYNC. A background sync reads the view's
-  // total from counts() (same per-view aggregate) instead of a second COUNT(*) on the list.
+  // Set by the poll / refocus just before REQUEST_SYNC. Every sync reads the view's total from
+  // counts() (same per-view aggregate, fetched anyway for the sidebar) instead of a second
+  // COUNT(*) on the list; only a foreground sync whose counts() failed re-asks the list.
   const backgroundSync = useRef(false);
   const lastSyncAt = useRef(0);
   const inboxTotal = useRef<number | null | undefined>(null);
@@ -74,12 +75,14 @@ export function useMailSync(): void {
     flagsReady.current = false; // pause flag persistence while we (re)load
     lastSyncAt.current = Date.now();
     // counts() has no "all" view (label filter), so that list keeps its own total.
-    const totalFromCounts = backgroundSync.current && view !== "all";
+    const totalFromCounts = view !== "all";
+    const background = backgroundSync.current;
     backgroundSync.current = false;
+    const listArgs = { limit: PAGE_SIZE, folder: view, ...(inboxCursor ? { cursor: inboxCursor } : {}) };
     void (async () => {
       try {
         const [inbox, sent, scheduled, flags, drafts, bgCounts] = await Promise.all([
-          api.listInbox({ limit: PAGE_SIZE, folder: view, ...(inboxCursor ? { cursor: inboxCursor } : {}), ...(totalFromCounts ? { withTotal: false } : {}) }),
+          api.listInbox({ ...listArgs, ...(totalFromCounts ? { withTotal: false } : {}) }),
           api.listSent({ limit: PAGE_SIZE, ...(sentCursor ? { cursor: sentCursor } : {}) }),
           // Scheduled (予約送信) is best-effort: an older gateway without the endpoint yields
           // an empty list rather than blanking inbox+sent.
@@ -91,8 +94,17 @@ export function useMailSync(): void {
           totalFromCounts ? api.counts().catch(() => null) : Promise.resolve(null),
         ]);
         if (!alive) return;
-        // Background: total from counts (keep the previous one if counts failed).
-        const total = totalFromCounts ? (bgCounts?.[view as Exclude<typeof view, "all">]?.total ?? inboxTotal.current ?? null) : (inbox.total ?? null);
+        // Total from counts. If counts failed: a background sync keeps the previous total, a
+        // foreground one asks the list for it (the old path) so the pager still shows it.
+        let total: number | null;
+        if (!totalFromCounts) total = inbox.total ?? null;
+        else if (bgCounts) total = bgCounts[view as Exclude<typeof view, "all">]?.total ?? inboxTotal.current ?? null;
+        else if (background) total = inboxTotal.current ?? null;
+        else {
+          const withTotal = await api.listInbox(listArgs).catch(() => null);
+          if (!alive) return;
+          total = withTotal?.total ?? inboxTotal.current ?? null;
+        }
         dispatch({
           type: "HYDRATE",
           threads: combineThreads(inbox.items, sent.items, me),

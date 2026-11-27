@@ -19,6 +19,7 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities, makeCanEditTask, makeCanEditBar, READ_ONLY_TASK_HINT } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
+import { assigneeLabel } from "../domain/assignee";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { childProgressByParent } from "../domain/child-progress";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
@@ -80,6 +81,7 @@ const FIELD_LABEL: Record<string, string> = {
   status: "ステータス",
   priority: "重要度",
   assigneeId: "担当",
+  assigneeTeamId: "担当",
   teamId: "チーム",
   parentTaskId: "親タスク",
   dependsOnIds: "先行タスク",
@@ -317,11 +319,12 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   const assigneeNameById = useMemo(() => {
     const m = new Map<common.TaskId, string>();
     for (const t of tasks) {
-      const name = t.assigneeId ? users.get(t.assigneeId)?.displayName : undefined;
+      // 担当 = 人 or チーム (#882): a team assignee shows as 「<チーム名>（チーム）」.
+      const name = assigneeLabel(t, (id) => users.get(id)?.displayName, teams);
       if (name) m.set(t.id, name);
     }
     return m;
-  }, [tasks, users]);
+  }, [tasks, users, teams]);
   // Displayed titles come from the store (task-service = the authority on title), so a
   // detail-panel rename reflects on every bar/row the SAME tick (optimistic) and is
   // reconciled by loadAll — never reverting to the gantt read model's denormalized,
@@ -796,6 +799,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         status: draft.status,
         priority: draft.priority,
         assigneeId: draft.assigneeId,
+        assigneeTeamId: draft.assigneeTeamId ?? null,
         teamId,
         startAt: draft.startAt,
         dueAt: draft.dueAt,
@@ -814,6 +818,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         ...(draft.description ? { description: draft.description } : {}),
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
+        ...(draft.assigneeTeamId ? { assigneeTeamId: draft.assigneeTeamId } : {}),
         // 依頼者 (#881): send the form value (null = なし). If the signed-in user is unknown the
         // form starts empty — omit it then so the server defaults it to the caller.
         ...(draft.requesterId !== null || currentUserId ? { requesterId: draft.requesterId } : {}),

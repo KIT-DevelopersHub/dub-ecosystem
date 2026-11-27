@@ -1,6 +1,7 @@
 // My Tasks hub — pure domain logic (no React, no I/O) so filtering/sorting is unit
 // tested in isolation. The hub unifies two lenses over the frozen task-service:
-//   担当 (assigned): GET /tasks?assigneeId=<self>   — tasks assigned TO me
+//   担当 (assigned): GET /tasks?assigneeId=<self>&assigneeTeamId=<my teams>
+//                    — tasks assigned TO me or to a team I belong to (#882)
 //   依頼 (requested): GET /tasks?createdById=<self>  — tasks I issued (from me)
 // Both are self-scoped, so eventId may be omitted (server /me rule). The "すべて"
 // lens fetches both and de-duplicates. Requester (from→to "from") = task.requesterId (#881,
@@ -45,8 +46,16 @@ export function myTasksFilterActiveCount(f: MyTasksFilter): number {
 }
 
 /** Which backend queries a lens needs. Each is self-scoped (eventId omitted). */
-export function lensQueries(currentUserId: common.UserId, lens: MyTasksLens): task.ListTasksQuery[] {
-  const assigned: task.ListTasksQuery = { assigneeId: currentUserId, limit: 200 };
+export function lensQueries(
+  currentUserId: common.UserId,
+  lens: MyTasksLens,
+  myTeamIds: readonly common.TeamId[] = [],
+): task.ListTasksQuery[] {
+  const assigned: task.ListTasksQuery = {
+    assigneeId: currentUserId,
+    ...(myTeamIds.length > 0 ? { assigneeTeamId: [...myTeamIds].sort().join(",") } : {}),
+    limit: 200,
+  };
   const requested: task.ListTasksQuery = { createdById: currentUserId, limit: 200 };
   switch (lens) {
     case "assigned":

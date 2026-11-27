@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { event } from "@dub/types";
+import { event as eventNs, type event } from "@dub/types";
 import { Button, FormField } from "@dub/ui";
 import { DraftRestoredNotice, useDraftAutosave, peekDraft } from "@dub/app-ui";
 import { fieldErrorsOf, normalizeError } from "../lib/errorMap";
@@ -34,6 +34,17 @@ interface EventEditDraft {
   description: string;
   startsAt: string;
   endsAt: string;
+  venue?: string;
+  capacity?: string;
+}
+
+/** 定員 input → wire value. "" => null; anything but a whole number in range => "invalid". */
+export function parseCapacityInput(v: string): number | null | "invalid" {
+  const t = v.trim();
+  if (t === "") return null;
+  if (!/^\d+$/.test(t)) return "invalid";
+  const n = Number(t);
+  return n <= eventNs.EVENT_CAPACITY_MAX ? n : "invalid";
 }
 
 export function EventEditForm({
@@ -62,6 +73,8 @@ export function EventEditForm({
   const [description, setDescription] = useState(seed?.description ?? ev.description ?? "");
   const [startsAt, setStartsAt] = useState(seed?.startsAt ?? toLocalInput(ev.startsAt));
   const [endsAt, setEndsAt] = useState(seed?.endsAt ?? toLocalInput(ev.endsAt));
+  const [venue, setVenue] = useState(seed?.venue ?? ev.venue ?? "");
+  const [capacity, setCapacity] = useState(seed?.capacity ?? (ev.capacity == null ? "" : String(ev.capacity)));
   const [localError, setLocalError] = useState<string | null>(null);
 
   const readOnly = !canWrite || ev.archivedAt !== null;
@@ -71,10 +84,12 @@ export function EventEditForm({
     title !== ev.title ||
     description !== (ev.description ?? "") ||
     startsAt !== toLocalInput(ev.startsAt) ||
-    endsAt !== toLocalInput(ev.endsAt);
+    endsAt !== toLocalInput(ev.endsAt) ||
+    venue !== (ev.venue ?? "") ||
+    capacity !== (ev.capacity == null ? "" : String(ev.capacity));
   const draft = useDraftAutosave<EventEditDraft>({
     storageKey: draftKey,
-    value: { title, description, startsAt, endsAt },
+    value: { title, description, startsAt, endsAt, venue, capacity },
     dirty,
     enabled: !readOnly,
   });
@@ -90,7 +105,16 @@ export function EventEditForm({
       return;
     }
 
+    const cap = parseCapacityInput(capacity);
+    if (cap === "invalid") {
+      setLocalError(`定員は 0〜${eventNs.EVENT_CAPACITY_MAX} の整数で入力してください。`);
+      return;
+    }
+
     const req: event.UpdateEventRequest = { version: ev.version };
+    const venueTrim = venue.trim();
+    if (venueTrim !== (ev.venue ?? "")) req.venue = venueTrim === "" ? null : venueTrim;
+    if (cap !== (ev.capacity ?? null)) req.capacity = cap;
     if (title !== ev.title) req.title = title;
     if (description !== (ev.description ?? "")) req.description = description === "" ? null : description;
     if (!sameInstant(startsIso, ev.startsAt)) req.startsAt = startsIso;
@@ -122,6 +146,8 @@ export function EventEditForm({
           setDescription(ev.description ?? "");
           setStartsAt(toLocalInput(ev.startsAt));
           setEndsAt(toLocalInput(ev.endsAt));
+          setVenue(ev.venue ?? "");
+          setCapacity(ev.capacity == null ? "" : String(ev.capacity));
         }}
         onKeep={draft.acknowledgeRestored}
         testId="fe3-settings-draft-notice"
@@ -155,6 +181,30 @@ export function EventEditForm({
           value={endsAt}
           disabled={readOnly}
           onChange={(e) => setEndsAt(e.target.value)}
+        />
+      </FormField>
+      <FormField label="会場" error={fieldErrors.venue} htmlFor="fe3-edit-venue">
+        <input
+          id="fe3-edit-venue"
+          data-testid="fe3-edit-venue"
+          className={styles.input}
+          value={venue}
+          maxLength={eventNs.EVENT_VENUE_MAX_LENGTH}
+          placeholder="例: 金沢工業大学 扇が丘キャンパス"
+          disabled={readOnly}
+          onChange={(e) => setVenue(e.target.value)}
+        />
+      </FormField>
+      <FormField label="定員（人）" error={fieldErrors.capacity} htmlFor="fe3-edit-capacity">
+        <input
+          id="fe3-edit-capacity"
+          data-testid="fe3-edit-capacity"
+          className={styles.input}
+          inputMode="numeric"
+          value={capacity}
+          placeholder="例: 300"
+          disabled={readOnly}
+          onChange={(e) => setCapacity(e.target.value)}
         />
       </FormField>
       <FormField label="説明" htmlFor="fe3-edit-desc">
