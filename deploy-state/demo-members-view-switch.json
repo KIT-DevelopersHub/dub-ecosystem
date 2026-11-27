@@ -3,12 +3,12 @@
   "slug": "members-view-switch",
   "worker": "dub-demo-members-view-switch",
   "url": "https://dub-demo-members-view-switch.developershub-site.workers.dev",
-  "deployedSha": "f477e0b6",
+  "deployedSha": "ce4239e9",
   "branch": "feat/members-roster-view-switch-901",
   "actor": "ko-tarou",
   "markers": ["members-view-switch"],
   "live": true,
-  "verifiedAt": "2026-11-27T10:32:17Z",
-  "updatedAt": "2026-11-27T10:32:17Z",
+  "verifiedAt": "2026-11-27T10:45:04Z",
+  "updatedAt": "2026-11-27T10:45:04Z",
   "note": ""
 }
