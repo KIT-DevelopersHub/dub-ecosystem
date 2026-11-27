@@ -74,6 +74,20 @@ export function allSchemas(): string[] {
   ];
 }
 
+/**
+ * The dedicated `dub-tickets` D1 (LP チケット: 注文・券・受付). Same rule as allSchemas(): one
+ * sqlFile line per physical migration in services/lp-tickets/db, in id order. A new migration there
+ * must be added here too (test/ticket-to-checkin.test.ts fails when one is missing).
+ */
+export function ticketsSchemas(): string[] {
+  return [
+    sqlFile("../../../services/lp-tickets/db/0001_init.sql"),
+    sqlFile("../../../services/lp-tickets/db/0002_delivery.sql"),
+    sqlFile("../../../services/lp-tickets/db/0003_checkin.sql"),
+    sqlFile("../../../services/lp-tickets/db/0004_refund_mail.sql"),
+  ];
+}
+
 function norm(v: unknown): unknown {
   if (v === undefined) return null;
   if (typeof v === "boolean") return v ? 1 : 0;
