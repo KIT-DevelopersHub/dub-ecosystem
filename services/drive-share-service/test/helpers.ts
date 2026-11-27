@@ -50,7 +50,8 @@ export function fakeRoster(
 ): RoleMembership {
   return {
     async listActiveUsers(roleId?: string): Promise<ActiveUser[]> {
-      const out = users.filter((u) => !roleId || u.roleIds.includes(roleId)).map((u) => ({ ...u, roleIds: [...u.roleIds] }));
+      // identity's ?role= filter matches an assignment of any scope (org-wide or one event).
+      const out = users.filter((u) => !roleId || u.roleIds.includes(roleId) || !!u.scopedRoleIds?.includes(roleId)).map((u) => ({ ...u, roleIds: [...u.roleIds] }));
       // Role members given only by email become users with a derived id (usr:<email>).
       const byEmail = new Map(out.map((u) => [u.email, u]));
       for (const [rid, emails] of Object.entries(members)) {

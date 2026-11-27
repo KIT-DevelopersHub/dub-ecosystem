@@ -73,6 +73,26 @@ describe("role assignments", () => {
     expect(dup.status).toBe(409);
   });
 
+  it("GET /internal/users: an event-scoped role is in scopedRoleIds, never in roleIds (#908)", async () => {
+    const h = await makeHarness();
+    const organizer = (await (await h.app.request("/identity/roles", jsonBody(asUser(h.adminId), "POST", { name: "org-908", permissions: ["event:write"] }))).json()) as identity.Role;
+    await grant(h, h.memberId, organizer.id, { resourceType: "event", resourceId: "ev_908" });
+    const internal = { headers: { "x-dub-internal": "1", "x-dub-request-id": "r" } };
+    const list = async (q: string) => ((await (await h.app.request(`/internal/users?status=active${q}`, internal)).json()) as { items: identity.IdentityUser[] }).items;
+
+    const member = (await list(`&role=${organizer.id}`)).find((u) => u.id === h.memberId)!;
+    expect(member.roleIds).not.toContain(organizer.id); // authorization / Drive共有 stay org-wide
+    expect(member.scopedRoleIds).toEqual([organizer.id]);
+    // Org-wide only: the field is left out (additive).
+    expect((await list("")).find((u) => u.id === h.adminId)!.scopedRoleIds).toBeUndefined();
+
+    // Org-wide too: it is in roleIds, so not repeated as scoped.
+    await grant(h, h.memberId, organizer.id);
+    const both = (await list("")).find((u) => u.id === h.memberId)!;
+    expect(both.roleIds).toContain(organizer.id);
+    expect(both.scopedRoleIds).toBeUndefined();
+  });
+
   it("cascade-deletes assignments when the role is deleted", async () => {
     const h = await makeHarness();
     const role = (await (await h.app.request("/identity/roles", jsonBody(asUser(h.adminId), "POST", { name: "temp", permissions: ["task:read"] }))).json()) as identity.Role;

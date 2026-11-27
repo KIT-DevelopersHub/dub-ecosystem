@@ -54,7 +54,7 @@ import type { MemberDirectory, MemberGoogleInfo } from "./member-directory";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
 import { DESCRIPTION_MAX, DURATION_MAX, DURATION_MIN, endsAt, fromRecurrence, lastEndMs, TITLE_MAX, toRecurrence, validateMeeting, type MeetingFields } from "./meeting-rules";
 import { createInMemorySyncState, type CalendarAclState, type MeetingSyncSnapshot, type MeetingSyncState } from "./meeting-sync-state";
-import type { ActiveUser, RoleMembership } from "./role-membership";
+import { meetingRoleIds, type ActiveUser, type RoleMembership } from "./role-membership";
 
 export const ALL_TARGET_NAME = "全体";
 export const PEOPLE_CALENDAR_NAME = "個別";
@@ -436,7 +436,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
   const toInvitees = (users: readonly ActiveUser[], google: ReadonlyMap<string, MemberGoogleInfo>): Invitee[] =>
     users.map((u) => {
       const g = google.get(u.id);
-      return { userId: u.id, email: lower(g?.gmail ?? u.email), name: u.name, roleIds: u.roleIds, hasGoogle: !!g?.gmail };
+      return { userId: u.id, email: lower(g?.gmail ?? u.email), name: u.name, roleIds: meetingRoleIds(u), hasGoogle: !!g?.gmail };
     });
 
   /** One invite per address. After the target filter: two accounts can share a Gmail, and the
@@ -835,14 +835,15 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
 
     async targets(userId) {
       const [roles, users, calendars] = await Promise.all([deps.roster.listRoles(), deps.roster.listActiveUsers(), myCalendarIds()]);
+      const roleIdsOf = new Map(users.map((u) => [u.id, meetingRoleIds(u)]));
       const me = users.find((u) => u.id === userId);
       const items: meeting.MeetingTarget[] = [
         { id: meeting.ALL_MEMBERS_TARGET_ID, name: ALL_TARGET_NAME, memberCount: users.length, isMine: true },
         ...roles.map((r) => ({
           id: r.id,
           name: r.name,
-          memberCount: users.filter((u) => u.roleIds.includes(r.id)).length,
-          isMine: !!me?.roleIds.includes(r.id),
+          memberCount: users.filter((u) => roleIdsOf.get(u.id)!.includes(r.id)).length,
+          isMine: !!me && roleIdsOf.get(me.id)!.includes(r.id),
         })),
       ].map((t) => {
         // Only the caller's own calendars: those are the ones shared with them (no share mail any more).
@@ -1060,7 +1061,7 @@ export function createMeetingsService(deps: MeetingsDeps): MeetingsService {
       const invitedIds = new Set(ledger.map((r) => r.userId).filter((u): u is string => !!u));
       // An ended meeting's attendees are frozen: nobody is "still to invite".
       const over = isOver(fieldsOf(row), Date.parse(deps.now()));
-      const candidates = over ? [] : users.filter((u) => !invitedIds.has(u.id) && meeting.isInMeetingTargets({ id: u.id, roleIds: u.roleIds }, row.targets));
+      const candidates = over ? [] : users.filter((u) => !invitedIds.has(u.id) && meeting.isInMeetingTargets({ id: u.id, roleIds: meetingRoleIds(u) }, row.targets));
       if (candidates.length > 0) {
         try {
           const google = await deps.directory.googleEmails(candidates.map((u) => u.id), { strict: true });

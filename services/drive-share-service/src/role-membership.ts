@@ -17,7 +17,17 @@ export interface ActiveUser {
   /** Dub login address (trimmed, lowercased). */
   email: string;
   name: string;
+  /** Org-wide roles (what Drive共有 and authorization go by). */
   roleIds: string[];
+  /** Roles held only for one event etc. (identity's `scopedRoleIds`). */
+  scopedRoleIds?: string[];
+}
+
+/** The roles a meeting's role target counts someone in: any scope. Whoever holds Organizer — org-wide
+ *  or for one event — is an Organizer to invite to the Organizer 定例 (#908). Meetings only: Drive共有
+ *  stays with the org-wide roleIds. */
+export function meetingRoleIds(u: Pick<ActiveUser, "roleIds" | "scopedRoleIds">): string[] {
+  return u.scopedRoleIds?.length ? [...new Set([...u.roleIds, ...u.scopedRoleIds])] : u.roleIds;
 }
 
 /** Role membership + naming, as drive-share-service needs it. */
@@ -39,7 +49,7 @@ export type RoleMembershipFactory = (ctx: RequestContext) => RoleMembership;
 const PAGE_LIMIT = 200;
 
 interface UsersPage {
-  items: { id?: string; email?: string | null; displayName?: string | null; roleIds?: string[] | null }[];
+  items: { id?: string; email?: string | null; displayName?: string | null; roleIds?: string[] | null; scopedRoleIds?: string[] | null }[];
   nextCursor: string | null;
 }
 interface RolesPage {
@@ -98,7 +108,8 @@ export function createIdentityRoleMembership(binding: Fetcher, ctx: RequestConte
         for (const u of page.items) {
           const email = u.email?.trim().toLowerCase();
           if (!u.id || !email || out.has(u.id)) continue;
-          out.set(u.id, { id: u.id, email, name: u.displayName?.trim() || email, roleIds: [...(u.roleIds ?? [])] });
+          const scoped = Array.isArray(u.scopedRoleIds) ? u.scopedRoleIds.filter((r) => typeof r === "string" && r.length > 0) : [];
+          out.set(u.id, { id: u.id, email, name: u.displayName?.trim() || email, roleIds: [...(u.roleIds ?? [])], ...(scoped.length > 0 ? { scopedRoleIds: scoped } : {}) });
         }
         cursor = page.nextCursor ?? undefined;
       } while (cursor);

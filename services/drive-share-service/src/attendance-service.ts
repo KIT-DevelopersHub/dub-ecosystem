@@ -16,7 +16,7 @@ import { runMeetIngest } from "./meet-ingest";
 import { jstDate } from "./meeting-rules";
 import type { MeetingRow, MeetingStore } from "./meetings-store";
 import { describeTargets, targetsLabel } from "./meetings-service";
-import type { ActiveUser, RoleMembership } from "./role-membership";
+import { meetingRoleIds, type ActiveUser, type RoleMembership } from "./role-membership";
 
 const MS_PER_DAY = 86_400_000;
 const DEFAULT_RANGE_DAYS = 84;
@@ -134,7 +134,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
   const { orgId } = deps;
 
   /** The union of the meeting's targets (全体 / roles / members). */
-  const expectedOf = (users: ActiveUser[], m: MeetingRow) => users.filter((u) => meeting.isInMeetingTargets(u, m.targets));
+  const expectedOf = (users: ActiveUser[], m: MeetingRow) => users.filter((u) => meeting.isInMeetingTargets({ id: u.id, roleIds: meetingRoleIds(u) }, m.targets));
 
   /** Role names, best-effort (a failed read just shows a placeholder). */
   async function names(): Promise<Map<string, string>> {
@@ -197,7 +197,7 @@ export function createAttendanceService(deps: AttendanceDeps): AttendanceService
       const users = await deps.roster.listActiveUsers();
       const me = users.find((u) => u.id === userId);
       if (!me) return { items: [], googleLinked: linked };
-      const mine = rows.filter((m) => meeting.isInMeetingTargets(me, m.targets));
+      const mine = rows.filter((m) => meeting.isInMeetingTargets({ id: me.id, roleIds: meetingRoleIds(me) }, m.targets));
       const n = mine.some((m) => m.targets.some((t) => t.kind === "role")) ? await names() : new Map<string, string>();
       const now = deps.now();
       const today = jstDate(now);

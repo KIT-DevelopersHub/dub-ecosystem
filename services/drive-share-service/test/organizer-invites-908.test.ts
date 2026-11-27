@@ -1,7 +1,8 @@
 // #908 「Organizer ロールを持っているのにカレンダー（定例の招待）に入っていない人がいる」.
-// One test per suspected cause. The causes the code already handles stay as regression guards; the
-// real gap — a target member Dub cannot (or did not yet) invite was invisible — is what the
-// notInvited list, 参加者を再同期 (syncOne) and the outbox retry flag fix.
+// One test per suspected cause. The actual one: an Organizer given for one event (event-scoped) was
+// not a member of the Organizer target — identity's roleIds are org-wide only — so a meeting never
+// invited them, 名簿 Gmail or not. The other causes stay as regression guards; the notInvited list,
+// 参加者を再同期 (syncOne) and the outbox retry flag make any remaining gap visible and recoverable.
 import { describe, it, expect, vi } from "vitest";
 import { identity, meeting } from "@dub/types";
 import type { Fetcher } from "@cloudflare/workers-types";
@@ -11,7 +12,7 @@ import { createMockDriveShareClient } from "../src/mock-client";
 import { createInMemoryMeetingStore } from "../src/meetings-store";
 import { createInMemorySyncState } from "../src/meeting-sync-state";
 import { staticMemberDirectory, type MemberDirectory } from "../src/member-directory";
-import { createIdentityRoleMembership, type ActiveUser } from "../src/role-membership";
+import { createIdentityRoleMembership, meetingRoleIds, type ActiveUser } from "../src/role-membership";
 import { createRoleFollowService, type RoleFollowDeps } from "../src/role-follow";
 import type { RoleGrantsService } from "../src/role-grants-service";
 import { buildMeetings, buildRoleGrants, fakeRoster, memAuthzHolding, stubGoogleAccount } from "./helpers";
@@ -153,15 +154,57 @@ describe("#908 cause: invitable but the follow was missed (identity's call faile
   });
 });
 
-describe("#908 cause: event-scoped Organizer (organizer of one event only)", () => {
-  it("is not an org-wide Organizer: identity's roleIds carry org-wide roles only, so the meeting neither invites nor flags them", async () => {
-    // identity returns roleIds = org-wide assignments; an event-scoped one never appears there.
-    const roster = fakeRoster({}, NAMES, users(["usr_a", [ORGANIZER]], ["usr_event_only", []]));
-    const { service } = buildMeetings({ roster, directory: staticMemberDirectory(gmail("usr_a", "usr_event_only")) });
+describe("#908 cause: Organizer given for one event (event-scoped) — the actual gap", () => {
+  // identity's roleIds carry org-wide roles only; a grant scoped to one event is in scopedRoleIds.
+  // Before the fix the meeting read roleIds alone, so such an Organizer — 名簿 Gmail or not — was
+  // never invited, never shared the calendar, and not even listed as 未招待.
+  const TEAM = "role_auto_team_x";
+  const scopedUsers = (): ActiveUser[] => [
+    { id: "usr_a", email: "usr_a@developershub.jp", name: "usr_a", roleIds: [ORGANIZER] },
+    { id: "usr_event_only", email: "usr_event_only@developershub.jp", name: "usr_event_only", roleIds: [], scopedRoleIds: [ORGANIZER] },
+  ];
+
+  it("is invited at create, with its 名簿 Gmail (lone Organizer target)", async () => {
+    const roster = fakeRoster({}, NAMES, scopedUsers());
+    const { service, calendar } = buildMeetings({ roster, directory: staticMemberDirectory(gmail("usr_a", "usr_event_only")) });
     const m = await service.create("usr_admin", BASE);
+    expect(attendeesOnGoogle(calendar)).toEqual(["usr_a@gmail.com", "usr_event_only@gmail.com"]);
     const res = await service.attendees(m.id);
-    expect(res.items.map((i) => i.userId)).toEqual(["usr_a"]);
+    expect(res.items.map((i) => i.userId).sort()).toEqual(["usr_a", "usr_event_only"]);
     expect(res.notInvited).toEqual([]);
+  });
+
+  it("is invited by the role follow when the event-scoped grant comes after the meeting (team + Organizer targets)", async () => {
+    let current: ActiveUser[] = [{ id: "usr_a", email: "usr_a@developershub.jp", name: "usr_a", roleIds: [ORGANIZER] }];
+    const roster = { ...fakeRoster({}, { ...NAMES, [TEAM]: "team" }), listActiveUsers: (roleId?: string) => fakeRoster({}, {}, current).listActiveUsers(roleId) };
+    const { service, calendar } = buildMeetings({ roster, directory: staticMemberDirectory(gmail("usr_a", "usr_event_only")) });
+    const { targetId: _calendar, ...rest } = BASE;
+    await service.create("usr_admin", { ...rest, targets: [{ kind: "role", id: TEAM }, { kind: "role", id: ORGANIZER }] });
+    current = scopedUsers();
+    const res = await service.syncRoles([ORGANIZER]);
+    expect(res).toMatchObject({ meetings: 1, invitedAdded: 1, complete: true });
+    expect(attendeesOnGoogle(calendar)).toEqual(["usr_a@gmail.com", "usr_event_only@gmail.com"]);
+  });
+
+  it("counts toward the Organizer target and sees its calendar as theirs", async () => {
+    const roster = fakeRoster({}, NAMES, scopedUsers());
+    const { service } = buildMeetings({ roster, directory: staticMemberDirectory(gmail("usr_a", "usr_event_only")) });
+    await service.create("usr_admin", BASE);
+    const t = (await service.targets("usr_event_only")).items.find((i) => i.id === ORGANIZER);
+    expect(t).toMatchObject({ memberCount: 2, isMine: true });
+  });
+
+  it("identity's scopedRoleIds reach the meeting roster (absent = org-wide only, as before)", async () => {
+    const items = [
+      { id: "usr_a", email: "a@developershub.jp", displayName: "a", roleIds: [ORGANIZER] },
+      { id: "usr_e", email: "e@developershub.jp", displayName: "e", roleIds: [], scopedRoleIds: [ORGANIZER] },
+    ];
+    const binding = {
+      fetch: async () => new Response(JSON.stringify({ items, nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } }),
+    } as unknown as Fetcher;
+    const got = await createIdentityRoleMembership(binding, { requestId: "req_908" }).listActiveUsers();
+    expect(got.map((u) => [u.id, meetingRoleIds(u)])).toEqual([["usr_a", [ORGANIZER]], ["usr_e", [ORGANIZER]]]);
+    expect(got[1]!.roleIds).toEqual([]); // Drive共有 keeps reading org-wide roles only
   });
 });
 

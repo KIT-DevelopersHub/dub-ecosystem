@@ -162,6 +162,9 @@ export interface IdentityUser {
   avatarUrl: string | null;
   status: UserStatus;
   roleIds: RoleId[];
+  /** Roles held only for one resource (e.g. Organizer of one event), so not in `roleIds`. Additive:
+   *  omitted when there are none. Authorization never reads it; ミーティングの招待 does (#908). */
+  scopedRoleIds?: RoleId[];
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
