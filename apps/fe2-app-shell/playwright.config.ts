@@ -13,7 +13,7 @@ const BASE_URL = `http://localhost:${PORT}`;
 export default defineConfig({
   testDir: "./e2e",
   // 本物の lp-tickets スタックが要る（demo transport では動かない）→ playwright.tickets.config.ts
-  testIgnore: "ticket-to-checkin.spec.ts",
+  testIgnore: ["ticket-to-checkin.spec.ts", "smoke-all/**"], // smoke-all は playwright.smoke.config.ts
   outputDir: "./e2e/.output",
   timeout: 60_000,
   expect: { timeout: 10_000 },
