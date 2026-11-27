@@ -1,13 +1,12 @@
 // Escalation levels + exhaustion projection (#902). Pure and side-effect free.
 //
-// `status` (ok/warn/critical at 70/90) stays as the frozen wire field. `level` adds the
-// decision ladder used by the GitHub Issue flow and the dashboard:
-//   warn     >= 70%  look at it: an Issue (P1) is opened so it is tracked
-//   act      >= 85%  apply a mitigation from the playbook now (P1)
-//   critical >= 95%  the service is about to stop: mitigate or decide to pay today (P0)
+// `status` (ok/warn/critical) stays as the frozen wire field. `level` adds the decision
+// ladder used by the GitHub Issue flow and the dashboard (cutoffs: LEVEL_PCT):
+//   warn      look at it: an Issue (P1) is opened so it is tracked
+//   act       apply a mitigation from the playbook now (P1)
+//   critical  the service is about to stop: mitigate or decide to pay today (P0)
 // The projection can raise the level: a window metric whose current pace reaches 100% before
-// its reset is at least "warn" even below 70%, and a storage metric that fills within 7 days
-// is at least "act".
+// its reset is at least "warn", and a storage metric that fills soon is at least "act".
 import { DAY_MS, firstOfNextUtcMonth, nextUtcDay, startOfUtcDay, startOfUtcMonth } from "./time";
 import type { MetricDef } from "./limits";
 

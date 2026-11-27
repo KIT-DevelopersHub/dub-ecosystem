@@ -74,7 +74,7 @@ async function collectNow(env: Env, d1: NonNullable<Env["DB"]>): Promise<UsageSu
   const rows = await collectSnapshot(env, mailReadDb(d1), now);
   const db = usageDb(d1);
   await upsertSnapshot(db, rows, now);
-  return buildSummary(rows, now, now.toISOString(), await readGrowthHistory(db, now));
+  return buildSummary(rows, now, now.toISOString(), await readGrowthHistory(db, now), env.USAGE_ALERT_REPO);
 }
 
 function logError(message: string, err: unknown): void {
@@ -125,7 +125,7 @@ export function createApp(options: AppOptions = {}) {
       readLatestCapturedAt(db),
       readGrowthHistory(db, now),
     ]);
-    const summary = buildSummary(rows, now, capturedAt, history);
+    const summary = buildSummary(rows, now, capturedAt, history, c.env.USAGE_ALERT_REPO);
     if (!summary.stale) return c.json(summary);
 
     // Self-heal: stale data means the alarm loop stopped. Re-arm it (kick is INTERNAL and

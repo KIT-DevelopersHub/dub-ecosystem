@@ -4,7 +4,7 @@
 // One open Issue per metric (title prefix `[usage:<key>]`), at most one post per metric per
 // UTC day unless the level rises (then a comment + the P0 label for critical).
 // The GitHub side is a small port so tests run without the network; the real adapter uses
-// the workflow's GITHUB_TOKEN (issues: write) — no extra secret.
+// USAGE_ALERT_GH_TOKEN against the private USAGE_ALERT_REPO (see scripts/usage-escalation.ts).
 import { isEscalated, levelRank, type HistoryPoint } from "./escalation";
 import { fetchTopConsumers, type ConsumerOptions, type ConsumerResult } from "./consumers";
 import { AREA_LABEL, buildComment, buildIssue, postedLevelOn, priorityLabel } from "./issue";
@@ -96,7 +96,7 @@ export interface GithubRestOptions {
   fetch?: typeof fetch;
 }
 
-/** GitHub REST adapter (the workflow's GITHUB_TOKEN). */
+/** GitHub REST adapter for the alert repo (fine-grained token, Issues: write). */
 export function githubRest(opts: GithubRestOptions): IssuesPort {
   const f = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const base = `https://api.github.com/repos/${opts.repo}`;
@@ -185,7 +185,12 @@ export async function runEscalation(summary: UsageSummary, opts: RunEscalationOp
   }
 
   const open = opts.issues ? await opts.issues.listOpen(AREA_LABEL) : [];
-  if (opts.issues) await opts.issues.ensureLabel(AREA_LABEL, "c2e0c6", "無料枠の使用量（usage-escalation）");
+  if (opts.issues) {
+    // The alert repo (dub-docs) may not have these yet; 422 = already there.
+    await opts.issues.ensureLabel(AREA_LABEL, "c2e0c6", "無料枠の使用量（usage-escalation）");
+    await opts.issues.ensureLabel("P1", "fbca04", "優先度: 高");
+    await opts.issues.ensureLabel("P0", "b60205", "優先度: 最優先");
+  }
 
   for (const s of targets) {
     const existing = open.find((i) => i.title.startsWith(issueTitlePrefix(s.metricKey)));

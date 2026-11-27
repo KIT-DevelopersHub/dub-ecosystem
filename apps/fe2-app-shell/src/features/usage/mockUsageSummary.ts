@@ -19,7 +19,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
   const DAY = 24 * HOUR;
   const RUNBOOK = "https://github.com/KIT-DevelopersHub/dub-ecosystem/blob/main/docs/runbooks/11-usage-free-tier";
   const search = (key: string): string =>
-    `https://github.com/KIT-DevelopersHub/dub-ecosystem/issues?q=${encodeURIComponent(`is:issue is:open label:area:usage in:title "[usage:${key}]"`)}`;
+    `https://github.com/KIT-DevelopersHub/dub-docs/issues?q=${encodeURIComponent(`is:issue is:open label:area:usage in:title "[usage:${key}]"`)}`;
   const workersPaid = (price: string) => ({ name: "Workers Paid", price });
 
   return {
@@ -96,7 +96,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: iso(9 * DAY),
         overflowBehavior: "bill",
         status: "ok",
-        level: "ok", projection: { basis: "window", exhaustsAt: null, pctAtReset: 57.1, perDay: 57 }, playbookUrl: `${RUNBOOK}/email-sending.md`, paidPlan: { name: "Resend Pro", price: "$20/月（5 万通/月）" }, issueSearchUrl: search("resend_emails_month"),
+        level: "ok", projection: { basis: "window", exhaustsAt: null, pctAtReset: 57.1, perDay: 57 }, playbookUrl: `${RUNBOOK}/email-sending.md`, paidPlan: { name: "Resend Pro", price: "$20/月（5 万通/月込み、超過 $0.90/1,000 通）" }, issueSearchUrl: search("resend_emails_month"),
       },
       {
         provider: "cloudflare",

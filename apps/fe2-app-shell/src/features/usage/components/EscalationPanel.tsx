@@ -1,5 +1,5 @@
 // EscalationPanel (#902) — the "what now" strip under a usage card: the run-out estimate,
-// what to do at this level, the metric's open GitHub Issue (where 対策 / 課金 is decided)
+// what to do at this level, the metric's GitHub Issue in the private dub-docs (where 対策 / 課金 is decided)
 // and its playbook, plus what paying would cost. Built from @dub/ui + @dub/tokens only.
 import type { CSSProperties } from "react";
 import { toCssVarName } from "@dub/tokens";
@@ -65,7 +65,7 @@ export function EscalationPanel({ service, issue, now, testId }: EscalationPanel
   } else if (escalated && service.issueSearchUrl) {
     issueLink = (
       <ExternalLink href={service.issueSearchUrl} testId={`${testId}-issue-search`}>
-        Issue を探す
+        dub-docs の Issue で決める
       </ExternalLink>
     );
   }

@@ -1,5 +1,5 @@
-// Billing-guard alerting (spec E, #902 levels). When a metric reaches warn(70%)/act(85%)/
-// critical(95%) — or its projection says it runs out before the reset — the daily
+// Billing-guard alerting (spec E, #902 levels). When a metric reaches warn / act / critical
+// (escalation.ts) — or its projection says it runs out before the reset — the daily
 // alarm fires an admin alert over TWO best-effort channels — never throwing, never blocking:
 //   1. In-app EVT_NOTIFICATION via notification-service POST /notify (when admin user ids
 //      are configured via USAGE_ALERT_ADMIN_USER_IDS).

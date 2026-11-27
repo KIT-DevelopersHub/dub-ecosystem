@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../lib/api-client.tsx";
-import { createUsageApi, parseUsageIssues, USAGE_ISSUES_URL, type UsageApi } from "./usageApi.tsx";
+import { createUsageApi, USAGE_ALERT_REPO_URL, type UsageApi } from "./usageApi.tsx";
 import { buildMockUsageSummary } from "./mockUsageSummary.ts";
 import { UsageApiProvider } from "./UsageProvider.tsx";
 import { UsageDashboard } from "./UsageDashboard.tsx";
@@ -46,23 +46,20 @@ describe("escalation helpers", () => {
 });
 
 describe("open Issues lookup", () => {
-  it("maps [usage:<key>] titles to metrics and skips PRs / other issues", () => {
-    const r = parseUsageIssues([
-      { number: 1, html_url: "u1", title: "[usage:d1_rows_read_day] D1 が 88%" },
-      { number: 2, html_url: "u2", title: "unrelated" },
-      { number: 3, html_url: "u3", title: "[usage:kv_reads_day] x", pull_request: {} },
-    ]);
-    expect(r).toEqual({ available: true, byMetric: { d1_rows_read_day: { metricKey: "d1_rows_read_day", number: 1, url: "u1", title: "[usage:d1_rows_read_day] D1 が 88%" } } });
-    expect(parseUsageIssues({ message: "rate limited" }).available).toBe(false);
+  it("never calls GitHub from the browser: the Issues are in a private repo", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    const live = createUsageApi({} as ApiClient, {});
+    expect(await live.getOpenIssues!()).toEqual({ available: false, byMetric: {} });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
-  it("reads GitHub live and degrades to unavailable on failure", async () => {
-    const api = {} as ApiClient;
-    const ok = vi.fn(async () => new Response(JSON.stringify([{ number: 7, html_url: "u", title: "[usage:kv_reads_day] x" }])));
-    const live = createUsageApi(api, {}, ok as unknown as typeof fetch);
-    expect((await live.getOpenIssues!()).byMetric.kv_reads_day?.number).toBe(7);
-    expect(ok).toHaveBeenCalledWith(USAGE_ISSUES_URL, expect.anything());
-    const down = createUsageApi(api, {}, (async () => new Response("", { status: 403 })) as unknown as typeof fetch);
-    expect(await down.getOpenIssues!()).toEqual({ available: false, byMetric: {} });
+  it("demo shows a sample Issue in the private alert repo", async () => {
+    const demo = createUsageApi({} as ApiClient, { VITE_DEMO: "1" });
+    expect((await demo.getOpenIssues!()).byMetric.kv_reads_day?.url).toContain(USAGE_ALERT_REPO_URL);
+  });
+  it("the search link points at the private alert repo, not dub-ecosystem", () => {
+    const kv = buildMockUsageSummary(NOW).services.find((s) => s.metricKey === "kv_reads_day")!;
+    expect(kv.issueSearchUrl).toContain("/KIT-DevelopersHub/dub-docs/issues?q=");
   });
 });
 

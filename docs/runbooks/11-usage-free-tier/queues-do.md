@@ -5,7 +5,7 @@
 
 ## Queues について
 
-Dub は Cloudflare Queues（有料寄り）を使っていない。代わりに **freeq**（`packages/freeq`・D1 の outbox を cron / DO alarm で流す）を使う。
+Dub は Cloudflare Queues を使っていない（Queues 自体は Workers Free でも 1 日 1 万操作まで使える）。代わりに **freeq**（`packages/freeq`・D1 の outbox を cron / DO alarm で流す）を使う。
 そのため「キューが重い」は **D1 の行読み書き**と **DO / Workers のリクエスト**として現れる。
 freeq の drain が多い時は [d1-rows-written.md](./d1-rows-written.md) と [workers-requests.md](./workers-requests.md) も見る。
 
@@ -38,4 +38,4 @@ query($a:String!,$s:Date!,$e:Date!){viewer{accounts(filter:{accountTag:$a}){
 - リアルタイム機能（チャット等）の利用者が増え、メッセージ数に比例している
 
 **Workers Paid $5/月**: DO 100 万リクエスト/月込み（超過 $0.15/100 万）、実行時間 40 万 GB-s/月込み（超過 $12.50/100 万 GB-s）。
-Queues を使う場合も Workers Paid で 100 万操作/月込み（超過 $0.40/100 万）。Workers / D1 / KV も同時に従量になる。
+Queues を使う場合も Workers Paid で 100 万操作/月込み（超過 $0.40/100 万）。DO の SQLite 保存は 5 GB-月込み（超過 $0.20/GB-月）。Workers / D1 / KV も同時に従量になる。

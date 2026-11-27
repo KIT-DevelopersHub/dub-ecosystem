@@ -6,7 +6,7 @@
 import { isEscalated, levelFor, levelRank, projectUsage, type EscalationLevel, type HistoryPoint } from "./escalation";
 import { isStale } from "./freshness";
 import { MASTER, MASTER_BY_KEY, resetAt } from "./limits";
-import { playbookFor, playbookUrl, REPO } from "./playbook";
+import { DEFAULT_ALERT_REPO, playbookFor, playbookUrl, resolveAlertRepo } from "./playbook";
 import { worstStatus } from "./thresholds";
 import type { SnapshotRow, UsageServiceSummary, UsageStatus, UsageSummary } from "./types";
 
@@ -15,9 +15,10 @@ export function issueTitlePrefix(metricKey: string): string {
   return `[usage:${metricKey}]`;
 }
 
-export function issueSearchUrl(metricKey: string): string {
+/** Search link in the (private) alert repo; `repo` is USAGE_ALERT_REPO (refused -> default). */
+export function issueSearchUrl(metricKey: string, repo?: string | null): string {
   const q = `is:issue is:open label:area:usage in:title "${issueTitlePrefix(metricKey)}"`;
-  return `https://github.com/${REPO}/issues?q=${encodeURIComponent(q)}`;
+  return `https://github.com/${resolveAlertRepo(repo) ?? DEFAULT_ALERT_REPO}/issues?q=${encodeURIComponent(q)}`;
 }
 
 /** metricKey -> earlier daily readings (only storage metrics need it, for growth). */
@@ -29,6 +30,7 @@ export function buildSummary(
   now: Date,
   capturedAt: string | null,
   history: UsageHistory = new Map(),
+  alertRepo?: string | null,
 ): UsageSummary {
   const byKey = new Map(rows.map((r) => [r.metric_key, r]));
 
@@ -55,7 +57,7 @@ export function buildSummary(
       projection,
       playbookUrl: playbookUrl(def.metricKey),
       paidPlan: { name: pb.paid.name, price: pb.paid.price },
-      issueSearchUrl: issueSearchUrl(def.metricKey),
+      issueSearchUrl: issueSearchUrl(def.metricKey, alertRepo),
     };
   });
 

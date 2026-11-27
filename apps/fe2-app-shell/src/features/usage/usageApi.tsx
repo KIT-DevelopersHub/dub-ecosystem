@@ -13,30 +13,15 @@
 // "取得できませんでした" state instead. The mock is confined to VITE_DEMO.
 import { ApiError, type ApiClient } from "../../lib/api-client.tsx";
 import { buildMockUsageSummary, buildNeutralUsageSummary } from "./mockUsageSummary.ts";
-import type { UsageIssue, UsageIssuesResult, UsageSummary, UsageSummaryResult, UsageUnavailableReason } from "./types.ts";
+import type { UsageIssuesResult, UsageSummary, UsageSummaryResult, UsageUnavailableReason } from "./types.ts";
 
 /** Gateway path for the summary (contract: GET /usage/summary, /api/v1 prefixed). */
 export const USAGE_SUMMARY_PATH = "/api/v1/usage/summary" as const;
 
-/** Open escalation Issues (#902). The repo is public, so this is an unauthenticated read of
- *  GitHub's REST API from the browser (60/h per viewer IP — one call per /usage view). */
-export const USAGE_ISSUES_URL =
-  "https://api.github.com/repos/KIT-DevelopersHub/dub-ecosystem/issues?state=open&labels=area:usage&per_page=100" as const;
-
-const ISSUE_TITLE_RE = /^\[usage:([a-z0-9_]+)\]/;
-
-/** GitHub issues payload → open Issue per metric (first match wins; PRs skipped). */
-export function parseUsageIssues(payload: unknown): UsageIssuesResult {
-  if (!Array.isArray(payload)) return { available: false, byMetric: {} };
-  const byMetric: Record<string, UsageIssue> = {};
-  for (const raw of payload) {
-    const r = raw as { number?: unknown; html_url?: unknown; title?: unknown; pull_request?: unknown };
-    if (r.pull_request || typeof r.title !== "string" || typeof r.number !== "number" || typeof r.html_url !== "string") continue;
-    const m = ISSUE_TITLE_RE.exec(r.title);
-    if (m && !byMetric[m[1]!]) byMetric[m[1]!] = { metricKey: m[1]!, number: r.number, url: r.html_url, title: r.title };
-  }
-  return { available: true, byMetric };
-}
+/** Escalation Issues (#902) live in a PRIVATE repo (they carry real usage), so the browser
+ *  cannot list them without a token. Live cards link to the Issue search there instead
+ *  (`issueSearchUrl` from usage-meter, USAGE_ALERT_REPO); only demo shows a sample Issue. */
+export const USAGE_ALERT_REPO_URL = "https://github.com/KIT-DevelopersHub/dub-docs" as const;
 
 /** Demo build: one illustrative open Issue (the critical KV card). */
 function demoIssues(): UsageIssuesResult {
@@ -45,9 +30,9 @@ function demoIssues(): UsageIssuesResult {
     byMetric: {
       kv_reads_day: {
         metricKey: "kv_reads_day",
-        number: 902,
-        url: "https://github.com/KIT-DevelopersHub/dub-ecosystem/issues/902",
-        title: "[usage:kv_reads_day] KV 読み取り(日) が無料枠の 96.5%（危険）",
+        number: 1,
+        url: `${USAGE_ALERT_REPO_URL}/issues/1`,
+        title: "[usage:kv_reads_day] KV 読み取り(日)（危険・サンプル）",
       },
     },
   };
@@ -60,7 +45,7 @@ export interface UsageApi {
    *  endpoint exists yet, so this is a plain re-GET (contract: "無ければ再GETのみ").
    *  When the gateway later exposes POST /internal/meter/refresh, wire it here. */
   refresh(): Promise<UsageSummaryResult>;
-  /** Open escalation Issues per metric. Resolves always ({available:false} on failure). */
+  /** Open escalation Issues per metric. Resolves always; live = {available:false} (private repo). */
   getOpenIssues?(): Promise<UsageIssuesResult>;
 }
 
@@ -74,7 +59,6 @@ export function createUsageApi(
   env: { VITE_DEMO?: string } | undefined = typeof import.meta !== "undefined"
     ? (import.meta.env as { VITE_DEMO?: string })
     : undefined,
-  fetchImpl: typeof fetch | undefined = typeof fetch === "function" ? fetch.bind(globalThis) : undefined,
 ): UsageApi {
   const demo = isDemo(env);
 
@@ -106,15 +90,7 @@ export function createUsageApi(
   }
 
   async function getOpenIssues(): Promise<UsageIssuesResult> {
-    if (demo) return demoIssues();
-    if (!fetchImpl) return { available: false, byMetric: {} };
-    try {
-      const res = await fetchImpl(USAGE_ISSUES_URL, { headers: { accept: "application/vnd.github+json" } });
-      if (!res.ok) return { available: false, byMetric: {} };
-      return parseUsageIssues(await res.json());
-    } catch {
-      return { available: false, byMetric: {} };
-    }
+    return demo ? demoIssues() : { available: false, byMetric: {} };
   }
 
   return {

@@ -2,7 +2,7 @@
 // numbers and posts; this only renders. One open Issue per metric (title prefix
 // `[usage:<metricKey>]`); later escalations become comments on it. Each post carries a
 // hidden marker so a re-run on the same day at the same (or lower) level posts nothing.
-import { LEVEL_LABEL, levelRank, levelReason, type EscalationLevel } from "./escalation";
+import { LEVEL_LABEL, LEVEL_PCT, levelRank, levelReason, type EscalationLevel } from "./escalation";
 import type { ConsumerResult } from "./consumers";
 import { playbookFor, RUNBOOK_DIR } from "./playbook";
 import { issueTitlePrefix } from "./summary";
@@ -118,7 +118,7 @@ export function buildIssue(
     "  - [ ] 一時的な増加なので様子を見る",
     "",
     "## この Issue について",
-    `- usage-escalation ワークフローが自動で作りました。段階: 注意 70% / 対策 85% / 危険 95%（危険は P0）。リセット前に上限に届く見込みのときも注意以上になります。`,
+    `- usage-escalation ワークフローが自動で作りました。段階: 注意 ${LEVEL_PCT.warn}% / 対策 ${LEVEL_PCT.act}% / 危険 ${LEVEL_PCT.critical}%（危険は P0）。リセット前に上限に届く見込みのときも注意以上になります。`,
     `- 同じ項目は 1 日 1 回まで。段階が上がった時だけ追記します。落ち着いたら閉じてください（再び上がれば新しく作ります）。`,
     `- 一覧: \`${RUNBOOK_DIR}/README.md\``,
     "",

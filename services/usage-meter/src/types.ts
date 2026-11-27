@@ -14,7 +14,7 @@ export type Provider = "cloudflare" | "resend" | "gcp";
  *  bill = metered/overage billing kicks in (only after a manual Paid upgrade). */
 export type OverflowBehavior = "halt" | "bill";
 
-/** ok < 70% ; warn >= 70% ; critical >= 90% ; unknown = usage could not be measured. */
+/** ok / warn / critical by pct (thresholds.ts) ; unknown = usage could not be measured. */
 export type UsageStatus = "ok" | "warn" | "critical" | "unknown";
 
 /** How the metric's usage window resets (drives resetsAt). none = cumulative (e.g. storage). */
@@ -34,7 +34,7 @@ export interface UsageServiceSummary {
   overflowBehavior: OverflowBehavior;
   status: UsageStatus;
   // ---- additive (#902): escalation ladder + what to do about it ----
-  /** ok / warn>=70 / act>=85 / critical>=95, raised by the projection (see escalation.ts). */
+  /** ok / warn / act / critical (LEVEL_PCT), raised by the projection (see escalation.ts). */
   level: EscalationLevel;
   /** Run-out estimate at the current pace; null when it cannot be estimated. */
   projection: UsageProjection | null;

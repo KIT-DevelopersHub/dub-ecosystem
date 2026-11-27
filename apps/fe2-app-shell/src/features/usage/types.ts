@@ -17,7 +17,7 @@
 export type ServiceProvider = "cloudflare" | "resend" | (string & {});
 
 /** Per-metric health. Drives the status color and worst-status roll-up.
- *  ok = comfortable · warn ≥70% · critical ≥90% · unknown = could not be read. */
+ *  ok = comfortable · warn / critical by pct · unknown = could not be read. */
 export type UsageStatus = "ok" | "warn" | "critical" | "unknown";
 
 /** What the upstream does when the quota is exceeded.
@@ -25,7 +25,7 @@ export type UsageStatus = "ok" | "warn" | "critical" | "unknown";
  *  bill = usage past the quota is billed (a Paid/metered plan). */
 export type OverflowBehavior = "halt" | "bill";
 
-/** Escalation ladder (#902): warn ≥70 · act ≥85 · critical ≥95, raised when the current
+/** Escalation ladder (#902): warn · act · critical (LEVEL_PCT), raised when the current
  *  pace runs out before the reset. Drives the GitHub Issue flow (area:usage). */
 export type EscalationLevel = "ok" | "warn" | "act" | "critical" | "unknown";
 

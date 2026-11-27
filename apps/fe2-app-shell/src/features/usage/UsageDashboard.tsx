@@ -84,7 +84,7 @@ export function UsageDashboard(): JSX.Element {
     queryKey: queryKeys.feature("usage", "summary"),
     queryFn: () => usageApi.getSummary(),
   });
-  // Open escalation Issues (#902) — best-effort, independent of the summary.
+  // Open escalation Issues (#902): demo only (the live repo is private) — cards fall back to the search link.
   const issuesQuery = useQuery({
     queryKey: queryKeys.feature("usage", "issues"),
     queryFn: () => usageApi.getOpenIssues?.() ?? Promise.resolve({ available: false, byMetric: {} }),
@@ -138,7 +138,7 @@ export function UsageDashboard(): JSX.Element {
           </li>
         </ul>
         <p style={noteStyle}>
-          注意以上の項目は GitHub Issue（ラベル area:usage）が自動で作られ、何が使っているか・対策・課金した場合の値段がまとまります。
+          注意以上の項目は、非公開の dub-docs リポジトリに GitHub Issue（ラベル area:usage）が自動で作られ、何が使っているか・対策・課金した場合の値段がまとまります（見るには dub-docs の閲覧権限が要ります）。
           課金は人が決めます（自動では上げません）。
         </p>
         <a href={USAGE_RUNBOOK_URL} target="_blank" rel="noopener noreferrer" style={guideLinkStyle} data-testid="fe2-usage-runbook">

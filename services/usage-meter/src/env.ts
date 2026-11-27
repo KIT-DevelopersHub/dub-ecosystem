@@ -33,6 +33,9 @@ export interface Env {
   // csv of role keys the notification service expands to admin inboxes. Defaults to
   // role_sys_admin,role_sys_maintainer (mirrors the feedback -> admin fan-out).
   USAGE_ALERT_ADMIN_ROLE_IDS?: string;
+  // owner/name the escalation Issues live in (private). Default KIT-DevelopersHub/dub-docs;
+  // only used here for the dashboard's search link — the Worker never files Issues.
+  USAGE_ALERT_REPO?: string;
 
   ENVIRONMENT?: string;
 }

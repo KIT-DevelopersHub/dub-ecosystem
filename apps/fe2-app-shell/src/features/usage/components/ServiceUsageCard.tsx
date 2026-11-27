@@ -59,7 +59,7 @@ export interface ServiceUsageCardProps {
 export function ServiceUsageCard({ service, now, testId, issue }: ServiceUsageCardProps): JSX.Element {
   const meta = statusMeta(service.status);
   // The badge shows the escalation level when the backend sends it (注意/対策/危険), else the
-  // legacy 70/90 status. The gauge/pct keep the status colour scale.
+  // legacy status. The gauge/pct keep the status colour scale.
   const level = effectiveLevel(service);
   const badge = service.level ? levelMeta(level) : meta;
   const overflow = overflowMeta(service.overflowBehavior);

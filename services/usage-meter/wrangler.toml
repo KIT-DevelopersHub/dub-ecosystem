@@ -51,6 +51,8 @@ ENVIRONMENT = "production"
 # CF_ACCOUNT_ID is the account tag the GraphQL Analytics query filters by. Non-secret, but
 # left to the free deploy / secret since it is environment-specific.
 # USAGE_ALERT_EMAIL defaults to admin@developershub.jp in code when unset.
+# USAGE_ALERT_REPO (owner/name, private) only drives the dashboard Issue-search link; default
+# KIT-DevelopersHub/dub-docs. The Worker never files Issues (usage-escalation.yml does).
 
 # --- secrets (set via `wrangler secret put`, never committed) ---
 # USAGE_CF_ANALYTICS_TOKEN  -> Cloudflare GraphQL Analytics (account read). If unset the code

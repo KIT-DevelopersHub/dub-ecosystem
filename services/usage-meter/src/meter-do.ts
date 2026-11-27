@@ -116,7 +116,7 @@ export class MeterDO {
     const rows = await collectSnapshot(this.env, mailReadDb(this.env.DB), now, log);
     const db = usageDb(this.env.DB);
     await upsertSnapshot(db, rows, now);
-    const summary = buildSummary(rows, now, now.toISOString(), await readGrowthHistory(db, now));
+    const summary = buildSummary(rows, now, now.toISOString(), await readGrowthHistory(db, now), this.env.USAGE_ALERT_REPO);
     const alertRes = await runAlerts(this.env, summary, now, this.dedupStore(), log);
     return {
       metrics: rows.length,

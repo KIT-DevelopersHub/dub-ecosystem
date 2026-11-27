@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { runEscalation, summaryFromHistory, type HistoryRow, type IssuesPort, type OpenIssue } from "../src/escalate";
 import { fetchTopConsumers, topLines } from "../src/consumers";
 import { marker, postedLevelOn } from "../src/issue";
+import { DEFAULT_ALERT_REPO, resolveAlertRepo } from "../src/playbook";
+import { issueSearchUrl } from "../src/summary";
 
 const NOW = new Date("2026-11-27T12:00:00Z");
 
@@ -105,5 +107,21 @@ describe("top consumers", () => {
     expect(await fetchTopConsumers("kv", { token: "t", accountId: "acc", now: NOW, fetch: bad })).toEqual({ error: "GraphQL: boom" });
     expect(await fetchTopConsumers("workers", { token: null, accountId: "acc", now: NOW })).toHaveProperty("error");
     expect(await fetchTopConsumers("email", { token: null, accountId: null, now: NOW })).toHaveProperty("note");
+  });
+});
+
+describe("alert repo (Issues go to a private repo)", () => {
+  it("defaults to dub-docs and refuses the public dub-ecosystem or a malformed value", () => {
+    expect(resolveAlertRepo(undefined)).toBe(DEFAULT_ALERT_REPO);
+    expect(resolveAlertRepo("  ")).toBe("KIT-DevelopersHub/dub-docs");
+    expect(resolveAlertRepo("acme/private-ops")).toBe("acme/private-ops");
+    expect(resolveAlertRepo("KIT-DevelopersHub/dub-ecosystem")).toBeNull();
+    expect(resolveAlertRepo("kit-developershub/DUB-ECOSYSTEM")).toBeNull();
+    expect(resolveAlertRepo("https://github.com/x/y")).toBeNull();
+  });
+  it("the dashboard search link follows USAGE_ALERT_REPO and never points at dub-ecosystem", () => {
+    expect(issueSearchUrl("kv_reads_day")).toMatch(/^https:\/\/github\.com\/KIT-DevelopersHub\/dub-docs\/issues\?q=/);
+    expect(issueSearchUrl("kv_reads_day", "acme/ops")).toMatch(/^https:\/\/github\.com\/acme\/ops\/issues/);
+    expect(issueSearchUrl("kv_reads_day", "KIT-DevelopersHub/dub-ecosystem")).toContain("/dub-docs/");
   });
 });

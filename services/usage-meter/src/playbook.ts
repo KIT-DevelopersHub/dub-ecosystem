@@ -2,12 +2,29 @@
 // copied into the GitHub Issue, how to find the top consumers, and what paying would cost.
 // The runbooks themselves are docs/runbooks/11-usage-free-tier/*.md — keep the two in step.
 //
-// !! Prices are the 2026 public list prices (USD) and need periodic re-checking, same as
-// the ceilings in limits.ts. Paying is ALWAYS a human decision: nothing here upgrades a plan.
+// !! Prices are public list prices (USD) checked 2026-11-27 against the official pages listed
+// in docs/runbooks/11-usage-free-tier/README.md (料金の出典); re-check like limits.ts. Paying is ALWAYS a human decision: nothing here upgrades a plan.
 
-export const REPO = "KIT-DevelopersHub/dub-ecosystem";
+/** Where the runbooks live (public: they explain the mechanism, not our numbers). */
+export const RUNBOOK_REPO = "KIT-DevelopersHub/dub-ecosystem";
 export const RUNBOOK_DIR = "docs/runbooks/11-usage-free-tier";
-const RUNBOOK_BASE = `https://github.com/${REPO}/blob/main/${RUNBOOK_DIR}`;
+const RUNBOOK_BASE = `https://github.com/${RUNBOOK_REPO}/blob/main/${RUNBOOK_DIR}`;
+
+/** Where escalation Issues are filed. Private on purpose: an Issue carries real usage and
+ *  which service is near its ceiling. Override with USAGE_ALERT_REPO. */
+export const DEFAULT_ALERT_REPO = "KIT-DevelopersHub/dub-docs";
+
+/** Repos Issues must never be filed in (public). */
+const PUBLIC_REPOS = new Set([RUNBOOK_REPO.toLowerCase()]);
+
+/** USAGE_ALERT_REPO -> owner/name. Empty = default; a public or malformed value is refused
+ *  (returns null) so real numbers cannot leak through a misconfiguration. */
+export function resolveAlertRepo(value: string | undefined | null): string | null {
+  const repo = (value ?? "").trim() || DEFAULT_ALERT_REPO;
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return null;
+  if (PUBLIC_REPOS.has(repo.toLowerCase())) return null;
+  return repo;
+}
 
 /** Which top-consumer breakdown applies (see consumers.ts). */
 export type ConsumerKind =
@@ -244,8 +261,8 @@ const PB: Record<string, Playbook> = {
     ],
     paid: {
       name: "Resend Pro",
-      price: "$20/月（5 万通/月、日次上限なし）",
-      note: "Resend は月額固定のプラン。Pro にすると 1 日 100 通の上限がなくなる",
+      price: "$20/月（5 万通/月込み、日次上限なし、超過 $0.90/1,000 通）",
+      note: "Pro にすると 1 日 100 通の上限がなくなる。5 万通を超えた分は従量（10 万通/月の枠は $35/月）",
     },
   },
   resend_emails_month: {
@@ -259,8 +276,8 @@ const PB: Record<string, Playbook> = {
     ],
     paid: {
       name: "Resend Pro",
-      price: "$20/月（5 万通/月）",
-      note: "Resend は月額固定のプラン",
+      price: "$20/月（5 万通/月込み、超過 $0.90/1,000 通）",
+      note: "10 万通/月の枠は $35/月",
     },
   },
 };
