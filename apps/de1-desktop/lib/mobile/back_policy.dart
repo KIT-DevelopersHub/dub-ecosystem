@@ -4,13 +4,16 @@
 const Set<String> backSkipPaths = {'/login'};
 
 /// How many steps to go back (a negative number for
-/// `goBackOrForward(steps:)`), skipping [backSkipPaths]. Null when there is
-/// nothing to go back to, so the app should exit.
+/// `goBackOrForward(steps:)`), skipping [skipPaths] and entries for the page
+/// already on screen. Null when there is nothing to go back to, so the app
+/// should exit.
 int? backSteps(List<Uri?> history, int currentIndex,
     {Set<String> skipPaths = backSkipPaths}) {
+  final current = history[currentIndex]?.path;
   for (var i = currentIndex - 1; i >= 0; i--) {
     final path = history[i]?.path ?? '';
-    if (!skipPaths.contains(path)) return i - currentIndex;
+    if (skipPaths.contains(path) || path == current) continue;
+    return i - currentIndex;
   }
   return null;
 }

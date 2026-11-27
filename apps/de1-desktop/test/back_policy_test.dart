@@ -9,7 +9,11 @@ void main() {
   });
 
   test('skips /login after logging in', () {
-    expect(backSteps([u('/'), u('/login'), u('/')], 2), -2);
+    expect(backSteps([u('/members'), u('/login'), u('/')], 2), -2);
+  });
+
+  test('exits instead of showing the same page again', () {
+    expect(backSteps([u('/'), u('/login'), u('/')], 2), isNull);
   });
 
   test('exits when only /login is behind', () {
