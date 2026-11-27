@@ -335,6 +335,11 @@ class _WebShellState extends ConsumerState<WebShell> {
   /// (like a browser's back button); otherwise let the app exit.
   Future<void> _onPopInvoked(bool didPop, Object? result) async {
     if (didPop) return;
+    // A native card (autofill prompt / settings) is open: close it first.
+    if (_overlay != _Overlay.none) {
+      _overlay == _Overlay.enablePrompt ? _declineEnable() : _closeOverlay();
+      return;
+    }
     final controller = _controller;
     if (controller != null && await controller.canGoBack()) {
       await controller.goBack();
@@ -650,6 +655,8 @@ class _WebShellState extends ConsumerState<WebShell> {
                   applicationNameForUserAgent: 'Dub-Desktop',
                   useShouldOverrideUrlLoading: _isMobile,
                   useOnDownloadStart: _isMobile,
+                  // iOS: swipe from the left edge goes back, like Safari.
+                  allowsBackForwardNavigationGestures: _isMobile,
                 ),
                 onDownloadStartRequest: _isMobile ? _onDownloadStart : null,
                 shouldOverrideUrlLoading:
