@@ -9,9 +9,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../config.dart';
 import '../feature_registry.dart';
+import '../mobile/link_policy.dart';
+import '../mobile/new_window_bridge.dart';
 import '../push/fcm_push.dart';
 import '../push/foreground_bridge.dart';
 import '../push/native_push.dart';
@@ -19,6 +22,7 @@ import '../push/push_notifications.dart';
 import '../state/autofill.dart';
 import '../state/credential_store.dart';
 import '../webview_runtime_check.dart';
+import 'link_viewer.dart';
 
 /// How long the shell waits for the SPA to finish loading before treating it
 /// as failed (shows a retry screen instead of spinning forever).
@@ -113,6 +117,14 @@ class _WebShellState extends ConsumerState<WebShell> {
   /// Deep-link path from a notification tap that arrived before the WebView
   /// finished its first load (cold start). Flushed in [_onLoadFinished].
   String? _pendingNavPath;
+
+  /// iOS / Android: phone-only behaviour (link routing, ...). Desktop keeps
+  /// its current behaviour.
+  static bool get _isMobile =>
+      !kIsWeb && (Platform.isIOS || Platform.isAndroid);
+
+  /// Hosts that belong to Dub; anything else opens in the OS browser.
+  final Set<String> _appHosts = defaultAppHosts();
 
   @override
   void initState() {
@@ -329,6 +341,58 @@ class _WebShellState extends ConsumerState<WebShell> {
     await SystemNavigator.pop();
   }
 
+  /// Main-frame navigations away from Dub (and mailto:/tel:) go to the OS
+  /// instead of replacing the app with another site.
+  Future<NavigationActionPolicy> _onShouldOverrideUrlLoading(
+    InAppWebViewController controller,
+    NavigationAction action,
+  ) async {
+    final uri = action.request.url;
+    if (uri == null) return NavigationActionPolicy.ALLOW;
+    final decision = classifyNavigation(
+      uri,
+      isMainFrame: action.isForMainFrame,
+      newWindow: false,
+      appHosts: _appHosts,
+    );
+    if (decision == LinkAction.openExternal) {
+      await _launchExternal(uri);
+      return NavigationActionPolicy.CANCEL;
+    }
+    return NavigationActionPolicy.ALLOW;
+  }
+
+  /// JS -> native: the page asked for a new window (see [NewWindowBridge]).
+  Future<dynamic> _onOpenWindow(List<dynamic> args) async {
+    if (args.isEmpty) return null;
+    final uri = Uri.tryParse(args.first.toString());
+    if (uri == null || !mounted) return null;
+    final decision = classifyNavigation(
+      uri,
+      isMainFrame: true,
+      newWindow: true,
+      appHosts: _appHosts,
+    );
+    switch (decision) {
+      case LinkAction.openInAppViewer:
+        await LinkViewerPage.open(context, uri, _appHosts);
+      case LinkAction.openExternal:
+        await _launchExternal(uri);
+      case LinkAction.allow:
+        break; // blob:/data: in a new window: nothing sensible to show.
+    }
+    return null;
+  }
+
+  Future<void> _launchExternal(Uri uri) async {
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) _snack('このリンクを開けるアプリが見つかりません');
+    } catch (_) {
+      _snack('このリンクを開けるアプリが見つかりません');
+    }
+  }
+
   /// Page script (runs at document start on every navigation). It:
   ///   1. captures the typed credentials on login-form submit,
   ///   2. auto-fills (and submits) the login form when creds are saved, and
@@ -530,6 +594,11 @@ class _WebShellState extends ConsumerState<WebShell> {
                     source: ForegroundBridge.jsSource(),
                     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                   ),
+                  if (_isMobile)
+                    UserScript(
+                      source: NewWindowBridge.jsSource(),
+                      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                    ),
                 ]),
                 initialSettings: InAppWebViewSettings(
                   transparentBackground: false,
@@ -537,7 +606,10 @@ class _WebShellState extends ConsumerState<WebShell> {
                   javaScriptCanOpenWindowsAutomatically: true,
                   supportZoom: false,
                   applicationNameForUserAgent: 'Dub-Desktop',
+                  useShouldOverrideUrlLoading: _isMobile,
                 ),
+                shouldOverrideUrlLoading:
+                    _isMobile ? _onShouldOverrideUrlLoading : null,
                 onWebViewCreated: (controller) {
                   _controller = controller;
                   controller.addJavaScriptHandler(
@@ -555,6 +627,10 @@ class _WebShellState extends ConsumerState<WebShell> {
                   controller.addJavaScriptHandler(
                     handlerName: ForegroundBridge.handlerName,
                     callback: _onForegroundNotification,
+                  );
+                  controller.addJavaScriptHandler(
+                    handlerName: NewWindowBridge.handlerName,
+                    callback: _onOpenWindow,
                   );
                 },
                 onLoadStop: (controller, url) {
