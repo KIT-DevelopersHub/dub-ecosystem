@@ -68,11 +68,17 @@ function upstream(status: number): DubError {
 }
 
 export class ResendSuppressionsClient {
+  private readonly fetchImpl: typeof fetch;
+
   constructor(
     private readonly apiKey: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    fetchImpl?: typeof fetch,
     private readonly timeoutMs = 10_000,
-  ) {}
+  ) {
+    // Bound: `this.fetchImpl(...)` with a bare global fetch runs with `this === client`, which
+    // Workers rejects ("Illegal invocation") — every sweep failed that way in prod (2026-11-28).
+    this.fetchImpl = fetchImpl ?? fetch.bind(globalThis);
+  }
 
   private async call(method: string, path: string): Promise<Response> {
     try {
@@ -82,7 +88,8 @@ export class ResendSuppressionsClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (err) {
-      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", "Resend Suppressions request failed", { status: 502, cause: err, retryable: true });
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      throw new DubError("MAIL_PROVIDER_UNAVAILABLE", `Resend Suppressions request failed (${detail})`, { status: 502, cause: err, retryable: true });
     }
   }
 
@@ -124,7 +131,7 @@ export class ResendSuppressionsClient {
 }
 
 /** Null unless the outbound provider is Resend with a key (other providers have no such list). */
-export function suppressionsClientFromEnv(env: Env, fetchImpl: typeof fetch = fetch): ResendSuppressionsClient | null {
+export function suppressionsClientFromEnv(env: Env, fetchImpl?: typeof fetch): ResendSuppressionsClient | null {
   const provider = (env.MAIL_OUTBOUND_PROVIDER ?? "resend").toLowerCase();
   const key = env.RESEND_API_KEY;
   if (provider !== "resend" || typeof key !== "string" || !key) return null;
@@ -219,7 +226,7 @@ export async function recordRemoval(db: DbClient, s: Suppression, actor: string,
 }
 
 /** One sweep. Never throws (the cron must keep going). */
-export async function sweepSuppressions(env: Env, db: DbClient, now: number = Date.now(), fetchImpl: typeof fetch = fetch): Promise<SweepResult> {
+export async function sweepSuppressions(env: Env, db: DbClient, now: number = Date.now(), fetchImpl?: typeof fetch): Promise<SweepResult> {
   const out: SweepResult = { enabled: autohealEnabled(env), checked: 0, removed: [], skipped: 0, error: null };
   if (!out.enabled) return out;
   const client = suppressionsClientFromEnv(env, fetchImpl);
@@ -244,7 +251,7 @@ export async function sweepSuppressions(env: Env, db: DbClient, now: number = Da
 }
 
 /** "Resend の送信停止リストに登録（bounce・…）" for the canary's To-missing detail; "" when unknown. */
-export async function suppressionNote(env: Env, address: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function suppressionNote(env: Env, address: string, fetchImpl?: typeof fetch): Promise<string> {
   const client = suppressionsClientFromEnv(env, fetchImpl);
   if (!client) return "";
   try {
