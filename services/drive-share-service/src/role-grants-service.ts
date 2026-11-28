@@ -20,7 +20,7 @@ import { DubError, errors } from "@dub/errors";
 import { GoogleQuotaError, NON_GOOGLE_USER_JA, type DriveShareClient } from "./drive-client";
 import type { meeting } from "@dub/types";
 import type { GrantMemberRow, GrantRow, RoleGrantStore } from "./role-grants-store";
-import type { RoleMembership } from "./role-membership";
+import { anyScopeRoleIds, type RoleMembership } from "./role-membership";
 import { staticMemberDirectory, type MemberDirectory } from "./member-directory";
 import { computeShareDrift } from "./share-drift";
 import type {
@@ -157,7 +157,7 @@ export function createRoleGrantsService(deps: RoleGrantsDeps): RoleGrantsService
       const google = await directory.googleEmails(users.map((u) => u.id), deps.strictDirectory ? { strict: true } : undefined);
       return users.map((u) => {
         const gmail = google.get(u.id)?.gmail ?? null;
-        return { email: (gmail ?? u.email).trim().toLowerCase(), hasGoogle: gmail !== null, roleIds: u.roleIds };
+        return { email: (gmail ?? u.email).trim().toLowerCase(), hasGoogle: gmail !== null, roleIds: anyScopeRoleIds(u) };
       });
     })());
   }

@@ -1,7 +1,7 @@
 // RBAC evaluation — the frozen semantics (identity-roster.md §2-2). Pure over the
 // data the repo already loaded, so the same code path serves POST /authz/check,
 // the /me effective-permissions aggregation and the service's own dogfood guards.
-import type { identity } from "@dub/types";
+import { identity } from "@dub/types";
 import type { AssignmentRow, RoleRow, UserRow } from "./repo/types";
 import { isPermissionKey } from "./permissions";
 
@@ -17,6 +17,10 @@ export interface EvalContext {
  * Decide a single check. Default deny. Preconditions: user active AND a member of
  * req.orgId. Allow if any assignment (a) is in req.orgId, (b) whose role grants the
  * permission, and (c) is org-wide OR matches the query's resourceType+resourceId.
+ * An UNSCOPED query (the org-wide question every policy-gate rule asks) also counts an
+ * event-scoped assignment of an event-operation role (Organizer / 名簿のチーム,
+ * `identity.countsOrgWide`): whoever runs some event holds that role's permissions. A query
+ * naming event X still matches only X's assignments. System roles count org-wide rows only.
  * Non-catalog permission keys are always denied.
  */
 export function evaluate(ctx: EvalContext, q: identity.AuthzQuery): boolean {
@@ -33,19 +37,21 @@ export function evaluate(ctx: EvalContext, q: identity.AuthzQuery): boolean {
     if (!role || !role.permissions.includes(q.permission)) continue;
     const orgWide = a.resourceType === null && a.resourceId === null;
     if (orgWide) return true;
+    if (resourceType === null && resourceId === null && identity.countsOrgWide(a)) return true;
     if (a.resourceType === resourceType && a.resourceId === resourceId) return true;
   }
   return false;
 }
 
-/** Org-wide effective permission set (used by /me aggregation; resource-scoped grants stay server-side). */
+/** Org-wide effective permission set (/me aggregation, the in-process gate): the answer to the
+ *  unscoped question, so event-operation roles count from any event (`identity.countsOrgWide`). */
 export function effectiveOrgWidePermissions(ctx: EvalContext): identity.PermissionKey[] {
   const { user, orgId } = ctx;
   if (!user || user.status !== "active" || user.orgId !== orgId) return [];
   const set = new Set<identity.PermissionKey>();
   for (const a of ctx.assignments) {
     if (a.orgId !== orgId) continue;
-    if (a.resourceType !== null || a.resourceId !== null) continue; // org-wide only
+    if (!identity.countsOrgWide(a)) continue; // org-wide (+ event-operation roles of any event)
     const role = ctx.roleById.get(a.roleId);
     if (!role) continue;
     for (const p of role.permissions) set.add(p);

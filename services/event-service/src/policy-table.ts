@@ -23,7 +23,9 @@
 // ── READ THIS BEFORE COPYING THE PATTERN: what the key half of these rules CANNOT see ──
 // identity's evaluator (`services/identity-roster/src/authz.ts` `evaluate`) matches an
 // UNSCOPED query against ORG-WIDE assignments only: a query with `resourceType === null`
-// fails both branches for an assignment carrying `resourceType === "event"`. policy-gate's
+// fails both branches for an assignment carrying `resourceType === "event"` — with ONE
+// exception, the event-operation roles (Organizer / 名簿のチーム, `identity.countsOrgWide`):
+// their event-scoped rows answer the unscoped question too (see 2. below). policy-gate's
 // granter (`packages/policy-gate/src/authz.ts`) always sends `checks: [{ permission }]` with
 // no resource. So every rule below is an ORG-WIDE question, which has two consequences:
 //   1. SAFE DIRECTION — the table can never be *wider* than the guard it replaces. Passing a
@@ -38,6 +40,12 @@
 //      for routes whose path names the target event. Event-scoped role assignment therefore
 //      stops conferring access on event-service — a deliberate, owner-visible trade, not an
 //      oversight. Do not "fix" it by loosening a rule below.
+//      The one decision taken since, IN IDENTITY and not here: Organizer and the チーム roles are
+//      assigned per event (運営ロールのイベント単位化), and an event-scoped row of THOSE roles
+//      counts for the org-wide question ("runs some event" = holds the role's keys). That is
+//      exactly what an org-wide row of the same role granted before the move, so it is never
+//      wider than the pre-move state; every other role (admin / member / 人事 …) assigned per
+//      event still grants nothing here. The rules below are unchanged.
 import { definePolicyTable, appLevel, INTERNAL } from "@dub/policy-gate";
 
 export const POLICY_TABLE = definePolicyTable({

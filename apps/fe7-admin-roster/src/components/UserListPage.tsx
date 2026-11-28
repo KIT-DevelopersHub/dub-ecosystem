@@ -134,7 +134,7 @@ export function UserListPage() {
   const totalQuery = useUsers(DEFAULT_USER_FILTERS);
   const { results: searched } = useClientFilter(query.data?.items ?? NO_USERS, filters.search, userSearchText);
   const { roleKey } = filters;
-  const items = useMemo(() => (roleKey ? searched.filter((u) => u.roleIds.includes(roleKey)) : searched), [searched, roleKey]);
+  const items = useMemo(() => (roleKey ? searched.filter((u) => u.roleIds.includes(roleKey) || !!u.scopedRoleIds?.includes(roleKey)) : searched), [searched, roleKey]);
 
   // ⑧ Mirror the active filter + sort into the URL query (replace, not push).
   useEffect(() => {

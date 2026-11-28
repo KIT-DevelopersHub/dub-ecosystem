@@ -17,16 +17,16 @@ export interface ActiveUser {
   /** Dub login address (trimmed, lowercased). */
   email: string;
   name: string;
-  /** Org-wide roles (what Drive共有 and authorization go by). */
+  /** Org-wide roles. Role targets (ミーティング・Drive共有) use `anyScopeRoleIds`. */
   roleIds: string[];
   /** Roles held only for one event etc. (identity's `scopedRoleIds`). */
   scopedRoleIds?: string[];
 }
 
-/** The roles a meeting's role target counts someone in: any scope. Whoever holds Organizer — org-wide
- *  or for one event — is an Organizer to invite to the Organizer 定例 (#908). Meetings only: Drive共有
- *  stays with the org-wide roleIds. */
-export function meetingRoleIds(u: Pick<ActiveUser, "roleIds" | "scopedRoleIds">): string[] {
+/** The roles someone counts in for a role target, any scope: whoever holds Organizer — org-wide or
+ *  for one event — is an Organizer to invite to the Organizer 定例 (#908) and to share the
+ *  Organizer's Drive files with (運営ロールをイベント単位へ移しても共有が剥がれない). */
+export function anyScopeRoleIds(u: Pick<ActiveUser, "roleIds" | "scopedRoleIds">): string[] {
   return u.scopedRoleIds?.length ? [...new Set([...u.roleIds, ...u.scopedRoleIds])] : u.roleIds;
 }
 
