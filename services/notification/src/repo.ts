@@ -532,9 +532,35 @@ interface FeedbackRow {
   page_url: string | null;
   page_name: string | null;
   user_agent: string | null;
+  client: notification.FeedbackClient | null;
+  os: string | null;
+  os_version: string | null;
+  browser: string | null;
+  screen_width: number | null;
+  screen_height: number | null;
+  app_version: string | null;
+  app_build: string | null;
   request_id: string;
   read_at: string | null;
   created_at: string;
+}
+
+const FEEDBACK_COLS =
+  "id, user_id, category, kind, message, page_url, page_name, user_agent, client, os, os_version, browser, screen_width, screen_height, app_version, app_build, request_id, read_at, created_at";
+
+/** Rows filed before device context (client IS NULL) read as device: null. */
+function rowToFeedbackDevice(r: FeedbackRow): notification.FeedbackDevice | null {
+  if (!r.client) return null;
+  const d: notification.FeedbackDevice = { client: r.client };
+  if (r.os !== null) d.os = r.os;
+  if (r.os_version !== null) d.osVersion = r.os_version;
+  if (r.browser !== null) d.browser = r.browser;
+  if (r.screen_width !== null) d.screenWidth = r.screen_width;
+  if (r.screen_height !== null) d.screenHeight = r.screen_height;
+  if (r.app_version !== null) d.appVersion = r.app_version;
+  if (r.app_build !== null) d.appBuild = r.app_build;
+  if (r.user_agent !== null) d.userAgent = r.user_agent;
+  return d;
 }
 
 function rowToFeedbackItem(r: FeedbackRow): notification.FeedbackItem {
@@ -546,6 +572,7 @@ function rowToFeedbackItem(r: FeedbackRow): notification.FeedbackItem {
     message: r.message,
     pageUrl: r.page_url,
     pageName: r.page_name,
+    device: rowToFeedbackDevice(r),
     readAt: r.read_at,
     createdAt: r.created_at,
   };
@@ -558,7 +585,9 @@ export interface InsertFeedbackInput {
   message: string;
   pageUrl: string | null;
   pageName: string | null;
+  /** Raw UA: the client-reported one, else the request header (capped by the caller). */
   userAgent: string | null;
+  device: Omit<notification.FeedbackDevice, "userAgent"> | null;
   requestId: string;
 }
 
@@ -568,8 +597,8 @@ export async function insertFeedback(db: DbClient, input: InsertFeedbackInput): 
   const now = nowIso();
   await db.run(
     `INSERT INTO notif_feedback
-       (id, user_id, category, kind, message, page_url, page_name, user_agent, request_id, read_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+       (${FEEDBACK_COLS})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
     id,
     input.userId,
     input.category,
@@ -578,11 +607,19 @@ export async function insertFeedback(db: DbClient, input: InsertFeedbackInput): 
     input.pageUrl,
     input.pageName,
     input.userAgent,
+    input.device?.client ?? null,
+    input.device?.os ?? null,
+    input.device?.osVersion ?? null,
+    input.device?.browser ?? null,
+    input.device?.screenWidth ?? null,
+    input.device?.screenHeight ?? null,
+    input.device?.appVersion ?? null,
+    input.device?.appBuild ?? null,
     input.requestId,
     now,
   );
   const row = await db.first<FeedbackRow>(
-    `SELECT id, user_id, category, kind, message, page_url, page_name, user_agent, request_id, read_at, created_at
+    `SELECT ${FEEDBACK_COLS}
      FROM notif_feedback WHERE id = ?`,
     id,
   );
@@ -604,7 +641,7 @@ export async function listFeedback(
   }
   const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const rows = await db.all<FeedbackRow>(
-    `SELECT id, user_id, category, kind, message, page_url, page_name, user_agent, request_id, read_at, created_at
+    `SELECT ${FEEDBACK_COLS}
      FROM notif_feedback ${clause}
      ORDER BY id DESC
      LIMIT ?`,

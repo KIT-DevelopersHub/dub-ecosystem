@@ -4,6 +4,7 @@
 // shared contract notification.CreateFeedbackRequest.
 import type { notification } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
+import { captureDeviceContext } from "./deviceContext.ts";
 import type { FeedbackCategory, InquiryKind } from "./inquiryKinds.ts";
 
 /**
@@ -12,7 +13,9 @@ import type { FeedbackCategory, InquiryKind } from "./inquiryKinds.ts";
  *   - pageUrl:    location.href     -> page.url
  *   - pagePath:   location.pathname -> shown in the UI only
  *   - screenName: document.title    -> page.name
- *   - userAgent:  browser UA        -> sent as the UA header, not the body
+ *   - userAgent:  browser UA        -> the UA header (and device.userAgent)
+ * Device context (client区分・OS・ブラウザ・画面・アプリの版) is attached by submitInquiry
+ * itself (captureDeviceContext), so every caller sends it without asking the user.
  */
 export interface InquiryInput {
   kind: InquiryKind;
@@ -50,6 +53,7 @@ export async function submitInquiry(api: ApiClient, input: InquiryInput): Promis
     kind: input.kind,
     category: input.category,
     page: { url: input.pageUrl, name: input.screenName },
+    device: captureDeviceContext(),
   };
   return api.request<InquiryAck, notification.CreateFeedbackRequest>({
     method: "POST",

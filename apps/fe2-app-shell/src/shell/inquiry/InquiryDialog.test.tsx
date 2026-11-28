@@ -56,6 +56,9 @@ describe("InquiryDialog", () => {
     expect(arg).toMatchObject({ method: "POST", path: "/api/v1/feedback" });
     expect(arg.body).toMatchObject({ kind: "feedback", category: "bug", message: "並び順を直してほしい", page: { name: "テスト画面" } });
     expect(arg.body).not.toHaveProperty("pagePath");
+    // device context rides along automatically (jsdom = a plain browser -> web-*)
+    expect(arg.body.device.client).toMatch(/^web-(pc|mobile)$/);
+    expect(arg.body.device.userAgent).toBe(navigator.userAgent);
   });
 
   it("名刺が切れた: asks for 希望枚数 and sends it folded into the message (category other)", async () => {
