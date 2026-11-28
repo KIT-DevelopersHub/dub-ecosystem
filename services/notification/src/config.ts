@@ -1,5 +1,6 @@
 // notification service constants. Centralized so retention windows and delivery
 // retry budget stay in one place (they cross the app / queue / cron boundaries).
+import type { notification } from "@dub/types";
 
 export const SERVICE_NAME = "notification";
 
@@ -90,6 +91,18 @@ export const INQUIRY_KIND_LABELS: Record<(typeof INQUIRY_KINDS)[number], string>
 export const FEEDBACK_MESSAGE_MAX = 4000;
 export const FEEDBACK_PAGE_URL_MAX = 2048;
 export const FEEDBACK_PAGE_NAME_MAX = 200;
+// Device context caps (notification.FeedbackDevice). Over-long strings are cut, not rejected.
+export const FEEDBACK_UA_MAX = 512;
+export const FEEDBACK_DEVICE_FIELD_MAX = 64;
+export const FEEDBACK_SCREEN_MAX = 100_000;
+// Admin-facing client labels for the 「端末:」 line.
+export const FEEDBACK_CLIENT_LABELS: Record<(typeof notification.FEEDBACK_CLIENTS)[number], string> = {
+  "ios-app": "iPhone アプリ",
+  "android-app": "Android アプリ",
+  "desktop-app": "デスクトップアプリ",
+  "web-mobile": "スマホのブラウザ",
+  "web-pc": "PC のブラウザ",
+};
 // Best-effort admin notification recipient. Deliverability depends on domain
 // verification; a send failure never blocks the feedback save.
 export const FEEDBACK_ADMIN_EMAIL = "admin@developershub.jp";

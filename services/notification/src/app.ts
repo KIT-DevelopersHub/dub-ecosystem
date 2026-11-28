@@ -48,6 +48,8 @@ import {
   parseReadAll,
   parsePreferencesUpdate,
   parseCreateFeedback,
+  cutUserAgent,
+  withoutUserAgent,
   parseListFeedbackQuery,
   parseListManageQuery,
   parsePublishBatch,
@@ -453,7 +455,8 @@ export function createApp(options: CreateAppOptions = {}) {
       message: parsed.message,
       pageUrl: parsed.page?.url ?? null,
       pageName: parsed.page?.name ?? null,
-      userAgent: c.req.header("user-agent") ?? null,
+      userAgent: parsed.device?.userAgent ?? cutUserAgent(c.req.header("user-agent")),
+      device: parsed.device ? withoutUserAgent(parsed.device) : null,
       requestId: ctx.requestId,
     });
     // Best-effort admin alert — never blocks the save / 201.
