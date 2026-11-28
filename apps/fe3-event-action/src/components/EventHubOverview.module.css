@@ -1,0 +1,193 @@
+/* #879 event hub redesign proposal — @dub/tokens CSS variables only. */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-8);
+  margin-bottom: var(--dub-space-8);
+}
+
+/* ---- hero ---- */
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-5);
+  padding: var(--dub-space-8);
+  border-radius: var(--dub-radius-lg);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+  box-shadow: var(--dub-shadow-sm);
+}
+.heroHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--dub-space-4);
+  flex-wrap: wrap;
+}
+.heroTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.heroTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-2xl);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+.heroActions {
+  display: flex;
+  gap: var(--dub-space-2);
+  flex-wrap: wrap;
+}
+.heroDesc {
+  margin: 0;
+  color: var(--dub-color-text-secondary);
+  line-height: 1.7;
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--dub-space-4);
+}
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-2);
+  padding: var(--dub-space-4) var(--dub-space-5);
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-surface-sunken);
+}
+.factLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dub-space-1);
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.factValue {
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.factValue[data-empty="true"] {
+  font-weight: var(--dub-font-weight-medium);
+  color: var(--dub-color-text-muted);
+}
+
+/* ---- sections ---- */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dub-space-4);
+}
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-3);
+}
+.sectionTitle {
+  margin: 0;
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+  color: var(--dub-color-text-primary);
+}
+
+/* ---- related apps ---- */
+.appGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--dub-space-4);
+}
+.appTile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--dub-space-2);
+  min-height: 44px;
+  padding: var(--dub-space-5);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dub-motion-fast) var(--dub-motion-easing), box-shadow var(--dub-motion-fast) var(--dub-motion-easing);
+}
+.appTile:hover {
+  border-color: var(--dub-color-border-strong);
+  box-shadow: var(--dub-shadow-sm);
+}
+.appTile:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+.appTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dub-space-2);
+  margin-bottom: var(--dub-space-2);
+}
+.appIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--dub-radius-md);
+  background: var(--dub-color-brand-50);
+  color: var(--dub-color-brand-600);
+}
+.appLabel {
+  font-weight: var(--dub-font-weight-bold);
+}
+.appDesc {
+  font-size: var(--dub-font-size-sm);
+  color: var(--dub-color-text-muted);
+}
+
+/* ---- actions (イベント > アクション) ---- */
+.actionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-border-default);
+  background: var(--dub-color-surface-raised);
+}
+.actionList > li + li {
+  border-top: 1px solid var(--dub-color-border-default);
+}
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--dub-space-4) var(--dub-space-5);
+  border: none;
+  background: none;
+  color: var(--dub-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.actionRow:hover {
+  background: var(--dub-color-surface-sunken);
+}
+.actionRow:focus-visible {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: -2px;
+}
+.actionTitle {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--dub-font-weight-medium);
+}
