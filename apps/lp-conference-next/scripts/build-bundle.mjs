@@ -67,6 +67,8 @@ function buildHead(id) {
   const outName = ".bundle-out";
   rmSync(join(APP, outName), { recursive: true, force: true });
   nextBuild(APP, id, { NEXT_DIST_DIR: outName });
+  // Same post-step as `pnpm build` (archived versions keep their own build as-is).
+  run("node", [join(APP, "scripts", "inline-css.mjs"), join(APP, outName)]);
   return join(APP, outName);
 }
 

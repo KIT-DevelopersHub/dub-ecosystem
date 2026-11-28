@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import Lenis from "lenis";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import type { gsap as Gsap } from "gsap";
 
 // MotionRoot — the single client-side motion orchestrator that reproduces
 // goodpatch.com/ja's "dynamic" feel with the same library stack goodpatch ships
@@ -45,126 +43,146 @@ export function MotionRoot() {
     if (prefersReduced()) return;
     if (typeof window === "undefined") return;
 
-    gsap.registerPlugin(ScrollTrigger);
-
-    // ---------------------------------------------------------------
-    // 1) Lenis inertia smooth-scroll, synced to GSAP + ScrollTrigger
-    // ---------------------------------------------------------------
-    const lenis = new Lenis({
-      duration: 1.15, // glide length (s) — goodpatch-ish weighty inertia
-      // easeOutExpo — the classic Lenis/goodpatch wheel glide
-      easing: (t: number) => (t === 1 ? 1 : 1 - Math.pow(2, -10 * t)),
-      wheelMultiplier: 1,
-      touchMultiplier: 1.6,
-      smoothWheel: true,
-    });
-
-    lenis.on("scroll", ScrollTrigger.update);
-    const tick = (time: number) => lenis.raf(time * 1000);
-    gsap.ticker.add(tick);
-    gsap.ticker.lagSmoothing(0);
-
-    // Route in-page anchor clicks through Lenis for a smooth glide to targets.
-    const onAnchorClick = (e: MouseEvent) => {
-      const a = (e.target as HTMLElement)?.closest?.(
-        'a[href^="#"]',
-      ) as HTMLAnchorElement | null;
-      if (!a) return;
-      const hash = a.getAttribute("href");
-      if (!hash || hash === "#") return;
-      const target = document.querySelector(hash);
-      if (!target) return;
-      e.preventDefault();
-      // Offset by the live header height (it grows when the crowdfunding ribbon is shown).
-      const head = document.querySelector<HTMLElement>(".site-head");
-      lenis.scrollTo(target as HTMLElement, { offset: -(head?.offsetHeight ?? 72), duration: 1.2 });
-    };
-    document.addEventListener("click", onAnchorClick);
-
-    // Pause smooth-scroll while a modal dialog is open so wheel/touch input does
-    // not scroll the page behind the backdrop (Program dispatches 'lp:dialog').
-    const onDialogToggle = (e: Event) => {
-      const openNow = (e as CustomEvent<{ open: boolean }>).detail?.open;
-      if (openNow) lenis.stop();
-      else lenis.start();
-    };
-    window.addEventListener("lp:dialog", onDialogToggle as EventListener);
-
-    // ---------------------------------------------------------------
-    // 2) Scroll-scrubbed parallax  ([data-parallax="<px amplitude>"])
-    //    Positive amplitude → element lags (drifts down as you scroll down),
-    //    reads as "further back". Applied to --par-y (see globals.css).
-    // ---------------------------------------------------------------
-    const ctx = gsap.context(() => {
-      gsap.utils.toArray<HTMLElement>("[data-parallax]").forEach((el) => {
-        const amp = parseFloat(el.dataset.parallax || "60");
-        gsap.fromTo(
-          el,
-          { "--par-y": amp },
-          {
-            "--par-y": -amp,
-            ease: "none",
-            scrollTrigger: {
-              trigger: el,
-              start: "top bottom",
-              end: "bottom top",
-              scrub: 0.6,
-            },
-          },
-        );
-      });
-
-      // 3) Scroll-linked line/underline draw  ([data-line])
-      gsap.utils.toArray<HTMLElement>("[data-line]").forEach((el) => {
-        gsap.fromTo(
-          el,
-          { "--line": 0 },
-          {
-            "--line": 1,
-            ease: "none",
-            scrollTrigger: {
-              trigger: el,
-              start: "top 88%",
-              end: "top 46%",
-              scrub: 0.5,
-            },
-          },
-        );
-      });
-    });
-
-    // ScrollTrigger must re-measure once fonts/images settle.
-    const refresh = () => ScrollTrigger.refresh();
-    window.addEventListener("load", refresh);
-    const refreshTimer = window.setTimeout(refresh, 600);
-
-    // ---------------------------------------------------------------
-    // 4) Magnetic CTAs + custom cursor (fine pointer only)
-    // ---------------------------------------------------------------
-    let cleanupPointer = () => {};
-    if (window.matchMedia?.("(pointer: fine)").matches) {
-      cleanupPointer = setupPointer();
-    }
-
+    // GSAP / Lenis are loaded as a separate chunk after the first paint, so they never
+    // compete with the hero for bandwidth or main-thread time.
+    let disposed = false;
+    let cleanup = () => {};
+    Promise.all([import("lenis"), import("gsap"), import("gsap/ScrollTrigger")])
+      .then(([{ default: Lenis }, { gsap }, { ScrollTrigger }]) => {
+        if (!disposed) cleanup = startMotion(Lenis, gsap, ScrollTrigger);
+      })
+      .catch(() => undefined); // motion is decorative; the page works without it
     return () => {
-      document.removeEventListener("click", onAnchorClick);
-      window.removeEventListener("lp:dialog", onDialogToggle as EventListener);
-      window.removeEventListener("load", refresh);
-      window.clearTimeout(refreshTimer);
-      gsap.ticker.remove(tick);
-      ctx.revert();
-      lenis.destroy();
-      cleanupPointer();
+      disposed = true;
+      cleanup();
     };
   }, []);
 
   return null;
 }
 
+function startMotion(
+  Lenis: typeof import("lenis").default,
+  gsap: typeof Gsap,
+  ScrollTrigger: typeof import("gsap/ScrollTrigger").ScrollTrigger,
+): () => void {
+  gsap.registerPlugin(ScrollTrigger);
+
+  // ---------------------------------------------------------------
+  // 1) Lenis inertia smooth-scroll, synced to GSAP + ScrollTrigger
+  // ---------------------------------------------------------------
+  const lenis = new Lenis({
+    duration: 1.15, // glide length (s) — goodpatch-ish weighty inertia
+    // easeOutExpo — the classic Lenis/goodpatch wheel glide
+    easing: (t: number) => (t === 1 ? 1 : 1 - Math.pow(2, -10 * t)),
+    wheelMultiplier: 1,
+    touchMultiplier: 1.6,
+    smoothWheel: true,
+  });
+
+  lenis.on("scroll", ScrollTrigger.update);
+  const tick = (time: number) => lenis.raf(time * 1000);
+  gsap.ticker.add(tick);
+  gsap.ticker.lagSmoothing(0);
+
+  // Route in-page anchor clicks through Lenis for a smooth glide to targets.
+  const onAnchorClick = (e: MouseEvent) => {
+    const a = (e.target as HTMLElement)?.closest?.(
+      'a[href^="#"]',
+    ) as HTMLAnchorElement | null;
+    if (!a) return;
+    const hash = a.getAttribute("href");
+    if (!hash || hash === "#") return;
+    const target = document.querySelector(hash);
+    if (!target) return;
+    e.preventDefault();
+    // Offset by the live header height (it grows when the crowdfunding ribbon is shown).
+    const head = document.querySelector<HTMLElement>(".site-head");
+    lenis.scrollTo(target as HTMLElement, { offset: -(head?.offsetHeight ?? 72), duration: 1.2 });
+  };
+  document.addEventListener("click", onAnchorClick);
+
+  // Pause smooth-scroll while a modal dialog is open so wheel/touch input does
+  // not scroll the page behind the backdrop (Program dispatches 'lp:dialog').
+  const onDialogToggle = (e: Event) => {
+    const openNow = (e as CustomEvent<{ open: boolean }>).detail?.open;
+    if (openNow) lenis.stop();
+    else lenis.start();
+  };
+  window.addEventListener("lp:dialog", onDialogToggle as EventListener);
+
+  // ---------------------------------------------------------------
+  // 2) Scroll-scrubbed parallax  ([data-parallax="<px amplitude>"])
+  //    Positive amplitude → element lags (drifts down as you scroll down),
+  //    reads as "further back". Applied to --par-y (see globals.css).
+  // ---------------------------------------------------------------
+  const ctx = gsap.context(() => {
+    gsap.utils.toArray<HTMLElement>("[data-parallax]").forEach((el) => {
+      const amp = parseFloat(el.dataset.parallax || "60");
+      gsap.fromTo(
+        el,
+        { "--par-y": amp },
+        {
+          "--par-y": -amp,
+          ease: "none",
+          scrollTrigger: {
+            trigger: el,
+            start: "top bottom",
+            end: "bottom top",
+            scrub: 0.6,
+          },
+        },
+      );
+    });
+
+    // 3) Scroll-linked line/underline draw  ([data-line])
+    gsap.utils.toArray<HTMLElement>("[data-line]").forEach((el) => {
+      gsap.fromTo(
+        el,
+        { "--line": 0 },
+        {
+          "--line": 1,
+          ease: "none",
+          scrollTrigger: {
+            trigger: el,
+            start: "top 88%",
+            end: "top 46%",
+            scrub: 0.5,
+          },
+        },
+      );
+    });
+  });
+
+  // ScrollTrigger must re-measure once fonts/images settle.
+  const refresh = () => ScrollTrigger.refresh();
+  window.addEventListener("load", refresh);
+  const refreshTimer = window.setTimeout(refresh, 600);
+
+  // ---------------------------------------------------------------
+  // 4) Magnetic CTAs + custom cursor (fine pointer only)
+  // ---------------------------------------------------------------
+  let cleanupPointer = () => {};
+  if (window.matchMedia?.("(pointer: fine)").matches) {
+    cleanupPointer = setupPointer(gsap);
+  }
+
+  return () => {
+    document.removeEventListener("click", onAnchorClick);
+    window.removeEventListener("lp:dialog", onDialogToggle as EventListener);
+    window.removeEventListener("load", refresh);
+    window.clearTimeout(refreshTimer);
+    gsap.ticker.remove(tick);
+    ctx.revert();
+    lenis.destroy();
+    cleanupPointer();
+  };
+}
+
 // Custom cursor (a soft dot + a lagging ring) plus magnetic pull on primary
 // CTAs — goodpatch's fine-pointer polish. Purely decorative; native cursor is
 // hidden only while this runs (removed on cleanup / touch).
-function setupPointer(): () => void {
+function setupPointer(gsap: typeof Gsap): () => void {
   const dot = document.createElement("div");
   dot.className = "lp-cursor-dot";
   const ring = document.createElement("div");

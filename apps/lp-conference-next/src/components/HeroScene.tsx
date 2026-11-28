@@ -149,13 +149,8 @@ function compile(gl: WebGLRenderingContext, type: number, src: string) {
   const sh = gl.createShader(type);
   if (!sh) return null;
   gl.shaderSource(sh, src);
+  // Status is checked after linking (whenLinked) so the compile is not forced to block.
   gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    // eslint-disable-next-line no-console
-    console.warn("[HeroScene] shader compile failed:", gl.getShaderInfoLog(sh));
-    gl.deleteShader(sh);
-    return null;
-  }
   return sh;
 }
 
@@ -167,211 +162,296 @@ export function HeroScene() {
     if (!canvas) return;
 
     const section = canvas.closest(".hero") as HTMLElement | null;
-    const reduced = prefersReduced();
-    const isMobile = window.matchMedia?.("(max-width: 820px)").matches ?? false;
-
-    const gl =
-      (canvas.getContext("webgl", {
-        antialias: false,
-        alpha: false,
-        depth: false,
-        powerPreference: "high-performance",
-      }) as WebGLRenderingContext | null) ||
-      (canvas.getContext("experimental-webgl") as WebGLRenderingContext | null);
-
-    // No WebGL → CSS gradient behind stays; still drive the headline via scroll.
-    let scrollCleanup = () => {};
-    if (!gl) {
-      scrollCleanup = wireScrollVarOnly(section);
-      return scrollCleanup;
-    }
-
-    const vs = compile(gl, gl.VERTEX_SHADER, VERT);
-    const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
-    const prog = gl.createProgram();
-    if (!vs || !fs || !prog) {
-      scrollCleanup = wireScrollVarOnly(section);
-      return scrollCleanup;
-    }
-    gl.attachShader(prog, vs);
-    gl.attachShader(prog, fs);
-    gl.bindAttribLocation(prog, 0, "aPos");
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      scrollCleanup = wireScrollVarOnly(section);
-      return scrollCleanup;
-    }
-    gl.useProgram(prog);
-
-    // full-screen triangle
-    const buf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1, -1, 3, -1, -1, 3]),
-      gl.STATIC_DRAW,
-    );
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    const uTime = gl.getUniformLocation(prog, "uTime");
-    const uScroll = gl.getUniformLocation(prog, "uScroll");
-    const uRes = gl.getUniformLocation(prog, "uRes");
-    const uBlob = gl.getUniformLocation(prog, "uBlob[0]");
-
-    // Per-frame blob centers, hoisted out of the fragment shader (see FRAG note).
-    // Same formula as the old in-shader centers; f64→f32 rounding differs only at
-    // ~1e-6 world units (no fract amplification) so the field is visually identical.
-    const NB = 11;
-    const blobData = new Float32Array(NB * 3);
-    const updateBlobs = (t: number) => {
-      for (let i = 0; i < NB; i++) {
-        blobData[i * 3 + 0] = Math.sin(t * 0.35 + i * 1.7) * 2.4 + Math.cos(i * 2.1) * 1.2;
-        blobData[i * 3 + 1] = Math.cos(t * 0.3 + i * 2.3) * 1.8 + Math.sin(i * 1.3) * 1.0;
-        blobData[i * 3 + 2] = Math.sin(t * 0.25 + i * 0.9) * 2.2 - 1.0 + Math.cos(i * 0.7) * 1.4;
+    // The shader compile + first frames are heavy, so the scene boots only after the
+    // page has painted and gone idle (the CSS gradient covers the hero until then).
+    let disposed = false;
+    let cleanup = () => {};
+    const cancelBoot = afterIdle(() => {
+      if (disposed) return;
+      const gl = getGL(canvas);
+      // No WebGL, or a CPU (software) renderer where a raymarcher would hog the
+      // whole page → CSS gradient stays; still drive the headline via scroll.
+      if (!gl || isSoftwareRenderer(gl)) {
+        cleanup = wireScrollVarOnly(section);
+        return;
       }
-      gl.uniform3fv(uBlob, blobData);
-    };
-
-    // internal resolution scale — softly downscaled (the blob field is fog-soft,
-    // so a ~1.0 effective DPR is indistinguishable from the old 1.35 while cutting
-    // ~45% of fragment work). Mobile & DPR clamps go lower still.
-    const renderScale = reduced ? 1.0 : isMobile ? 0.6 : 0.8;
-    const dprCap = isMobile ? 1.0 : 1.25;
-
-    // Frame-rate cap: the field drifts slowly, so 40fps (30 on mobile) is visually
-    // identical to 60 but ~33% less GPU/CPU. Motion stays time-based (dt) so the
-    // perceived speed is unchanged.
-    const targetFps = reduced ? 0 : isMobile ? 30 : 40;
-    const frameInterval = targetFps > 0 ? 1000 / targetFps : 0;
-
-    let w = 0;
-    let h = 0;
-    const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, dprCap) * renderScale;
-      const cw = canvas.clientWidth || window.innerWidth;
-      const ch = canvas.clientHeight || window.innerHeight;
-      w = Math.max(1, Math.round(cw * dpr));
-      h = Math.max(1, Math.round(ch * dpr));
-      canvas.width = w;
-      canvas.height = h;
-      gl.viewport(0, 0, w, h);
-      gl.uniform2f(uRes, w, h);
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-
-    // eased scroll progress (0..1) over the first viewport of the hero
-    let scrollTarget = 0;
-    let scrollEased = 0;
-    const readScroll = () => {
-      const vh = window.innerHeight || 1;
-      const p = Math.min(Math.max(window.scrollY / (vh * 0.95), 0), 1.15);
-      scrollTarget = p;
-    };
-    readScroll();
-    window.addEventListener("scroll", readScroll, { passive: true });
-
-    let onScreen = true;
-    const shouldRun = () => onScreen && !document.hidden && !reduced;
-    const io = new IntersectionObserver(
-      (entries) => {
-        onScreen = entries[0]?.isIntersecting ?? true;
-        if (shouldRun() && raf === 0) {
-          lastRender = 0;
-          last = performance.now();
-          raf = requestAnimationFrame(loop);
+      const vs = compile(gl, gl.VERTEX_SHADER, VERT);
+      const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
+      const prog = gl.createProgram();
+      if (!vs || !fs || !prog) {
+        cleanup = wireScrollVarOnly(section);
+        return;
+      }
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.bindAttribLocation(prog, 0, "aPos");
+      gl.linkProgram(prog);
+      // Link off the main thread where supported (KHR_parallel_shader_compile).
+      cleanup = whenLinked(gl, prog, (ok) => {
+        if (disposed) return;
+        if (!ok) {
+          cleanup = wireScrollVarOnly(section);
+          return;
         }
-      },
-      { threshold: 0 },
-    );
-    if (section) io.observe(section);
-
-    let raf = 0;
-    let last = performance.now();
-    let lastRender = 0;
-    let time = 0;
-
-    // dt-based smoothing so the scroll follow feels identical at any frame rate
-    const easeToward = (dt: number) => {
-      const f = 1 - Math.pow(1 - 0.08, Math.min(dt * 60, 4));
-      scrollEased += (scrollTarget - scrollEased) * f;
-    };
-
-    const render = () => {
-      if (section) section.style.setProperty("--hero-scroll", scrollEased.toFixed(4));
-      updateBlobs(time);
-      gl.uniform1f(uTime, time);
-      gl.uniform1f(uScroll, Math.min(scrollEased, 1));
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    };
-
-    const loop = (now: number) => {
-      raf = shouldRun() ? requestAnimationFrame(loop) : 0;
-      // frame-rate cap (time-based motion, so perceived speed is unchanged)
-      if (frameInterval > 0 && now - lastRender < frameInterval - 1) return;
-      const dt = Math.min((now - lastRender) / 1000, 0.1);
-      lastRender = now;
-      time += dt;
-      easeToward(dt);
-      render();
-    };
-
-    // context loss / restore
-    const onLost = (e: Event) => {
-      e.preventDefault();
-      if (raf) cancelAnimationFrame(raf);
-      raf = 0;
-    };
-    canvas.addEventListener("webglcontextlost", onLost, false);
-
-    // pause entirely when the tab is backgrounded
-    const onVis = () => {
-      if (document.hidden) {
-        if (raf) cancelAnimationFrame(raf);
-        raf = 0;
-      } else if (shouldRun() && raf === 0) {
-        lastRender = 0;
-        last = performance.now();
-        raf = requestAnimationFrame(loop);
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-
-    if (reduced) {
-      // single still frame; still keep the headline scroll-linked (cheap)
-      render();
-      const onScrollStatic = () => {
-        readScroll();
-        scrollEased = scrollTarget;
-        render();
-      };
-      window.addEventListener("scroll", onScrollStatic, { passive: true });
-      scrollCleanup = () => window.removeEventListener("scroll", onScrollStatic);
-    } else {
-      render(); // draw frame 0 immediately so there is no black gap before the cap
-      last = performance.now();
-      lastRender = last;
-      raf = requestAnimationFrame(loop);
-    }
-
+        cleanup = startScene(canvas, section, gl, prog, vs, fs);
+      });
+    });
     return () => {
-      if (raf) cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", readScroll);
-      document.removeEventListener("visibilitychange", onVis);
-      canvas.removeEventListener("webglcontextlost", onLost);
-      ro.disconnect();
-      io.disconnect();
-      scrollCleanup();
-      gl.deleteBuffer(buf);
-      gl.deleteProgram(prog);
-      gl.deleteShader(vs);
-      gl.deleteShader(fs);
+      disposed = true;
+      cancelBoot();
+      cleanup();
     };
   }, []);
 
   return <canvas ref={canvasRef} className="hero-canvas" aria-hidden="true" />;
+}
+
+function startScene(
+  canvas: HTMLCanvasElement,
+  section: HTMLElement | null,
+  gl: WebGLRenderingContext,
+  prog: WebGLProgram,
+  vs: WebGLShader,
+  fs: WebGLShader,
+): () => void {
+  const reduced = prefersReduced();
+  const isMobile = window.matchMedia?.("(max-width: 820px)").matches ?? false;
+  let scrollCleanup = () => {};
+  gl.useProgram(prog);
+
+  // full-screen triangle
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 3, -1, -1, 3]),
+    gl.STATIC_DRAW,
+  );
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  const uTime = gl.getUniformLocation(prog, "uTime");
+  const uScroll = gl.getUniformLocation(prog, "uScroll");
+  const uRes = gl.getUniformLocation(prog, "uRes");
+  const uBlob = gl.getUniformLocation(prog, "uBlob[0]");
+
+  // Per-frame blob centers, hoisted out of the fragment shader (see FRAG note).
+  // Same formula as the old in-shader centers; f64→f32 rounding differs only at
+  // ~1e-6 world units (no fract amplification) so the field is visually identical.
+  const NB = 11;
+  const blobData = new Float32Array(NB * 3);
+  const updateBlobs = (t: number) => {
+    for (let i = 0; i < NB; i++) {
+      blobData[i * 3 + 0] = Math.sin(t * 0.35 + i * 1.7) * 2.4 + Math.cos(i * 2.1) * 1.2;
+      blobData[i * 3 + 1] = Math.cos(t * 0.3 + i * 2.3) * 1.8 + Math.sin(i * 1.3) * 1.0;
+      blobData[i * 3 + 2] = Math.sin(t * 0.25 + i * 0.9) * 2.2 - 1.0 + Math.cos(i * 0.7) * 1.4;
+    }
+    gl.uniform3fv(uBlob, blobData);
+  };
+
+  // internal resolution scale — softly downscaled (the blob field is fog-soft,
+  // so a ~1.0 effective DPR is indistinguishable from the old 1.35 while cutting
+  // ~45% of fragment work). Mobile & DPR clamps go lower still.
+  const renderScale = reduced ? 1.0 : isMobile ? 0.6 : 0.8;
+  const dprCap = isMobile ? 1.0 : 1.25;
+
+  // Frame-rate cap: the field drifts slowly, so 40fps (30 on mobile) is visually
+  // identical to 60 but ~33% less GPU/CPU. Motion stays time-based (dt) so the
+  // perceived speed is unchanged.
+  const targetFps = reduced ? 0 : isMobile ? 30 : 40;
+  const frameInterval = targetFps > 0 ? 1000 / targetFps : 0;
+
+  let w = 0;
+  let h = 0;
+  const resize = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, dprCap) * renderScale;
+    const cw = canvas.clientWidth || window.innerWidth;
+    const ch = canvas.clientHeight || window.innerHeight;
+    w = Math.max(1, Math.round(cw * dpr));
+    h = Math.max(1, Math.round(ch * dpr));
+    canvas.width = w;
+    canvas.height = h;
+    gl.viewport(0, 0, w, h);
+    gl.uniform2f(uRes, w, h);
+  };
+  resize();
+  const ro = new ResizeObserver(resize);
+  ro.observe(canvas);
+
+  // eased scroll progress (0..1) over the first viewport of the hero
+  let scrollTarget = 0;
+  let scrollEased = 0;
+  const readScroll = () => {
+    const vh = window.innerHeight || 1;
+    const p = Math.min(Math.max(window.scrollY / (vh * 0.95), 0), 1.15);
+    scrollTarget = p;
+  };
+  readScroll();
+  window.addEventListener("scroll", readScroll, { passive: true });
+
+  let onScreen = true;
+  const shouldRun = () => onScreen && !document.hidden && !reduced;
+  const io = new IntersectionObserver(
+    (entries) => {
+      onScreen = entries[0]?.isIntersecting ?? true;
+      if (shouldRun() && raf === 0) {
+        lastRender = 0;
+        last = performance.now();
+        raf = requestAnimationFrame(loop);
+      }
+    },
+    { threshold: 0 },
+  );
+  if (section) io.observe(section);
+
+  let raf = 0;
+  let last = performance.now();
+  let lastRender = 0;
+  let time = 0;
+
+  // dt-based smoothing so the scroll follow feels identical at any frame rate
+  const easeToward = (dt: number) => {
+    const f = 1 - Math.pow(1 - 0.08, Math.min(dt * 60, 4));
+    scrollEased += (scrollTarget - scrollEased) * f;
+  };
+
+  const render = () => {
+    if (section) section.style.setProperty("--hero-scroll", scrollEased.toFixed(4));
+    updateBlobs(time);
+    gl.uniform1f(uTime, time);
+    gl.uniform1f(uScroll, Math.min(scrollEased, 1));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+
+  const loop = (now: number) => {
+    raf = shouldRun() ? requestAnimationFrame(loop) : 0;
+    // frame-rate cap (time-based motion, so perceived speed is unchanged)
+    if (frameInterval > 0 && now - lastRender < frameInterval - 1) return;
+    const dt = Math.min((now - lastRender) / 1000, 0.1);
+    lastRender = now;
+    time += dt;
+    easeToward(dt);
+    render();
+  };
+
+  // context loss / restore
+  const onLost = (e: Event) => {
+    e.preventDefault();
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+  };
+  canvas.addEventListener("webglcontextlost", onLost, false);
+
+  // pause entirely when the tab is backgrounded
+  const onVis = () => {
+    if (document.hidden) {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    } else if (shouldRun() && raf === 0) {
+      lastRender = 0;
+      last = performance.now();
+      raf = requestAnimationFrame(loop);
+    }
+  };
+  document.addEventListener("visibilitychange", onVis);
+
+  if (reduced) {
+    // single still frame; still keep the headline scroll-linked (cheap)
+    render();
+    const onScrollStatic = () => {
+      readScroll();
+      scrollEased = scrollTarget;
+      render();
+    };
+    window.addEventListener("scroll", onScrollStatic, { passive: true });
+    scrollCleanup = () => window.removeEventListener("scroll", onScrollStatic);
+  } else {
+    render(); // draw frame 0 immediately so there is no black gap before the cap
+    last = performance.now();
+    lastRender = last;
+    raf = requestAnimationFrame(loop);
+  }
+  // First frame is drawn → fade the field in over the CSS gradient.
+  canvas.classList.add("is-live");
+
+  return () => {
+    if (raf) cancelAnimationFrame(raf);
+    window.removeEventListener("scroll", readScroll);
+    document.removeEventListener("visibilitychange", onVis);
+    canvas.removeEventListener("webglcontextlost", onLost);
+    ro.disconnect();
+    io.disconnect();
+    scrollCleanup();
+    gl.deleteBuffer(buf);
+    gl.deleteProgram(prog);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+  };
+}
+
+function getGL(canvas: HTMLCanvasElement): WebGLRenderingContext | null {
+  const opts = { antialias: false, alpha: false, depth: false, powerPreference: "high-performance" } as const;
+  return (
+    (canvas.getContext("webgl", opts) as WebGLRenderingContext | null) ||
+    (canvas.getContext("experimental-webgl") as WebGLRenderingContext | null)
+  );
+}
+
+function isSoftwareRenderer(gl: WebGLRenderingContext): boolean {
+  try {
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? "");
+    return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+  } catch {
+    return false;
+  }
+}
+
+// Runs `fn` once the page has loaded and the main thread is idle. Returns a canceller.
+function afterIdle(fn: () => void): () => void {
+  let timer = 0;
+  let idle = 0;
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  const schedule = () => {
+    timer = window.setTimeout(() => {
+      if (w.requestIdleCallback) idle = w.requestIdleCallback(fn, { timeout: 1500 });
+      else fn();
+    }, 300);
+  };
+  if (document.readyState === "complete") schedule();
+  else window.addEventListener("load", schedule, { once: true });
+  return () => {
+    window.removeEventListener("load", schedule);
+    window.clearTimeout(timer);
+    if (idle) w.cancelIdleCallback?.(idle);
+  };
+}
+
+const COMPLETION_STATUS_KHR = 0x91b1;
+
+// Calls `done(linked)` once the program has linked. With KHR_parallel_shader_compile
+// the driver compiles in the background and we poll per frame instead of blocking.
+function whenLinked(gl: WebGLRenderingContext, prog: WebGLProgram, done: (ok: boolean) => void): () => void {
+  const parallel = !!gl.getExtension("KHR_parallel_shader_compile");
+  let raf = 0;
+  const check = () => {
+    raf = 0;
+    if (parallel && !gl.getProgramParameter(prog, COMPLETION_STATUS_KHR)) {
+      raf = requestAnimationFrame(check);
+      return;
+    }
+    const ok = !!gl.getProgramParameter(prog, gl.LINK_STATUS);
+    // eslint-disable-next-line no-console
+    if (!ok) console.warn("[HeroScene] shader link failed:", gl.getProgramInfoLog(prog));
+    done(ok);
+  };
+  check();
+  return () => {
+    if (raf) cancelAnimationFrame(raf);
+  };
 }
 
 // Fallback: no WebGL — still feed --hero-scroll so the headline motion works.

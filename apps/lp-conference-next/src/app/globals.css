@@ -1372,7 +1372,7 @@ img { max-width: 100%; height: auto; display: block; }
   /* The official logo (pale blue→green→gold on transparent) is placed on a deep
      navy chip so it stays legible on the light header and the dark footer. */
   background-color: #0c1533;
-  background-image: url("/img/brand-logo.png");
+  background-image: url("/img/brand-logo.webp");
   background-size: 82%;
   background-position: center;
   background-repeat: no-repeat;
@@ -2271,7 +2271,7 @@ img { max-width: 100%; height: auto; display: block; }
   font-weight: 800;
   letter-spacing: 0.18em;
   font-size: 0.72rem;
-  color: var(--lp-teal);
+  color: #0e8466; /* --lp-teal darkened to 4.6:1 on white (small text, WCAG AA) */
 }
 .git-btn-jp { font-weight: 800; color: var(--lp-heading); font-size: 1.02rem; }
 .git-btn .arrow {
@@ -2778,6 +2778,7 @@ img { max-width: 100%; height: auto; display: block; }
   -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.34);
   white-space: nowrap;
 }
+.marquee-word::before { content: attr(data-text); }
 .marquee-track--b .marquee-word {
   -webkit-text-stroke: 0;
   color: rgba(255, 255, 255, 0.06);
@@ -2891,7 +2892,12 @@ img { max-width: 100%; height: auto; display: block; }
   display: block;
   z-index: 0;
   pointer-events: none;
-  /* entrance: canvas softly fades/zooms in so the field "arrives" */
+  /* hidden until HeroScene has drawn its first frame (it boots after first paint) */
+  opacity: 0;
+}
+/* entrance: canvas softly fades/zooms in so the field "arrives" */
+.hero--v31 .hero-canvas.is-live {
+  opacity: 1;
   animation: hero31-canvas-in 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes hero31-canvas-in {
@@ -3047,7 +3053,7 @@ img { max-width: 100%; height: auto; display: block; }
 /* reduced motion: no 3D drift on the copy, static scroll cue */
 @media (prefers-reduced-motion: reduce) {
   .hero--v31 .hero-copy { transform: none !important; opacity: 1 !important; }
-  .hero--v31 .hero-canvas { animation: none; }
+  .hero--v31 .hero-canvas.is-live { animation: none; }
   .hero--v31 .hero-scroll-line { animation: none; opacity: 0.7; }
 }
 
