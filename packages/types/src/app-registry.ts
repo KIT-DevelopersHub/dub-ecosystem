@@ -101,7 +101,7 @@ export const APP_MANIFEST = [
   { id: "chat", label: "チャット", navPath: "/chat", domain: "chat", permissions: ["app:chat:view"], access: { view: "app:chat:view", edit: "app:chat:edit" },
     detailPermissions: ["chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:times", "chat:manage_sections", "chat:change_visibility"] },
   { id: "mail", label: "メール", navPath: "/mail", domain: "mail", permissions: ["mail:read"], access: { view: "app:mail:view", edit: "app:mail:edit" },
-    detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:admin"] },
+    detailPermissions: ["mail:read", "mail:send", "mail:read_all", "mail:read_role_shared", "mail:read_managed", "mail:admin"] },
   { id: "usage", label: "無料枠 / 課金ガード", navPath: "/usage", domain: "usage", permissions: ["usage:view"], access: { view: "app:usage:view", edit: "app:usage:edit" }, openToAllAuthenticated: true,
     detailPermissions: ["usage:view"] },
   // 運営メンバー owns the WHOLE identity:* surface (roster AND role administration): the

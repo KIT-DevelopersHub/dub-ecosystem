@@ -787,14 +787,35 @@ export const initialMailState: MailState = {
 
 const MailStoreCtx = createContext<{ state: MailState; dispatch: Dispatch<MailAction> } | null>(null);
 
+/** What a read-only store (another member's mailbox, #942) drops: everything that would change
+ *  their mail or send as them. Navigation, search, paging and server hydration still apply. */
+const READ_ONLY_DROPPED: ReadonlySet<MailAction["type"]> = new Set<MailAction["type"]>([
+  "TOGGLE_STAR", "SET_READ", "ARCHIVE", "TRASH", "PURGE", "RESTORE", "DISMISS_NUDGE", "TOGGLE_LABEL",
+  "SELECT_ALL_IN_VIEW", "ADD_MESSAGE", "SEND", "SEND_STARTED", "OPEN_COMPOSE", "UNDO",
+  "UPSERT_DRAFT", "SET_DRAFT_ATTACHMENTS", "REMOVE_DRAFT", "SET_BLOCKS",
+]);
+
+export function readOnlyReducer(state: MailState, action: MailAction): MailState {
+  if (READ_ONLY_DROPPED.has(action.type)) return state;
+  const next = reducer(state, action);
+  if (action.type !== "OPEN_THREAD") return next;
+  // Opening reads the conversation for the owner; here it must leave their 未読 as it was.
+  const before = state.threads.find((t) => t.id === action.id);
+  if (!before) return next;
+  return { ...next, threads: next.threads.map((t) => (t.id === action.id ? { ...t, messages: before.messages } : t)) };
+}
+
 export function MailStoreProvider({
   children,
   initial = initialMailState,
+  readOnly = false,
 }: {
   children: ReactNode;
   initial?: MailState;
+  /** Another member's mailbox (#942): mutating actions are dropped. Fixed for the mount. */
+  readOnly?: boolean;
 }): JSX.Element {
-  const [state, dispatch] = useReducer(reducer, initial);
+  const [state, dispatch] = useReducer(readOnly ? readOnlyReducer : reducer, initial);
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <MailStoreCtx.Provider value={value}>{children}</MailStoreCtx.Provider>;
 }

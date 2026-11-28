@@ -206,7 +206,7 @@ describe("RolePolicyEditor — アプリのアクセス権が軸、詳細はダ�
     expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:send") as HTMLInputElement).checked).toBe(true);
     // mail:read はアプリに必須なので有効化と同時に入り、固定表示になる
     expect((within(dialog).getByTestId("fe7-app-dialog-toggle-mail:read") as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("2 / 5");
+    expect(screen.getByTestId("fe7-app-detail-count-mail").textContent).toBe("2 / 6");
   });
 
   // その他側と対称の到達性テスト: アプリが宣言した細かい権限は必ずそのダイアログに出る

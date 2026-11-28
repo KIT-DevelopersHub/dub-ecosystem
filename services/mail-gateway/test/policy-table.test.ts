@@ -73,7 +73,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 //         member get neither).
 // The last three rows are not roles but the shapes the table was written to fix.
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
-  admin: ["app:mail:view", "app:mail:edit", "mail:read", "mail:read_all", "mail:send", "mail:admin"],
+  admin: ["app:mail:view", "app:mail:edit", "mail:read", "mail:read_all", "mail:read_managed", "mail:send", "mail:admin"],
   maintainer: ["app:mail:view", "app:mail:edit", "mail:read", "mail:send"],
   organizer: [],
   member: [],
@@ -87,6 +87,11 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   // INFRASTRUCTURE (mailboxes, Email Routing) and still cannot read one message — which is
   // precisely why the admin rules are the bare key and the user rules are appLevel(...).
   "mail-admin-without-app-tier": ["mail:admin"],
+  // #942: a role turned on for 自分の班・チームのメンバーのメール (e.g. 役職: リーダー) on top of 閲覧.
+  // Reaches the /managed routes; WHICH member is the handler's range check (managed-view.test.ts).
+  "view-tier-with-read-managed": ["app:mail:view", "mail:read", "mail:read_managed"],
+  // The key alone (メール app off) opens nothing — the tier is still authoritative.
+  "read-managed-without-app-tier": ["mail:read_managed"],
 };
 
 /**
@@ -187,8 +192,21 @@ const INTERNAL_ROUTES = ["GET /health/quota", "GET /internal/health/ready", "GET
 // than hidden: that is the fact a matrix is for.
 const PUBLIC_ROUTES = ["GET /internal/health"];
 
+// 閲覧 on メール + mail:read + mail:read_managed (#942): another member's mailbox, GET only.
+const MANAGED = [
+  "GET /mail/managed-mailboxes",
+  "GET /mail/managed/:userId/counts",
+  "GET /mail/managed/:userId/messages",
+  "GET /mail/managed/:userId/messages/:id",
+  "GET /mail/managed/:userId/messages/:id/attachments/:attId",
+  "GET /mail/managed/:userId/sent",
+  "GET /mail/managed/:userId/sent/:id",
+  "GET /mail/managed/:userId/sent/:id/attachments/:attId",
+  "GET /mail/managed/:userId/threads/:id",
+];
+
 const sorted = (...groups: string[][]): string[] => [...new Set(groups.flat())].sort();
-const FULL = sorted(PUBLIC_ROUTES, READS, WRITES, ADMIN);
+const FULL = sorted(PUBLIC_ROUTES, READS, WRITES, ADMIN, MANAGED);
 const USER_SURFACE = sorted(PUBLIC_ROUTES, READS, WRITES);
 const READ_ONLY = sorted(PUBLIC_ROUTES, READS);
 const ADMIN_ONLY = sorted(PUBLIC_ROUTES, ADMIN);
@@ -204,6 +222,8 @@ describe("role x endpoint matrix (frozen)", () => {
     "disabled-tier-with-legacy-mail-keys": PUBLIC_ONLY,
     "view-tier-with-legacy-send-key": READ_ONLY,
     "mail-admin-without-app-tier": ADMIN_ONLY,
+    "view-tier-with-read-managed": sorted(PUBLIC_ROUTES, READS, MANAGED),
+    "read-managed-without-app-tier": PUBLIC_ONLY,
   };
 
   it("matches the committed matrix for every role", () => {
@@ -214,10 +234,10 @@ describe("role x endpoint matrix (frozen)", () => {
   });
 
   it("the matrix covers the whole table (no route omitted from the snapshot)", () => {
-    const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN);
+    const everyRoute = sorted(PUBLIC_ROUTES, INTERNAL_ROUTES, READS, WRITES, ADMIN, MANAGED);
     expect(everyRoute).toEqual(Object.keys(POLICY_TABLE).sort());
     expect(everyRoute).toEqual(protectableRouteKeys(createApp()).sort());
-    expect(everyRoute).toHaveLength(74);
+    expect(everyRoute).toHaveLength(83);
   });
 
   // THE boundary this service's admin console depends on: mail administration (issuing

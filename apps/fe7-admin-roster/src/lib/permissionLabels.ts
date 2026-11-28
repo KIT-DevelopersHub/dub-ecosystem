@@ -91,6 +91,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "mail:read": { label: "メールの閲覧", description: "メールのメッセージ・スレッド・振り分けルールを閲覧できるようになります。" },
   "mail:read_all": { label: "全メールの閲覧（監督）", description: "オンにすると全ユーザーの送受信メールを閲覧できます。" },
   "mail:read_role_shared": { label: "同じロールの人宛てのメールを閲覧", description: "オンにすると、このロールを持つ全員が、同じロールのメンバー宛てに届いたメールを閲覧できます。" },
+  "mail:read_managed": { label: "自分の班・チームのメンバーのメールを閲覧", description: "オンにすると、役職がリーダーの人は自分の班のメンバー、オーガナイザーの人は自分のチームのメンバーのメールを、読み取り専用で閲覧できます（運営メンバーの名簿の役職・チーム・リーダーで決まります）。閲覧したことは監査ログに残ります。" },
   "mail:admin": { label: "メールの管理", description: "メールボックスや受信監視・振り分けルールの設定を管理できるようになります。" },
   "chat:create": { label: "パブリックチャンネルの作成", description: "チャットのパブリックチャンネルを新規作成し、DM を始められるようになります。" },
   "chat:create_private": { label: "プライベートチャンネルの作成", description: "チャットのプライベートチャンネルも新規作成できるようになります。" },

@@ -59,6 +59,12 @@ export const POLICY_TABLE = definePolicyTable({
   // `チーム名 <list@…>`; the scheduled drain asks with no user, so key-free like team-members.
   "GET /members/internal/team-names": INTERNAL,
 
+  // 自分がマネジメントする範囲, mail-gateway -> member-service (#942). Returns the identity ids of
+  // the members a leader (班) / organizer (チーム) may read the mail of. Key-free: the caller's
+  // mail:read_managed is checked by mail-gateway's own table; this only answers "who is in range",
+  // a membership oracle that must stay INTERNAL (the edge 404s /members/internal/).
+  "GET /members/internal/managed-mailboxes": INTERNAL,
+
   // 名簿の Gmail 逆引き, drive-share-service -> member-service. カレンダー > ミーティングの招待先
   // (and the shared calendar ACL) are each member's 名簿 Gmail. Key-free like team-members: the
   // reconcile runs hourly as a system actor (no user), and the edge 404s /members/internal/.

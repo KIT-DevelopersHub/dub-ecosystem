@@ -1,0 +1,35 @@
+/* #942 受信箱の切り替え (自分 / 自分の班・チームのメンバー) と、閲覧中の帯。 */
+.switcher {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2) var(--dub-space-3);
+  margin: 0 var(--dub-space-4) var(--dub-space-2);
+}
+.label {
+  font-size: var(--dub-font-size-xs);
+  color: var(--dub-color-text-muted);
+}
+.picker {
+  flex: 0 1 18rem;
+  min-width: 0;
+}
+
+/* 他のメンバーの受信箱を見ている間ずっと出す帯。読み取り専用で、閲覧が記録されることも書く。 */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dub-space-2) var(--dub-space-3);
+  margin: 0 var(--dub-space-4) var(--dub-space-2);
+  padding: var(--dub-space-2) var(--dub-space-3) var(--dub-space-2) var(--dub-space-4);
+  border-radius: var(--dub-radius-md);
+  border: 1px solid var(--dub-color-warning-500);
+  background: var(--dub-color-warning-300);
+  color: var(--dub-color-warning-900);
+}
+.bannerText {
+  flex: 1 1 16em;
+  min-width: 0;
+  font-size: var(--dub-font-size-sm);
+}
