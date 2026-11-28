@@ -1,7 +1,6 @@
 // 目標管理: チームごとの 1 か月の目標と KPI (member-service /members/goals)。
 // 実績は保存せず、表示のたびに各アプリのデータから数える。指標の定義と達成率の計算はここが SoT。
 import type { ISODateTime, TeamId, UserId } from "./common";
-import type { GoalMetric as SponsorMetric, MonthlyGoal as SponsorMonthlyGoal } from "./sponsor";
 
 export const GOAL_TITLE_MAX = 200;
 export const KPI_NAME_MAX = 100;
@@ -32,28 +31,71 @@ export type GoalMetric = (typeof GOAL_METRICS)[number]["key"];
 export const metricOf = (key: GoalMetric): (typeof GOAL_METRICS)[number] => GOAL_METRICS.find((m) => m.key === key)!;
 export const isGoalMetric = (v: unknown): v is GoalMetric => GOAL_METRICS.some((m) => m.key === v);
 
-/** スポンサーアプリの「目標」タブに出す指標。目標値はここ (KPI) が正で、タブは表示するだけ。 */
-const SPONSOR_TAB_METRICS: Partial<Record<GoalMetric, SponsorMetric>> = {
-  sponsor_contacted: "contacted",
-  sponsor_proposed: "proposed",
-  sponsor_agreed: "agreed",
-  sponsor_amount: "amount",
-};
+// ── スポンサーアプリの「目標」タブ (閲覧専用) ──────────────────────────────
+// 目標値も実績もここ (KPI と member-service の集計) が正。タブは返ってきた指標をそのまま並べるので、
+// 目標管理でスポンサーの KPI を足す・消すと、タブのカードと列も増える・減る。
 
-export const isSponsorTabMetric = (metric: GoalMetric): boolean => metric in SPONSOR_TAB_METRICS;
+/** タブに出す指標 = 出どころがスポンサーの指標 (GOAL_METRICS の順)。 */
+export const SPONSOR_TAB_METRICS: readonly GoalMetric[] = GOAL_METRICS.filter((m) => m.source === "スポンサー").map((m) => m.key);
 
-/** 全チームの KPI からタブの月間目標を作る (新しい月が先頭)。実績は団体全体で 1 つなので、複数チームが置いた指標は足さず大きい方を出す。 */
-export function sponsorGoalsOf(goals: readonly { month: string; kpis: readonly Pick<Kpi, "metric" | "target">[] }[]): SponsorMonthlyGoal[] {
-  const months = new Map<string, SponsorMonthlyGoal>();
-  for (const { month, kpis } of goals) {
-    for (const { metric, target } of kpis) {
-      const key = SPONSOR_TAB_METRICS[metric];
-      if (!key) continue;
-      const row = months.get(month) ?? { month, contacted: null, proposed: null, agreed: null, amount: null };
-      months.set(month, { ...row, [key]: Math.max(row[key] ?? 0, target) });
-    }
+export const isSponsorTabMetric = (metric: GoalMetric): boolean => SPONSOR_TAB_METRICS.includes(metric);
+
+/** 1 回で取れる月の数。 */
+export const SPONSOR_TAB_MONTHS_MAX = 12;
+
+export interface SponsorTabMetric {
+  metric: GoalMetric;
+  /** その月の目標値。どのチームも KPI に置いていなければ null。 */
+  target: number | null;
+  /** 団体全体の実績。集計に失敗したら null (0 と区別する)。 */
+  actual: number | null;
+  /** 達成率 (%)。目標なし・集計できなければ null。 */
+  percent: number | null;
+}
+
+export interface SponsorTabMonth {
+  /** YYYY-MM。 */
+  month: string;
+  /** SPONSOR_TAB_METRICS の全指標 (目標が無い指標も実績だけ入る)。 */
+  metrics: SponsorTabMetric[];
+}
+
+/** GET /members/sponsor/goals?from=YYYY-MM&to=YYYY-MM の応答。from から to まで全月 (新しい月が先頭)。 */
+export interface SponsorTabResponse {
+  months: SponsorTabMonth[];
+}
+
+/** その月の全チームの KPI から、指標ごとの目標値を作る。実績は団体全体で 1 つなので、複数チームが置いた指標は足さず大きい方を出す。 */
+export function sponsorTargetsOf(kpis: readonly Pick<Kpi, "metric" | "target">[]): Map<GoalMetric, number> {
+  const targets = new Map<GoalMetric, number>();
+  for (const { metric, target } of kpis) {
+    if (isSponsorTabMetric(metric)) targets.set(metric, Math.max(targets.get(metric) ?? 0, target));
   }
-  return [...months.values()].sort((a, b) => b.month.localeCompare(a.month));
+  return targets;
+}
+
+/** タブの 1 か月分。actuals が null = 集計に失敗した。 */
+export function sponsorTabMonthOf(
+  month: string,
+  kpis: readonly Pick<Kpi, "metric" | "target">[],
+  actuals: Partial<Record<GoalMetric, number>> | null,
+): SponsorTabMonth {
+  const targets = sponsorTargetsOf(kpis);
+  return {
+    month,
+    metrics: SPONSOR_TAB_METRICS.map((metric) => {
+      const target = targets.get(metric) ?? null;
+      const actual = actuals?.[metric] ?? null;
+      return { metric, target, actual, percent: target === null ? null : kpiPercent(actual, target) };
+    }),
+  };
+}
+
+/** from から to までの月 (新しい月が先頭)。from > to なら空。 */
+export function monthsBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let m = to; m >= from; m = shiftMonth(m, -1)) out.push(m);
+  return out;
 }
 
 /** 保存する KPI。manualActual は metric = manual のときだけ意味を持つ。 */

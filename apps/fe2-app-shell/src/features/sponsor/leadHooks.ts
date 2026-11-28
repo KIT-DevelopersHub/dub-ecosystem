@@ -132,7 +132,8 @@ export function useImportLeads() {
   });
 }
 
-export function useGoals() {
+/** 目標タブ。from〜to の月 (目標管理の KPI と同じ集計)。enabled = false の間は取りに行かない。 */
+export function useGoals(from: string, to: string, enabled = true) {
   const api = useSponsorApi();
-  return useQuery({ queryKey: GOALS_KEY, queryFn: () => api.listGoals(), staleTime: 15_000 });
+  return useQuery({ queryKey: [...GOALS_KEY, from, to], queryFn: () => api.listGoals({ from, to }), staleTime: 15_000, enabled });
 }

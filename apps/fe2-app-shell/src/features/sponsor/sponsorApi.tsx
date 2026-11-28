@@ -1,7 +1,7 @@
 // スポンサー feature の api アダプタ。シェルの api-client (session cookie / 401→refresh / requestId /
 // エラー正規化) に乗り、/api/v1/members/sponsor/* → gateway → member-service に届く。
-// 契約型は @dub/types `sponsor` (SoT) をそのまま使う。
-import type { sponsor } from "@dub/types";
+// 契約型は @dub/types `sponsor` (SoT) をそのまま使う (目標タブだけ目標管理の `goal`)。
+import type { goal, sponsor } from "@dub/types";
 import type { ApiClient } from "../../lib/api-client.tsx";
 
 export interface SponsorApi {
@@ -20,7 +20,8 @@ export interface SponsorApi {
   importLeads(body: sponsor.ImportLeadsRequest): Promise<sponsor.ImportLeadsResponse>;
   updateLead(id: string, body: sponsor.UpdateLeadRequest): Promise<sponsor.SponsorLead>;
   removeLead(id: string): Promise<void>;
-  listGoals(): Promise<sponsor.ListGoalsResponse>;
+  /** 目標タブ。from〜to の各月のスポンサー指標 (目標値は目標管理の KPI)。 */
+  listGoals(range: { from: string; to: string }): Promise<goal.SponsorTabResponse>;
   // メール連携: メールの相手を担当者メールに登録・自動更新の履歴・既存メールからの一括補完。
   registerContactEmail(leadId: string, body: sponsor.RegisterContactEmailRequest): Promise<sponsor.RegisterContactEmailResponse>;
   listLeadActivity(leadId: string): Promise<sponsor.ListLeadActivityResponse>;
@@ -58,7 +59,7 @@ export function createSponsorApi(api: ApiClient): SponsorApi {
     removeLead: async (id) => {
       await api.request<void>({ method: "DELETE", path: lead(id) });
     },
-    listGoals: () => api.request<sponsor.ListGoalsResponse>({ method: "GET", path: `${BASE}/goals` }),
+    listGoals: (range) => api.request<goal.SponsorTabResponse>({ method: "GET", path: `${BASE}/goals`, query: range }),
     registerContactEmail: (leadId, body) =>
       api.request<sponsor.RegisterContactEmailResponse, sponsor.RegisterContactEmailRequest>({ method: "POST", path: `${lead(leadId)}/contact-emails`, body }),
     listLeadActivity: (leadId) => api.request<sponsor.ListLeadActivityResponse>({ method: "GET", path: `${lead(leadId)}/activity` }),

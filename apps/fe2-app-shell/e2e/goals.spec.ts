@@ -37,8 +37,8 @@ test("a target set in the goals app shows on the read-only sponsor tab", async (
     window.history.pushState({}, "", "/sponsor/goals");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
-  await expect(page.getByTestId("fe2-sponsor-goal-contacted")).toContainText("/ 30 社");
-  await expect(page.getByTestId("fe2-sponsor-goal-actual-contacted")).toHaveText(`${actual} 社`);
+  await expect(page.getByTestId("fe2-sponsor-goal-sponsor_contacted")).toContainText("/ 30社");
+  await expect(page.getByTestId("fe2-sponsor-goal-actual-sponsor_contacted")).toHaveText(`${actual}社`);
   await expect(page.getByTestId("fe2-sponsor-goal-edit")).toHaveCount(0);
   await expect(page.getByTestId("fe2-sponsor-goals-link").getByRole("link", { name: "目標管理" })).toBeVisible();
 });
