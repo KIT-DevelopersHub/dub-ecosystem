@@ -21,6 +21,7 @@ export type LpTicketOrdersPage = lpTickets.LpTicketOrdersPage;
 export type LpTicketTypeInput = lpTickets.LpTicketTypeInput;
 export type LpTicketCoupon = lpTickets.LpTicketCoupon;
 export type LpTicketCouponsPage = lpTickets.LpTicketCouponsPage;
+export type LpTicketPublicType = lpTickets.LpTicketPublicType;
 export type LpTicketReceipt = lpTickets.LpTicketReceipt;
 export type LpTicketReceiptIssuer = lpTickets.LpTicketReceiptIssuer;
 export type LpTicketRefundResult = lpTickets.LpTicketRefundResult;
@@ -167,11 +168,24 @@ export interface LpTicketRepo {
    * type, the coupon is active, not expired at row.createdAt, and its held uses + row.quantity <= max_uses
    * (else "coupon_used_up").
    */
+  /**
+   * With opts.uniqueFreeEmail (無料参加登録): in the SAME batch, the order is only inserted while no other held,
+   * non-preview, 0-yen, coupon-less order of this site has the same buyer email (case-insensitive), else
+   * "already_registered". So two racing sign-ups with one address serialize and one gets 409.
+   */
   insertOrderIfAvailable(
     row: TicketOrderRow,
     capacities: ReadonlyMap<string, number | null>,
     pendingSince: string,
-  ): Promise<{ ok: true } | { ok: false; reason: "sold_out"; ticketTypeId: string } | { ok: false; reason: "coupon_used_up" }>;
+    opts?: { uniqueFreeEmail?: boolean },
+  ): Promise<
+    | { ok: true }
+    | { ok: false; reason: "sold_out"; ticketTypeId: string }
+    | { ok: false; reason: "coupon_used_up" }
+    | { ok: false; reason: "already_registered" }
+  >;
+  /** 無料参加登録 (0 yen, no coupon) orders from this sender created at/after `since` (per-sender sign-up cap). */
+  countFreeSignupsByClient(site: string, clientKey: string, since: string): Promise<number>;
   /** false when (site, code) already exists. */
   insertCoupon(row: TicketCouponRow): Promise<boolean>;
   getCoupon(site: string, id: string): Promise<TicketCouponRow | null>;

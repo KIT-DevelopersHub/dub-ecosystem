@@ -18,6 +18,11 @@ export interface LpTicketType {
   /** 1 回の購入で買える上限枚数 1..20（既定 10） */
   maxPerOrder: number;
   active: boolean;
+  /**
+   * 無料参加登録: 0 円券をクーポン無しで申し込める（LP は「無料で参加登録」と出す）。
+   * true は priceJpy === 0 のときだけ。1 メールアドレスにつき 1 枚（同じイベントで重複登録は 409 already_registered）。
+   */
+  openRegistration: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -109,7 +114,31 @@ export interface LpTicketTypeInput {
   dayLabel: string;
   maxPerOrder: number;
   active: boolean;
+  /** 省略 = false（作成）/ 変更なし（PATCH）。true は priceJpy === 0 のときだけ（違えば 400 openRegistration requires_free）。 */
+  openRegistration?: boolean;
 }
+
+/**
+ * GET /lp/internal/tickets の券種（公開 LP 向け。販売中の券種だけ）。
+ * couponOnly = 0 円でクーポン必須（LP は通常の一覧に出さない）。openRegistration = 0 円でクーポン無しで申し込める
+ * （1 回 1 枚・1 メールアドレス 1 回）。両方 true にはならない。
+ */
+export interface LpTicketPublicType {
+  id: string;
+  name: string;
+  description: string;
+  priceJpy: number;
+  dayLabel: string;
+  maxPerOrder: number;
+  /** 確保分を引いた残り。null = 定員なし */
+  remaining: number | null;
+  soldOut: boolean;
+  couponOnly: boolean;
+  openRegistration: boolean;
+}
+
+/** 409 の details.reason（公開 checkout）。already_registered = 同じメールアドレスで無料参加登録済み。 */
+export type LpTicketCheckoutConflict = "sold_out" | "coupon_used_up" | "already_registered";
 
 /** 無料券のクーポン。1 コード = 1 券種 x 最大 maxUses 枚。used = 使った枚数（決済待ち・要確認の確保分を含む）。 */
 export interface LpTicketCoupon {
