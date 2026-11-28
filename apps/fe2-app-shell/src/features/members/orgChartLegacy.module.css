@@ -1,0 +1,405 @@
+/* これまでの組織図(#890 より前 = 889f34d4 時点)。新しい表示(OrgChartView)と切り替えて使う。
+   #890 直前の members.module.css から組織図の部分だけを写したもの(チーム内は縦に積む)。 */
+
+/* ══ 組織図ビュー — PDF「全体組織体制図」の構図を再現 ══════════════════════
+   統括の横長ダークネイビー箱 → コネクタ線 → チーム色の縦カラム
+   (オーガナイザー→リーダー→メンバー階層)。各カラムの --team アクセント色から
+   color-mix でチップの濃淡を動的生成し、DBの Team.color に追従させる。
+   常に白地(印刷/PNGでも同じ見た目)なので、ここだけ固定パレットを使う。 */
+.orgChart {
+  color: #1f2933;
+}
+.orgHead {
+  margin-bottom: var(--dub-space-3);
+}
+.orgTitle {
+  font-size: var(--dub-font-size-lg);
+  font-weight: var(--dub-font-weight-bold);
+  color: #0f2436;
+}
+.orgSub {
+  font-size: var(--dub-font-size-xs);
+  color: #55637a;
+  margin-top: 2px;
+}
+.orgLegend {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 11px;
+  color: #55637a;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.orgLegend .li {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.legendSw {
+  width: 24px;
+  height: 12px;
+  border-radius: 4px;
+  border: 1.4px solid #bfdbfe;
+  background: #eff6ff;
+  display: inline-block;
+}
+.legendSw.tent {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  border-style: dashed;
+}
+.legendSw.leave {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+/* legend の役割スウォッチ（tier 別の見た目に合わせた小さな見本）。 */
+.legendSw.swOrg {
+  background: #94a3b8;
+  border-color: #64748b;
+  border-left: 4px solid #475569;
+}
+.legendSw.swLead {
+  background: #cbd5e1;
+  border-color: #94a3b8;
+  border-left: 4px solid #64748b;
+}
+/* horizontal scroll for many teams; page body never scrolls sideways */
+.orgScroll {
+  overflow-x: auto;
+  padding-bottom: var(--dub-space-2);
+}
+.orgCanvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: max-content;
+  padding-top: var(--dub-space-2);
+}
+
+/* 統括トップ箱 */
+.topbox {
+  background: var(--hq, #1e3a5f);
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 26px 12px;
+  text-align: center;
+  min-width: 620px;
+  box-shadow: 0 3px 8px rgba(30, 58, 95, 0.22);
+}
+.topTitle {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.topRole {
+  font-size: 11px;
+  color: #c7d6ea;
+  margin-top: 3px;
+}
+.topNames {
+  margin-top: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.namechip {
+  background: #fff;
+  border-radius: 9px;
+  padding: 8px 14px 9px;
+  min-width: 96px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #12324e;
+  position: relative;
+}
+.namechip .namechipRole {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5b6b82;
+  margin-top: 2px;
+}
+.namechip .miniBadge {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  background: #94a3b8;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+
+/* コネクタ */
+.connector {
+  position: relative;
+  height: 30px;
+}
+.connector .vtop {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 3px;
+  height: 20px;
+  background: #94a3b8;
+  transform: translateX(-50%);
+}
+.connector .hbar {
+  position: absolute;
+  top: 19px;
+  height: 3px;
+  background: #94a3b8;
+}
+.connector .vdrop {
+  position: absolute;
+  top: 19px;
+  width: 3px;
+  height: 23px;
+  background: #94a3b8;
+  transform: translateX(-50%);
+}
+
+/* チームカラム */
+.teamsRow {
+  display: flex;
+  gap: 13px;
+  justify-content: center;
+  align-items: stretch;
+}
+.orgCol {
+  flex: 1 1 0;
+  min-width: 150px;
+  max-width: 220px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.6px solid color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 2px 6px rgba(15, 36, 54, 0.08);
+  background: #fff;
+}
+.colHead {
+  padding: 8px 6px;
+  text-align: center;
+  color: #fff;
+  background: var(--team, #64748b);
+}
+.colName {
+  font-size: 14px;
+  font-weight: 800;
+}
+.colDesc {
+  font-size: 9px;
+  margin-top: 4px;
+  line-height: 1.4;
+  opacity: 0.95;
+}
+.colBody {
+  flex: 1;
+  padding: 8px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── leaderId 親子ツリー ─────────────────────────────────────────────
+   ネスト(子=リーダーの配下)を左レール＋エルボー線で結び、「誰がどのリーダーの下か」を
+   構造で示す。tier(役割段)はノードの色/枠の強さで補助表現する。 */
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nodeItem {
+  position: relative;
+  list-style: none;
+}
+/* 子グループ = 親の直下にインデントしてぶら下げる。 */
+.nodeChildren {
+  list-style: none;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* 各子ノードの接続線: 縦(レール)＋横(エルボー)。最後の子はレールをエルボーで止める。 */
+.nodeChildren > .nodeItem::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: -6px;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+}
+.nodeChildren > .nodeItem:last-child::before {
+  bottom: auto;
+  height: 21px;
+}
+.nodeChildren > .nodeItem::after {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: 15px;
+  width: 11px;
+  height: 2px;
+  background: color-mix(in srgb, var(--team, #64748b) 45%, #fff);
+}
+
+/* ノード(1人分のチップ) */
+.node {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  border-radius: 7px;
+  padding: 5px 9px;
+  position: relative;
+  background: color-mix(in srgb, var(--team, #64748b) 10%, #fff);
+  border: 1.4px solid color-mix(in srgb, var(--team, #64748b) 30%, #fff);
+  color: color-mix(in srgb, var(--team, #64748b) 80%, #000);
+}
+/* オーガナイザー = 最も濃く + 太い左アクセント */
+.node.nOrg {
+  font-weight: 800;
+  border-width: 2px;
+  border-left-width: 7px;
+  border-color: var(--team, #64748b);
+  background: color-mix(in srgb, var(--team, #64748b) 46%, #fff);
+  color: color-mix(in srgb, var(--team, #64748b) 84%, #000);
+}
+/* リーダー = 中間の濃さ + 左アクセント（配下を持つ親であることを強調） */
+.node.nLead {
+  font-weight: 800;
+  border-left: 6px solid color-mix(in srgb, var(--team, #64748b) 72%, #000);
+  background: color-mix(in srgb, var(--team, #64748b) 22%, #fff);
+}
+/* メンバー = 淡色・通常ウェイト */
+.node.nMember {
+  font-weight: 600;
+}
+.nodeName {
+  font-weight: inherit;
+}
+.nodeRole {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.72;
+}
+.nodeGrade {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.55;
+}
+.nodeBadge {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #fff;
+}
+/* 打診中 = 淡いグレー破線 */
+.node.tent {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #94a3b8 !important;
+  border-style: dashed !important;
+}
+.node.tent .nodeBadge {
+  background: #f59e0b;
+}
+/* 休み中 = 落ち着いたグレー（辞退とは別・在籍扱い） */
+.node.leave {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #64748b;
+}
+.node.leave .nodeBadge {
+  background: #64748b;
+}
+.colCount {
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+  margin-top: auto;
+  padding-top: 4px;
+}
+/* 未所属メンバー — 体制図の下部に控えめに並べる注記（チーム列ではない）。 */
+.orgUnassigned {
+  margin: 14px auto 0;
+  max-width: 720px;
+  padding: 8px 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.orgUnassignedLabel {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 5px;
+}
+.orgUnassignedNames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.orgUnassignedName {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #334155;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.orgFoot {
+  margin-top: var(--dub-space-4);
+  font-size: 11px;
+  color: #9aa5b1;
+  border-top: 1px solid #e4e7eb;
+  padding-top: 7px;
+}
+
+/* 印刷: 組織図だけを A4 横 1 枚に出す。組織図の親はスクロール枠や余白を外し、親以外の
+   アプリの枠(ヘッダー・タブ・見出し)は消す。倍率は orgChartPrint.ts が渡す。 */
+@media print {
+  :has(.orgChart) {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  :has(.orgChart) > :not(:has(.orgChart), .orgChart) {
+    display: none !important;
+  }
+  .orgChart {
+    width: max-content;
+    zoom: var(--org-print-zoom, 1);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .orgScroll {
+    overflow: visible !important;
+    padding-bottom: 0;
+  }
+  .orgCol {
+    box-shadow: none;
+  }
+}
