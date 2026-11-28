@@ -7,7 +7,7 @@
 // unit tests that provide only a fake MailApi.
 import { useEffect, useRef } from "react";
 import type { MailApi } from "../mailApi.tsx";
-import { useMailApi } from "../MailProvider.tsx";
+import { useMailApi, useMailViewing } from "../MailProvider.tsx";
 import { combineThreads, sentDetailToMessage, threadDetailToMessages } from "./hydrate.ts";
 import { dedupeLoopback, hasUnloadedReplies, type MailMsg } from "./mailModel.ts";
 import { PAGE_SIZE, pageSourceOf, searchViewOf, selectVisible, serverViewOf, useMailStore } from "./useMailStore.tsx";
@@ -38,6 +38,8 @@ export function useMailSync(): void {
   const api = useMailApi();
   const { state, dispatch } = useMailStore();
   const { syncNonce, me, openThreadId, threads } = state;
+  // Fixed for the mount: GmailApp remounts the store per mailbox.
+  const viewingOther = useMailViewing() !== null;
   // Current page cursor per list (undefined = page 1). A page change re-runs the load
   // below; a background/manual sync re-fetches the SAME page, so page 1 picks up new mail.
   const inboxCursor = state.pager.inbox.stack.at(-1);
@@ -340,7 +342,8 @@ export function useMailSync(): void {
           // we mark every received message read server-side (markRead is idempotent, and a
           // maillog id would 404). Best-effort — a failure never blocks opening the thread.
           const known = thread.messages;
-          for (const m of known) if (!m.outbound && m.mine !== false) void api.markRead(m.id).catch(() => undefined);
+          // Another member's mailbox (#942) is view-only: opening it never marks their mail read.
+          if (!viewingOther) for (const m of known) if (!m.outbound && m.mine !== false) void api.markRead(m.id).catch(() => undefined);
           // A conversation reached from 送信済み may have no received message loaded (and
           // none visible any more): a 404 then just means "our sends only".
           const sentOnly = known.every((m) => m.outbound);
@@ -350,12 +353,12 @@ export function useMailSync(): void {
           });
           // Replies fetched here for the first time were never marked read: do it now.
           for (const m of full.messages)
-            if (!m.read && m.mine !== false && !known.some((k) => k.id === m.id)) void api.markRead(m.id).catch(() => undefined);
+            if (!viewingOther && !m.read && m.mine !== false && !known.some((k) => k.id === m.id)) void api.markRead(m.id).catch(() => undefined);
           // getThread returns RECEIVED messages only. Preserve our own replies (folded Sent
           // rows, outbound=true) that it omits, so a sent reply stays visible in the thread
           // instead of vanishing on refresh. Dedup by id, order by date. Force read=true so a
           // racing getThread (server not yet reflecting markRead) can't revert to unread.
-          const inbound = threadDetailToMessages(full).map((m) => (m.mine === false ? m : { ...m, read: true }));
+          const inbound = threadDetailToMessages(full).map((m) => (m.mine === false || viewingOther ? m : { ...m, read: true }));
           const ours = await Promise.all(
             known.filter((m) => m.outbound && !inbound.some((i) => i.id === m.id)).map((m) => withFullSentBody(api, m)),
           );

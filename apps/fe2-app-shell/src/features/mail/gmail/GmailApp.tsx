@@ -3,7 +3,8 @@
 // windows and an undo toast. Owns the keyboard shortcuts (shortcuts.ts; r / a / f sit in
 // ReadingPane, which owns the addressing). State lives in the client
 // MailStore, hydrated from the real gateway by useMailSync (inbox + Sent are live data).
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { mail } from "@dub/types";
 import { COARSE_POINTER_QUERY, Drawer, IconButton, Modal, NARROW_VIEWPORT_QUERY, useMediaQuery } from "@dub/ui";
 import { MailSidebar } from "./MailSidebar.tsx";
 import { ThreadList } from "./ThreadList.tsx";
@@ -20,7 +21,8 @@ import { useMailSync } from "./useMailSync.tsx";
 import { useReadState } from "./useReadState.tsx";
 import { deliver } from "./sendMail.ts";
 import { SHORTCUTS, isTyping, modalOpen, shortcutsBlocked } from "./shortcuts.ts";
-import { useCanCompose, useMailApi } from "../MailProvider.tsx";
+import { MailApiProvider, MailViewingProvider, useCanCompose, useMailApi, useMailViewing } from "../MailProvider.tsx";
+import { MailboxSwitcher, type MailboxSwitcherProps } from "./MailboxSwitcher.tsx";
 
 /** P1-2 follow-up: floating compose windows are pure client state (useMailStore starts
  *  with composes: [] on every mount/reload) — a reload while typing loses the OPEN
@@ -318,8 +320,9 @@ function useOpenMessageFromLink(openMessageId: string | undefined): void {
   }, [openMessageId, state.threads, dispatch]);
 }
 
-function GmailBody({ openMessageId }: { openMessageId?: string | undefined }): JSX.Element {
+function GmailBody({ openMessageId, switcher }: { openMessageId?: string | undefined; switcher: MailboxSwitcherProps }): JSX.Element {
   const { state, dispatch } = useMailStore();
+  const viewing = useMailViewing();
   useOpenMessageFromLink(openMessageId);
   useMailSync(); // hydrate inbox + Sent from the gateway; lazy-load bodies on open
   useRestoreComposeDraftsOnMount(); // re-open any compose window left dirty by a reload/crash
@@ -347,7 +350,8 @@ function GmailBody({ openMessageId }: { openMessageId?: string | undefined }): J
       style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: narrow ? 0 : 560, background: "var(--dub-color-surface-sunken)" }}
     >
       <SearchBar narrow={narrow} onOpenNav={() => setNavOpen(true)} />
-      {canCompose ? null : (
+      <MailboxSwitcher {...switcher} />
+      {canCompose || viewing ? null : (
         <div role="status" data-testid="fe2-mail-readonly" style={{ margin: "0 16px 8px", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)" }}>
           メールは閲覧のみの権限です。送信が必要なら管理者に編集権限を依頼してください。
         </div>
@@ -387,10 +391,42 @@ function GmailBody({ openMessageId }: { openMessageId?: string | undefined }): J
   );
 }
 
+/** #942: the members whose mailbox the user may open (empty when the api has no such route or
+ *  the call fails — the switcher then simply does not appear). */
+function useManagedMailboxes(): mail.MailManagedMailbox[] {
+  const api = useMailApi();
+  const [items, setItems] = useState<mail.MailManagedMailbox[]>([]);
+  useEffect(() => {
+    let live = true;
+    if (!api.listManagedMailboxes) return;
+    api
+      .listManagedMailboxes()
+      .then((list) => {
+        if (live) setItems(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [api]);
+  return items;
+}
+
 export function GmailApp({ openMessageId }: { openMessageId?: string } = {}): JSX.Element {
+  const api = useMailApi();
+  const mailboxes = useManagedMailboxes();
+  const [viewing, setViewing] = useState<mail.MailManagedMailbox | null>(null);
+  // Another member's mailbox: its own read-only api, and a fresh read-only store per mailbox so
+  // nothing of one mailbox (open thread, search, selection) leaks into the next.
+  const shown = viewing && api.forManaged ? viewing : null;
+  const scopedApi = useMemo(() => (shown && api.forManaged ? api.forManaged(shown.userId) : api), [api, shown]);
   return (
-    <MailStoreProvider>
-      <GmailBody openMessageId={openMessageId} />
-    </MailStoreProvider>
+    <MailApiProvider value={scopedApi}>
+      <MailViewingProvider value={shown}>
+        <MailStoreProvider key={shown?.userId ?? "self"} readOnly={shown !== null}>
+          <GmailBody openMessageId={shown ? undefined : openMessageId} switcher={{ mailboxes, viewing: shown, onChange: setViewing }} />
+        </MailStoreProvider>
+      </MailViewingProvider>
+    </MailApiProvider>
   );
 }

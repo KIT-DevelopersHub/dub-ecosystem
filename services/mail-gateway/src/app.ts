@@ -37,6 +37,7 @@ import { registerEmailRoutingAdmin, registerEmailRoutingInternal } from "./email
 import { registerTeamListAdmin } from "./team-list-routes";
 import { registerSharedMailboxes } from "./shared-mailbox-routes";
 import { registerDrafts } from "./drafts";
+import { registerManagedView } from "./managed-view";
 import { registerTemplates } from "./templates";
 import { canaryConfig, listProbes, toProbeView } from "./canary";
 import { heartbeat } from "./monitor";
@@ -634,6 +635,8 @@ export function createApp() {
   registerTeamListAdmin(ext);
   registerSharedMailboxes(ext);
   registerDrafts(ext);
+  // 自分の班・チームのメンバーのメールを読み取り専用で見る (#942). Range check is handler-side there.
+  registerManagedView(ext, { ownerOf, hideArchive: (c, item) => hideArchiveCc(item, archiveOf(c)) });
   registerTemplates(ext);
 
   // Send-health for the admin shell's rate-limit banner (GET /api/v1/mail/status, mail:admin in

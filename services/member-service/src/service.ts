@@ -2,7 +2,8 @@
 // context, throws DubError, returns canonical @dub/types wire DTOs. The Hono app is a
 // thin adapter. member_teams is the source of truth for the shared Team entity.
 import { DubError, errors } from "@dub/errors";
-import { type common, member } from "@dub/types";
+import { type common, type mail, member } from "@dub/types";
+import { managedMailboxes } from "./managed-mail";
 import type { AppDeps, OnboardingItemRow, OnboardingMeetingRow, ParticipationRow, PersonRow, TeamRow } from "./types";
 import {
   composeName,
@@ -177,6 +178,15 @@ export class MemberService {
       userIds.push(uid);
     }
     return { userIds };
+  }
+
+  /** #942: members whose mailbox `viewerUserId` may open read-only (their 班 / their team).
+   *  mail-gateway asks on every managed-mailbox request; see managed-mail.ts for the range. */
+  async listManagedMailboxes(viewerUserId: string): Promise<mail.MailManagedMailboxList> {
+    if (!viewerUserId) return { items: [] };
+    const orgId = this.deps.orgId;
+    const [people, links] = await Promise.all([this.deps.repo.listPeople(orgId), this.deps.repo.teamLinksForOrg(orgId)]);
+    return { items: managedMailboxes(viewerUserId, people, links) };
   }
 
   /** Names of the given teams (mail-gateway: a team mailing list picked as the From is sent as

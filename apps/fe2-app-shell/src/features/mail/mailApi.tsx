@@ -84,6 +84,12 @@ export interface MailApi {
   /** 共用アドレス (0027): the Froms the user may pick, own address first (mail:read). Optional so
    *  fakes without it simply offer no choice. */
   listSendAs?(): Promise<mail.MailSendAsOption[]>;
+  /** #942: the members whose mailbox the signed-in user may open read-only (their 班 / team).
+   *  Optional so fakes without it simply offer no picker. */
+  listManagedMailboxes?(): Promise<mail.MailManagedMailbox[]>;
+  /** #942: a read-only api over one managed member's mailbox (reads go to /mail/managed/:userId;
+   *  every write rejects without a request). Optional like listManagedMailboxes. */
+  forManaged?(userId: string): MailApi;
   /** List sent messages, newest first (mail:read). */
   listSent(query?: SentQuery): Promise<Paginated<MailSentListItem>>;
   /** Fetch one sent message's full detail — body + recipients (mail:read). */
@@ -130,9 +136,88 @@ export function newIdempotencyKey(): string {
   return globalThis.crypto?.randomUUID?.() ?? `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function inboxQuery(query: InboxQuery | undefined): Record<string, string | number | boolean | undefined> {
+  const q: Record<string, string | number | boolean | undefined> = {};
+  if (query?.limit !== undefined) q.limit = query.limit;
+  if (query?.cursor !== undefined) q.cursor = query.cursor;
+  if (query?.threadId !== undefined) q.threadId = query.threadId;
+  if (query?.q !== undefined) q.q = query.q;
+  if (query?.folder !== undefined) q.folder = query.folder;
+  if (query?.withTotal === false) q.withTotal = "0";
+  return q;
+}
+
+function sentQuery(query: SentQuery | undefined): Record<string, string | number | boolean | undefined> {
+  const q: Record<string, string | number | boolean | undefined> = {};
+  if (query?.limit !== undefined) q.limit = query.limit;
+  if (query?.cursor !== undefined) q.cursor = query.cursor;
+  if (query?.q !== undefined) q.q = query.q;
+  return q;
+}
+
+const withQuery = (q: Record<string, string | number | boolean | undefined>) => (Object.keys(q).length > 0 ? { query: q } : {});
+
+/** Thrown by every write of a managed (read-only) mailbox — nothing is sent to the server. */
+export class ReadOnlyMailboxError extends Error {
+  constructor() {
+    super("他のメンバーのメールは閲覧のみです");
+    this.name = "ReadOnlyMailboxError";
+  }
+}
+
+/** #942: one managed member's mailbox, read-only. Reads go to /mail/managed/:userId/*; the
+ *  caller's personal lists (drafts, templates, scheduled, blocks, flags) are empty here, and
+ *  every write rejects before any request, so nothing can be sent as / changed for the member. */
+export function createManagedMailApi(api: ApiClient, userId: string): MailApi {
+  const base = `${MAIL}/managed/${encodeURIComponent(userId)}` as const;
+  const denied = (): Promise<never> => Promise.reject(new ReadOnlyMailboxError());
+  return {
+    listInbox: (query) => api.request<mail.MailMessagePage>({ method: "GET", path: `${base}/messages`, ...withQuery(inboxQuery(query)) }),
+    counts: () => api.request<mail.MailFolderCounts>({ method: "GET", path: `${base}/counts` }),
+    getMessage: (id) => api.request<MailMessageDetail>({ method: "GET", path: `${base}/messages/${encodeURIComponent(id)}` }),
+    getThread: (threadId) => api.request<MailThread>({ method: "GET", path: `${base}/threads/${encodeURIComponent(threadId)}` }),
+    listSent: (query) => api.request<Paginated<MailSentListItem>>({ method: "GET", path: `${base}/sent`, ...withQuery(sentQuery(query)) }),
+    getSent: (id) => api.request<MailSentDetail>({ method: "GET", path: `${base}/sent/${encodeURIComponent(id)}` }),
+    downloadAttachment: (kind, messageId, attId) =>
+      kind === "drafts" ? denied() : api.download(`${base}/${kind}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attId)}` as `/api/v1/${string}`),
+    avatars: (emails) => api.request<mail.MailAvatarsResponse, mail.MailAvatarsRequest>({ method: "POST", path: `${MAIL}/avatars`, body: { emails } }),
+    listDrafts: () => Promise.resolve([]),
+    listTemplates: () => Promise.resolve([]),
+    listFlags: () => Promise.resolve([]),
+    listBlocks: () => Promise.resolve([]),
+    listScheduled: () => Promise.resolve({ items: [], nextCursor: null }),
+    listSendAs: () => Promise.resolve([]),
+    listManagedMailboxes: () => Promise.resolve([]),
+    send: denied,
+    markRead: denied,
+    setReadState: denied,
+    bulkAction: denied,
+    saveDraft: denied,
+    deleteDraft: denied,
+    addDraftAttachment: denied,
+    removeDraftAttachment: denied,
+    saveTemplate: denied,
+    deleteTemplate: denied,
+    setFlags: denied,
+    schedule: denied,
+    getScheduled: denied,
+    updateScheduled: denied,
+    cancelScheduled: denied,
+    addBlock: denied,
+    removeBlock: denied,
+    getForward: denied,
+    registerForward: denied,
+    updateForward: denied,
+    removeForward: denied,
+  };
+}
+
 /** Build the mail api from the shell ApiClient (fed in composition, faked in tests). */
 export function createMailApi(api: ApiClient): MailApi {
   return {
+    listManagedMailboxes: () =>
+      api.request<mail.MailManagedMailboxList>({ method: "GET", path: `${MAIL}/managed-mailboxes` }).then((r) => r.items),
+    forManaged: (userId) => createManagedMailApi(api, userId),
     send: (req, opts) =>
       api.request<SendMailResponse, SendMailRequest>({
         method: "POST",

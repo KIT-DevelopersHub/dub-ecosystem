@@ -118,6 +118,20 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /mail/messages": appLevel("mail", "view", "mail:read"),
   "GET /mail/messages/:id": appLevel("mail", "view", "mail:read"),
   "GET /mail/counts": appLevel("mail", "view", "mail:read"),
+
+  // 自分の班・チームのメンバーのメール (#942): read-only, GET only. The key says the caller may
+  // use the feature at all (ロール管理 > メール 詳細設定). WHICH member's mailbox — a leader's 班,
+  // an organizer's team, nothing wider — is the handler's assertManaged (managed-view.ts), asked
+  // of member-service per request: data-dependent, so not the table's job.
+  "GET /mail/managed-mailboxes": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/messages": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/counts": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/messages/:id": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/messages/:id/attachments/:attId": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/threads/:id": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/sent": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/sent/:id": appLevel("mail", "view", "mail:read", "mail:read_managed"),
+  "GET /mail/managed/:userId/sent/:id/attachments/:attId": appLevel("mail", "view", "mail:read", "mail:read_managed"),
   "POST /mail/messages/:id/read": appLevel("mail", "view", "mail:read"),
   "POST /mail/read-state": appLevel("mail", "view", "mail:read"),
   "POST /mail/bulk": appLevel("mail", "view", "mail:read"),

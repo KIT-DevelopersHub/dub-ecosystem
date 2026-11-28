@@ -518,6 +518,19 @@ export interface MailSendAsOption {
 export interface MailSendAsList {
   items: MailSendAsOption[];
 }
+/** Why a managed mailbox is visible: the viewer leads the member's 班 / organizes their team. */
+export type MailManagedRelation = "squad" | "team";
+/** One member whose mailbox the viewer may open read-only (GET /mail/managed-mailboxes, #942). */
+export interface MailManagedMailbox {
+  userId: string;
+  name: string;
+  relation: MailManagedRelation;
+}
+/** GET /mail/managed-mailboxes: empty unless the viewer holds mail:read_managed and leads a
+ *  班 (役職 リーダー) or organizes a team (役職 オーガナイザー). */
+export interface MailManagedMailboxList {
+  items: MailManagedMailbox[];
+}
 export const MAIL_SHARED_DISPLAY_NAME_MAX = 100;
 export const MAIL_SHARED_SIGNATURE_MAX = 2_000;
 

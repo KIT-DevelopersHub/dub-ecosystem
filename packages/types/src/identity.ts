@@ -52,6 +52,7 @@ export const PERMISSION_CATALOG = [
   { key: "mail:read", name: "Read mail", description: "View messages/threads/rules", domain: "mail", dangerous: false },
   { key: "mail:read_all", name: "Read all mail", description: "View every user's mail (oversight/archive)", domain: "mail", dangerous: true },
   { key: "mail:read_role_shared", name: "Read role-shared mail", description: "View mail delivered to other holders of a role that carries this key", domain: "mail", dangerous: true },
+  { key: "mail:read_managed", name: "Read managed members' mail", description: "View (read-only) the mail of the members one manages: a leader's 班, an organizer's team", domain: "mail", dangerous: true },
   { key: "mail:admin", name: "Administer mail", description: "Manage mailbox/watch/rules", domain: "mail", dangerous: true },
   // チャンネル作成は積み上げ式の 3 択 (作成できない / パブリックのみ / プライベートも)。ロール管理は
   // トグルではなく 1 つの選択肢として出す (policy.chatCreateScopeOf)。create_private ⇒ create。

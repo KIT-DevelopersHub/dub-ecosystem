@@ -132,6 +132,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.listTeamNames(teamIds));
   });
 
+  // 自分がマネジメントする範囲 (mail-gateway → member-service, s2s のみ・#942)。
+  // ?userId=<identity id> -> { items: [{ userId, name, relation }] }: リーダーは自分の班、
+  // オーガナイザーは自分のチームのメンバー。範囲の決め方は managed-mail.ts。
+  app.get("/members/internal/managed-mailboxes", async (c) => {
+    return c.json(await svc.listManagedMailboxes(c.req.query("userId") ?? ""));
+  });
+
   // 名簿の Gmail 逆引き (drive-share-service → member-service, s2s のみ). カレンダー > ミーティングの
   // 招待先を「名簿の Gmail、無ければ Dub のログインメール」で決めるため。body { userIds } ->
   // { items: [{ userId, gmail, name }] } (リンク済みの行だけ)。
