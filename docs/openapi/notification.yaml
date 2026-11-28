@@ -580,6 +580,42 @@ components:
               type: string
             name:
               type: string
+        device:
+          $ref: '#/components/schemas/FeedbackDevice'
+    FeedbackClient:
+      type: string
+      description: Where the submission came from. *-app only when the Dub app WebView marked its UA with "DubApp/<platform> <version> (<build>)".
+      enum:
+        - ios-app
+        - android-app
+        - desktop-app
+        - web-mobile
+        - web-pc
+    FeedbackDevice:
+      type: object
+      description: Best-effort device context auto-attached by the client. An unknown client drops it (the submit never fails); long strings are cut. No IP is stored.
+      required:
+        - client
+      properties:
+        client:
+          $ref: '#/components/schemas/FeedbackClient'
+        os:
+          type: string
+        osVersion:
+          type: string
+        browser:
+          type: string
+        screenWidth:
+          type: integer
+        screenHeight:
+          type: integer
+        appVersion:
+          type: string
+        appBuild:
+          type: string
+        userAgent:
+          type: string
+          description: Raw UA, capped at 512 chars.
     CreateFeedbackResponse:
       type: object
       required:
@@ -600,6 +636,7 @@ components:
         - message
         - pageUrl
         - pageName
+        - device
         - readAt
         - createdAt
       properties:
@@ -621,6 +658,11 @@ components:
           type:
             - string
             - 'null'
+        device:
+          description: null for submissions without device context (incl. every row before it existed).
+          oneOf:
+            - $ref: '#/components/schemas/FeedbackDevice'
+            - type: 'null'
         readAt:
           type:
             - string

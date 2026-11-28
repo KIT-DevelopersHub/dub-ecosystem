@@ -60,7 +60,7 @@ const sampleMessage: InboundMail = {
 };
 
 describe("createMailGatewayClient — getMessage", () => {
-  it("issues GET /messages/:id with x-dub-* headers and parses the body", async () => {
+  it("issues GET /internal/messages/:id with x-dub-* headers and parses the body", async () => {
     const { binding, calls } = fakeFetcher(() => jsonResponse(sampleMessage));
     const client = createMailGatewayClient(binding);
 
@@ -70,7 +70,7 @@ describe("createMailGatewayClient — getMessage", () => {
     expect(calls).toHaveLength(1);
     const req = calls[0]!;
     expect(req.method).toBe("GET");
-    expect(new URL(req.url).pathname).toBe("/messages/gwmsg_1");
+    expect(new URL(req.url).pathname).toBe("/internal/messages/gwmsg_1");
     expect(new URL(req.url).searchParams.has("mailbox")).toBe(false);
     // request-context headers stamped by the @dub/http client
     expect(req.headers["x-dub-request-id"]).toBe("req_test_1");
@@ -95,7 +95,7 @@ describe("createMailGatewayClient — getMessage", () => {
     await client.getMessage(ctx, "msg/with space");
 
     // encodeURIComponent -> %2F is not decoded into a path separator
-    expect(new URL(calls[0]!.url).pathname).toBe("/messages/msg%2Fwith%20space");
+    expect(new URL(calls[0]!.url).pathname).toBe("/internal/messages/msg%2Fwith%20space");
   });
 
   it("restores an upstream business error (code passthrough, not a generic 502)", async () => {

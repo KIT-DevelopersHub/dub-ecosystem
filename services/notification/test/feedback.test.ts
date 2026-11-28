@@ -4,7 +4,8 @@ import { describe, it, expect } from "vitest";
 import type { Fetcher } from "@cloudflare/workers-types";
 import type { notification } from "@dub/types";
 import { createApp } from "../src/app";
-import { buildFeedbackEmail, buildFeedbackNotifyInput, notifyAdminsOfFeedbackInApp } from "../src/feedback";
+import { buildFeedbackEmail, buildFeedbackNotifyInput, deviceLine, notifyAdminsOfFeedbackInApp } from "../src/feedback";
+import { sanitizeFeedbackDevice } from "../src/validation";
 import { buildIngestDeps } from "../src/deps";
 import { unreadCount, listInbox } from "../src/repo";
 import {
@@ -198,6 +199,7 @@ describe("in-app feedback", () => {
       message: "希望日時の候補: 11/10 午後",
       pageUrl: null,
       pageName: null,
+      device: null,
       readAt: null,
       createdAt: "2026-11-04T00:00:00.000Z",
     };
@@ -223,6 +225,7 @@ describe("in-app feedback", () => {
       message: "アプリ: 名簿",
       pageUrl: null,
       pageName: null,
+      device: null,
       readAt: null,
       createdAt: "2026-11-09T00:00:00.000Z",
     };
@@ -241,6 +244,7 @@ describe("in-app feedback", () => {
       message: "検索を速くしてほしい",
       pageUrl: "https://app/s",
       pageName: "検索",
+      device: null,
       readAt: null,
       createdAt: "2026-08-11T00:00:00.000Z",
     });
@@ -318,6 +322,7 @@ describe("feedback -> in-app admin notifications", () => {
       message: "二重にならないこと",
       pageUrl: null,
       pageName: "設定",
+      device: null,
       readAt: null,
       createdAt: "2026-08-11T00:00:00.000Z",
     };
@@ -343,6 +348,7 @@ describe("feedback -> in-app admin notifications", () => {
         message: "使い方が分からない",
         pageUrl: "https://app/x",
         pageName: "ホーム",
+        device: null,
         readAt: null,
         createdAt: "2026-08-11T00:00:00.000Z",
       },
@@ -356,5 +362,110 @@ describe("feedback -> in-app admin notifications", () => {
     expect(input.resourceType).toBe("feedback");
     expect(input.resourceId).toBe("nfb_9");
     expect(input.actorId).toBe("usr_a");
+  });
+});
+
+describe("feedback device context", () => {
+  const ios: notification.FeedbackDevice = {
+    client: "ios-app",
+    os: "iOS",
+    osVersion: "18.1",
+    browser: "WebView",
+    screenWidth: 390,
+    screenHeight: 844,
+    appVersion: "1.0.2",
+    appBuild: "6",
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) DubApp/ios 1.0.2 (6)",
+  };
+
+  it("POST /feedback: stores the device columns + client UA; GET /feedback returns it", async () => {
+    const h = makeTestEnv({ SVC_IDENTITY: fakeAuthzIdentity(true) });
+    const mail = recordingMail("ok");
+    const app = createApp({ mail });
+    const req = reqOf(app, h);
+    const res = await req("/feedback", jsonPost({ message: "押せない", category: "bug", device: ios }));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as notification.CreateFeedbackResponse;
+    const row = await h.db.first<Record<string, unknown>>(
+      `SELECT client, os, os_version, browser, screen_width, screen_height, app_version, app_build, user_agent FROM notif_feedback WHERE id = ?`,
+      id,
+    );
+    expect(row).toEqual({
+      client: "ios-app",
+      os: "iOS",
+      os_version: "18.1",
+      browser: "WebView",
+      screen_width: 390,
+      screen_height: 844,
+      app_version: "1.0.2",
+      app_build: "6",
+      user_agent: ios.userAgent,
+    });
+    const body = (mail.calls[0]!.req as { textBody: string }).textBody;
+    expect(body).toContain("端末: iPhone アプリ 1.0.2(6)・iOS 18.1・390×844");
+    expect(body).toContain(`User-Agent: ${ios.userAgent}`);
+
+    const list = await req("/feedback", { method: "GET", headers: { "x-dub-user-id": "usr_admin" } });
+    const page = (await list.json()) as notification.ListFeedbackResponse;
+    expect(page.items[0]!.device).toEqual(ios);
+  });
+
+  it("POST /feedback: no device -> NULL columns, the header UA is kept (capped)", async () => {
+    const h = makeTestEnv();
+    const req = reqOf(createApp({ mail: recordingMail("ok") }), h);
+    const init = jsonPost({ message: "古いバンドル" });
+    (init.headers as Record<string, string>)["user-agent"] = "x".repeat(2000);
+    const res = await req("/feedback", init);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as notification.CreateFeedbackResponse;
+    const row = await h.db.first<{ client: string | null; user_agent: string }>(
+      `SELECT client, user_agent FROM notif_feedback WHERE id = ?`,
+      id,
+    );
+    expect(row?.client).toBeNull();
+    expect(row?.user_agent).toHaveLength(512);
+  });
+
+  it("POST /feedback: an invalid device never fails the submit", async () => {
+    const h = makeTestEnv();
+    const req = reqOf(createApp({ mail: recordingMail("ok") }), h);
+    const res = await req("/feedback", jsonPost({ message: "x", device: { client: "smart-fridge" } }));
+    expect(res.status).toBe(201);
+  });
+
+  it("sanitizeFeedbackDevice: only known clients pass; bad fields dropped; long strings cut; extras ignored", () => {
+    expect(sanitizeFeedbackDevice(undefined)).toBeUndefined();
+    expect(sanitizeFeedbackDevice("ios-app")).toBeUndefined();
+    expect(sanitizeFeedbackDevice({ os: "iOS" })).toBeUndefined();
+    expect(sanitizeFeedbackDevice({ client: "IOS-APP" })).toBeUndefined();
+    const d = sanitizeFeedbackDevice({
+      client: "web-pc",
+      os: "  Windows ",
+      osVersion: 10,
+      browser: "b".repeat(100),
+      screenWidth: 1280.5,
+      screenHeight: 720,
+      userAgent: "u".repeat(600),
+      ip: "203.0.113.1",
+    });
+    expect(d).toEqual({ client: "web-pc", os: "Windows", browser: "b".repeat(64), screenHeight: 720, userAgent: "u".repeat(512) });
+    expect(sanitizeFeedbackDevice({ client: "web-mobile", screenWidth: -1, screenHeight: 1e9 })).toEqual({ client: "web-mobile" });
+  });
+
+  it("deviceLine: app shows its version, web shows the browser, unknown says (不明)", () => {
+    expect(deviceLine({ device: ios })).toBe("端末: iPhone アプリ 1.0.2(6)・iOS 18.1・390×844");
+    expect(deviceLine({ device: { client: "web-pc", os: "macOS", osVersion: "15.1", browser: "Chrome 131", screenWidth: 1440, screenHeight: 900 } })).toBe(
+      "端末: PC のブラウザ・macOS 15.1・Chrome 131・1440×900",
+    );
+    expect(deviceLine({ device: { client: "android-app" } })).toBe("端末: Android アプリ");
+    expect(deviceLine({ device: null })).toBe("端末: (不明)");
+  });
+
+  it("buildFeedbackNotifyInput: the in-app body carries the 端末 line", () => {
+    const input = buildFeedbackNotifyInput(
+      { id: "nfb_d", userId: "usr_a", category: "bug", kind: "feedback", message: "m", pageUrl: null, pageName: null, device: ios, readAt: null, createdAt: "2026-11-28T00:00:00.000Z" },
+      "req_d",
+    );
+    expect(input.body).toContain("端末: iPhone アプリ 1.0.2(6)・iOS 18.1・390×844");
   });
 });

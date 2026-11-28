@@ -18,6 +18,9 @@ import {
   FEEDBACK_MESSAGE_MAX,
   FEEDBACK_PAGE_URL_MAX,
   FEEDBACK_PAGE_NAME_MAX,
+  FEEDBACK_UA_MAX,
+  FEEDBACK_DEVICE_FIELD_MAX,
+  FEEDBACK_SCREEN_MAX,
   RELEASE_TITLE_MAX,
   RELEASE_BODY_MAX,
   RELEASE_APP_MAX,
@@ -318,6 +321,54 @@ export function parseCreateFeedback(body: unknown): notification.CreateFeedbackR
   if (category !== undefined) out.category = category;
   if (kind !== undefined) out.kind = kind;
   if (page !== undefined) out.page = page;
+  const device = sanitizeFeedbackDevice(b.device);
+  if (device !== undefined) out.device = device;
+  return out;
+}
+
+const FEEDBACK_CLIENT_SET: ReadonlySet<string> = new Set(notification.FEEDBACK_CLIENTS);
+
+function cutString(v: unknown, max: number): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  return s ? s.slice(0, max) : undefined;
+}
+
+function screenSize(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isInteger(v) && v > 0 && v <= FEEDBACK_SCREEN_MAX ? v : undefined;
+}
+
+/** Cap a header UA the same way as the client-reported one (null when absent). */
+export function cutUserAgent(v: string | undefined): string | null {
+  return cutString(v, FEEDBACK_UA_MAX) ?? null;
+}
+
+/** The device columns minus the raw UA (which rides the existing user_agent column). */
+export function withoutUserAgent(d: notification.FeedbackDevice): Omit<notification.FeedbackDevice, "userAgent"> {
+  const { userAgent: _ua, ...rest } = d;
+  return rest;
+}
+
+/**
+ * Best-effort device context (notification.FeedbackDevice). Never fails the submit: a
+ * missing / unknown `client` drops the whole object, bad fields are dropped, long strings
+ * are cut. Only the declared fields pass through (nothing else is stored).
+ */
+export function sanitizeFeedbackDevice(v: unknown): notification.FeedbackDevice | undefined {
+  if (!isPlainObject(v)) return undefined;
+  if (typeof v.client !== "string" || !FEEDBACK_CLIENT_SET.has(v.client)) return undefined;
+  const out: notification.FeedbackDevice = { client: v.client as notification.FeedbackClient };
+  const strings = ["os", "osVersion", "browser", "appVersion", "appBuild"] as const;
+  for (const k of strings) {
+    const s = cutString(v[k], FEEDBACK_DEVICE_FIELD_MAX);
+    if (s !== undefined) out[k] = s;
+  }
+  const w = screenSize(v.screenWidth);
+  const h = screenSize(v.screenHeight);
+  if (w !== undefined) out.screenWidth = w;
+  if (h !== undefined) out.screenHeight = h;
+  const ua = cutString(v.userAgent, FEEDBACK_UA_MAX);
+  if (ua !== undefined) out.userAgent = ua;
   return out;
 }
 

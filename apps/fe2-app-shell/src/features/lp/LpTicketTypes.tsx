@@ -28,6 +28,7 @@ import {
   TICKET_NAME_MAX,
   TICKET_PRICE_MIN_PAID,
   COUPON_ONLY_NOTE,
+  OPEN_REGISTRATION_NOTE,
   formatPrice,
   formatYen,
   groupTicketTypesByDay,
@@ -46,6 +47,7 @@ const EMPTY_DRAFT: TicketTypeDraft = {
   dayLabel: "",
   maxPerOrder: String(TICKET_MAX_PER_ORDER_DEFAULT),
   active: true,
+  openRegistration: false,
 };
 
 function draftOf(t: LpTicketTypeSummary): TicketTypeDraft {
@@ -57,6 +59,7 @@ function draftOf(t: LpTicketTypeSummary): TicketTypeDraft {
     dayLabel: t.dayLabel,
     maxPerOrder: String(t.maxPerOrder),
     active: t.active,
+    openRegistration: t.openRegistration,
   };
 }
 
@@ -104,9 +107,15 @@ export function LpTicketTypesCard({
           t.priceJpy === 0 ? (
             <Stack gap={1}>
               <span className={styles.num}>{formatPrice(t.priceJpy)}</span>
-              <span className={styles.kpiHint} data-testid={`fe2-lp-ticket-type-coupon-only-${t.id}`}>
-                クーポン専用
-              </span>
+              {t.openRegistration ? (
+                <span className={styles.kpiHint} data-testid={`fe2-lp-ticket-type-open-registration-${t.id}`}>
+                  無料参加登録
+                </span>
+              ) : (
+                <span className={styles.kpiHint} data-testid={`fe2-lp-ticket-type-coupon-only-${t.id}`}>
+                  クーポン専用
+                </span>
+              )}
             </Stack>
           ) : (
             <span className={styles.num}>{formatPrice(t.priceJpy)}</span>
@@ -293,6 +302,7 @@ function TicketTypeDialog({
     if (result.input) onSubmit(result.input);
   };
   const err = (k: keyof TicketTypeDraftErrors) => (errors[k] ? { error: errors[k] } : {});
+  const isFree = draft.price.trim() !== "" && Number(draft.price.trim()) === 0;
 
   return (
     <Modal
@@ -361,14 +371,23 @@ function TicketTypeDialog({
           label="価格（円）"
           htmlFor="fe2-lp-ticket-type-price"
           required
-          help={`0 = 無料（決済なし・クーポンコードで申し込む券種）。有料は ${TICKET_PRICE_MIN_PAID} 円以上`}
+          help={`0 = 無料（決済なし。クーポン専用か、誰でも申し込める無料参加登録）。有料は ${TICKET_PRICE_MIN_PAID} 円以上`}
           {...err("price")}
         >
           <div style={{ display: "grid", gap: "var(--dub-space-2)" }}>
             <TextField id="fe2-lp-ticket-type-price" testId="fe2-lp-ticket-type-price" type="number" value={draft.price} placeholder="3000" onChange={(v) => set({ price: v })} />
-            {draft.price.trim() !== "" && Number(draft.price.trim()) === 0 ? (
+            {isFree ? (
+              <Switch
+                id="fe2-lp-ticket-type-open-registration"
+                testId="fe2-lp-ticket-type-open-registration"
+                checked={draft.openRegistration}
+                label="無料で参加登録（クーポン無しで誰でも申し込める）"
+                onChange={(v) => set({ openRegistration: v })}
+              />
+            ) : null}
+            {isFree ? (
               <p
-                data-testid="fe2-lp-ticket-type-coupon-note"
+                data-testid={draft.openRegistration ? "fe2-lp-ticket-type-open-registration-note" : "fe2-lp-ticket-type-coupon-note"}
                 style={{
                   display: "flex",
                   alignItems: "flex-start",
@@ -384,7 +403,11 @@ function TicketTypeDialog({
                 }}
               >
                 <Icon name="info" />
-                <span>{COUPON_ONLY_NOTE}。コードは「クーポン」欄から発行して招待者に渡してください。</span>
+                <span>
+                  {draft.openRegistration
+                    ? `${OPEN_REGISTRATION_NOTE}。`
+                    : `${COUPON_ONLY_NOTE}。コードは「クーポン」欄から発行して招待者に渡してください。`}
+                </span>
               </p>
             ) : null}
           </div>

@@ -23,6 +23,7 @@ import type {
   LpTicketReceipt,
   LpTicketReceiptIssuer,
   LpTicketPaymentMethod,
+  LpTicketPublicType,
   LpTicketRefundErrorReason,
   LpTicketRefundResponse,
   LpTicketsState,
@@ -58,6 +59,12 @@ const RESERVED_FIELD_IDS: ReadonlySet<string> = new Set(["name", "email"]);
  * campus IP still fits 20 tickets in flight at the same moment.
  */
 export const PER_CLIENT_HELD_MAX = 20;
+/**
+ * 無料参加登録 per sender per window: a shared campus IP still fits a group signing up together,
+ * a script filling the form with fresh addresses stops quickly. The email itself is unique per site.
+ */
+export const FREE_SIGNUP_PER_CLIENT_MAX = 10;
+export const FREE_SIGNUP_WINDOW_MS = 60 * 60 * 1000;
 /**
  * Coupon codes are generated here, never typed by staff: 10 chars from 31 symbols (no 0/O/1/I/L)
  * = ~8e14 codes, so guessing one through the public form is not a practical attack.
@@ -172,8 +179,18 @@ export function parseTicketTypeInput(body: unknown, partial: boolean): Partial<L
     if (typeof a !== "boolean") bad.push({ field: "active", reason: "invalid" });
     else out.active = a;
   }
+  if (has("openRegistration") || !partial) {
+    const r = b.openRegistration === undefined ? false : b.openRegistration;
+    if (typeof r !== "boolean") bad.push({ field: "openRegistration", reason: "invalid" });
+    else out.openRegistration = r;
+  }
   if (bad.length > 0) throw errors.validationFailed(bad);
   return out;
+}
+
+/** 無料参加登録 is a 0-yen-only flag (checked on the merged row, so a PATCH of either field is covered). */
+function assertOpenRegistration(t: Pick<LpTicketType, "priceJpy" | "openRegistration">): void {
+  if (t.openRegistration && t.priceJpy !== 0) throw errors.validationFailed([{ field: "openRegistration", reason: "requires_free" }]);
 }
 
 function parseFields(body: unknown): LpTicketField[] {
@@ -354,6 +371,13 @@ export const couponUsedUp = (): DubError =>
     status: 409,
     details: { reason: "coupon_used_up" },
   });
+/** 409: this email already holds a 無料参加登録 for this event (contract: already_registered). */
+export const alreadyRegistered = (): DubError =>
+  new DubError("LP_TICKET_ALREADY_REGISTERED", "このメールアドレスはすでに参加登録されています", {
+    status: 409,
+    retryable: false,
+    details: { reason: "already_registered" },
+  });
 /** One answer for unknown / paused / expired codes and paused target types: no hint which it was. */
 const couponInvalid = (): DubError => errors.validationFailed([{ field: "couponCode", reason: "invalid" }]);
 /** 409: no Stripe test key (unset or live), so the preview cannot buy (contract: preview_checkout_unavailable). */
@@ -383,19 +407,7 @@ export const paymentNotConfigured = (): DubError =>
     details: { reason: "payment_not_configured" },
   });
 
-export interface PublicTicketType {
-  id: string;
-  name: string;
-  description: string;
-  priceJpy: number;
-  dayLabel: string;
-  maxPerOrder: number;
-  /** Left after paid + held. null = no capacity. */
-  remaining: number | null;
-  soldOut: boolean;
-  /** 0-yen type: only bought with a coupon code (the LP hides it from the normal list). */
-  couponOnly: boolean;
-}
+export type PublicTicketType = LpTicketPublicType;
 
 export interface PublicCoupon {
   ticketTypeId: string;
@@ -500,10 +512,12 @@ export class TicketService {
     const input = parseTicketTypeInput(body, false);
     const existing = await this.repo.listTicketTypes(TICKET_SITE);
     const now = this.deps.now();
+    assertOpenRegistration(input as Pick<LpTicketType, "priceJpy" | "openRegistration">);
     const row: TicketTypeRow = {
       id: this.deps.newTicketTypeId(),
       site: TICKET_SITE,
       ...input,
+      openRegistration: input.openRegistration ?? false,
       sortOrder: existing.reduce((m, t) => Math.max(m, t.sortOrder + 1), 0),
       createdAt: now,
       updatedAt: now,
@@ -517,6 +531,7 @@ export class TicketService {
     const cur = await this.repo.getTicketType(TICKET_SITE, id);
     if (!cur) throw errors.notFound("lp_ticket_type", id);
     const row: TicketTypeRow = { ...cur, ...patch, updatedAt: this.deps.now() };
+    assertOpenRegistration(row);
     await this.repo.updateTicketType(row);
     return this.summary(row);
   }
@@ -581,7 +596,8 @@ export class TicketService {
           maxPerOrder: t.maxPerOrder,
           remaining: t.stats.remaining,
           soldOut: t.stats.remaining === 0,
-          couponOnly: t.priceJpy === 0,
+          couponOnly: t.priceJpy === 0 && !t.openRegistration,
+          openRegistration: t.priceJpy === 0 && t.openRegistration,
         })),
     };
   }
@@ -607,7 +623,9 @@ export class TicketService {
       const t = types.get(i.ticketTypeId);
       if (!t || !t.active) bad.push({ field: `items.${i.ticketTypeId}`, reason: "unavailable" });
       else if (i.quantity > t.maxPerOrder) bad.push({ field: `items.${i.ticketTypeId}`, reason: "too_many" });
-      else if (!coupon && t.priceJpy === 0) bad.push({ field: `items.${i.ticketTypeId}`, reason: "coupon_required" });
+      else if (!coupon && t.priceJpy === 0 && !t.openRegistration) bad.push({ field: `items.${i.ticketTypeId}`, reason: "coupon_required" });
+      // 無料参加登録 = one person, one ticket: the email is what makes it unique.
+      else if (!coupon && t.priceJpy === 0 && i.quantity > 1) bad.push({ field: `items.${i.ticketTypeId}`, reason: "too_many" });
       else
         items.push({
           ticketTypeId: t.id,
@@ -617,6 +635,9 @@ export class TicketService {
           quantity: i.quantity,
         });
     }
+    // A sign-up never rides along a paid order: the per-email guard keys on "0 yen without a coupon".
+    const signup = !coupon && items.some((i) => i.unitPriceJpy === 0);
+    if (signup && items.some((i) => i.unitPriceJpy > 0)) bad.push({ field: "items", reason: "free_with_paid" });
     if (bad.length > 0) throw errors.validationFailed(bad);
     const amountJpy = items.reduce((n, i) => n + i.unitPriceJpy * i.quantity, 0);
     const free = amountJpy === 0;
@@ -633,6 +654,18 @@ export class TicketService {
       (await this.repo.heldPendingByClient(TICKET_SITE, input.clientKey, this.pendingSince())) + quantity > PER_CLIENT_HELD_MAX
     ) {
       throw errors.rateLimited(60);
+    }
+    if (
+      signup &&
+      !preview &&
+      input.clientKey &&
+      (await this.repo.countFreeSignupsByClient(
+        TICKET_SITE,
+        input.clientKey,
+        new Date(Date.parse(now) - FREE_SIGNUP_WINDOW_MS).toISOString(),
+      )) >= FREE_SIGNUP_PER_CLIENT_MAX
+    ) {
+      throw errors.rateLimited(300);
     }
 
     const row: TicketOrderRow = {
@@ -660,12 +693,20 @@ export class TicketService {
       receiptName: input.receiptName,
     };
     const capacities = new Map(items.map((i) => [i.ticketTypeId, types.get(i.ticketTypeId)!.capacity]));
-    const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince());
+    // Test sign-ups from LP管理 may reuse one address; real ones are 1 email = 1 ticket per event.
+    const held = await this.repo.insertOrderIfAvailable(row, capacities, this.pendingSince(), {
+      uniqueFreeEmail: signup && !preview,
+    });
     if (!held.ok) {
       if (held.reason === "coupon_used_up") throw couponUsedUp();
+      if (held.reason === "already_registered") {
+        log("info", "lp ticket free signup duplicate", {});
+        throw alreadyRegistered();
+      }
       throw soldOut(held.ticketTypeId);
     }
     if (coupon) log("info", "lp ticket coupon used", { orderId: row.id, couponId: coupon.id, quantity });
+    if (signup) log("info", "lp ticket free signup", { orderId: row.id, quantity });
     if (preview) {
       try {
         await this.repo.markOrderPreview(row.id);

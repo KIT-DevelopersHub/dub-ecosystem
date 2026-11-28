@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_identity.dart';
 import '../config.dart';
 import '../feature_registry.dart';
 import '../mobile/back_policy.dart';
@@ -681,7 +682,8 @@ class _WebShellState extends ConsumerState<WebShell> {
                   javaScriptEnabled: true,
                   javaScriptCanOpenWindowsAutomatically: true,
                   supportZoom: false,
-                  applicationNameForUserAgent: 'Dub-Desktop',
+                  // Tells the web it runs inside the Dub app (feedback device context).
+                  applicationNameForUserAgent: dubAppUserAgentMark(),
                   useShouldOverrideUrlLoading: _isMobile,
                   useOnDownloadStart: _isMobile,
                   // iOS: swipe from the left edge goes back, like Safari.

@@ -11,6 +11,7 @@ import { ingest, type IngestDeps } from "./ingest";
 import type { IngestInput } from "./types";
 import {
   FEEDBACK_ADMIN_EMAIL,
+  FEEDBACK_CLIENT_LABELS,
   FEEDBACK_EXCERPT_LEN,
   FEEDBACK_NOTIFY_TYPE,
   INQUIRY_KIND_LABELS,
@@ -34,6 +35,24 @@ function kindLines(item: notification.FeedbackItem): string[] {
   return lines;
 }
 
+/**
+ * One-line device summary, e.g. 「端末: iPhone アプリ 1.0.2(6)・iOS 18.1・390×844」.
+ * Apps show their version; web shows the browser instead. Unknown → 「端末: (不明)」.
+ */
+export function deviceLine(item: Pick<notification.FeedbackItem, "device">): string {
+  const d = item.device;
+  if (!d) return "端末: (不明)";
+  const isApp = d.client.endsWith("-app");
+  let head = FEEDBACK_CLIENT_LABELS[d.client] ?? d.client;
+  if (isApp && d.appVersion) head += ` ${d.appVersion}${d.appBuild ? `(${d.appBuild})` : ""}`;
+  const parts = [head];
+  const os = [d.os, d.osVersion].filter(Boolean).join(" ");
+  if (os) parts.push(os);
+  if (!isApp && d.browser) parts.push(d.browser);
+  if (d.screenWidth && d.screenHeight) parts.push(`${d.screenWidth}×${d.screenHeight}`);
+  return `端末: ${parts.join("・")}`;
+}
+
 /** Build the admin-notification email for a stored feedback item. */
 export function buildFeedbackEmail(item: notification.FeedbackItem): mail.SendMailRequest {
   const lines = [
@@ -42,11 +61,13 @@ export function buildFeedbackEmail(item: notification.FeedbackItem): mail.SendMa
     ...kindLines(item),
     `送信ユーザー: ${item.userId}`,
     `発生ページ: ${item.pageName ?? "(不明)"}${item.pageUrl ? ` <${item.pageUrl}>` : ""}`,
+    deviceLine(item),
     `送信時刻: ${item.createdAt}`,
     `ID: ${item.id}`,
     ``,
     `--- 本文 ---`,
     item.message,
+    ...(item.device?.userAgent ? [``, `User-Agent: ${item.device.userAgent}`] : []),
   ];
   return {
     to: [{ email: FEEDBACK_ADMIN_EMAIL, name: "DevHub 管理者" }],
@@ -96,6 +117,7 @@ export function buildFeedbackNotifyInput(item: notification.FeedbackItem, reques
     ...kindLines(item),
     `送信ユーザー: ${item.userId}`,
     `発生ページ: ${pageLine}`,
+    deviceLine(item),
     ``,
     excerpt(item.message),
   ].join("\n");

@@ -12,7 +12,7 @@ import type {
   LpTicketTypeSummary,
 } from "../src/types";
 import { stripeFrom } from "../src/deps";
-import { TicketService } from "../src/tickets";
+import { FREE_SIGNUP_PER_CLIENT_MAX, TicketService } from "../src/tickets";
 import { get, makeApp, send, type RepoKind } from "./harness";
 
 const body = async <T>(res: Response): Promise<T> => (await res.json()) as T;
@@ -319,7 +319,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     expect(res.enabled).toBe(true);
     expect(res.paymentReady).toBe(false);
     expect(res.types).toEqual([
-      { id: a.id, name: "A", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: 0, soldOut: true, couponOnly: true },
+      { id: a.id, name: "A", description: "", priceJpy: 0, dayLabel: "", maxPerOrder: 10, remaining: 0, soldOut: true, couponOnly: true, openRegistration: false },
       expect.objectContaining({ name: "C", soldOut: false, couponOnly: true }),
     ]);
   });
@@ -1065,6 +1065,104 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
     }
     // an empty coupon field is "no coupon", not an invalid one
     expect(JSON.stringify(await (await app.fetch(checkout({ ticketTypeId: t.id, couponCode: "  " }))).json())).toContain("coupon_required");
+  });
+
+  it("openRegistration: 0-yen only, defaults off, PATCH of either field is checked; LP gets the flag", async () => {
+    const { app } = await setup(kind);
+    await enable(app);
+    const off = await addType(app, { name: "招待", priceJpy: 0 });
+    expect(off.openRegistration).toBe(false);
+    const free = await addType(app, { name: "学生", priceJpy: 0, openRegistration: true });
+    expect(free.openRegistration).toBe(true);
+    const paid = await addType(app, { name: "一般", priceJpy: 3000 });
+
+    const bad = await app.fetch(send("POST", "/lp/tickets/types", { name: "x", priceJpy: 1000, openRegistration: true }));
+    expect(bad.status).toBe(400);
+    expect(JSON.stringify(await bad.json())).toContain("requires_free");
+    expect((await app.fetch(send("POST", "/lp/tickets/types", { name: "x", priceJpy: 0, openRegistration: "yes" }))).status).toBe(400);
+    expect((await app.fetch(send("PATCH", `/lp/tickets/types/${paid.id}`, { openRegistration: true }))).status).toBe(400);
+    expect((await app.fetch(send("PATCH", `/lp/tickets/types/${free.id}`, { priceJpy: 500 }))).status).toBe(400);
+    // a PATCH without the field keeps it
+    const renamed = await body<LpTicketTypeSummary>(await app.fetch(send("PATCH", `/lp/tickets/types/${free.id}`, { name: "学生（無料）" })));
+    expect(renamed).toMatchObject({ name: "学生（無料）", openRegistration: true });
+    const toggled = await body<LpTicketTypeSummary>(await app.fetch(send("PATCH", `/lp/tickets/types/${off.id}`, { openRegistration: true })));
+    expect(toggled.openRegistration).toBe(true);
+    expect((await body<LpTicketsState>(await app.fetch(get("/lp/tickets")))).types.map((t) => t.openRegistration)).toEqual([true, true, false]);
+
+    const pub = await body<{ types: Array<{ id: string; couponOnly: boolean; openRegistration: boolean }> }>(
+      await app.fetch(get("/lp/internal/tickets", INTERNAL)),
+    );
+    expect(pub.types.find((t) => t.id === free.id)).toMatchObject({ couponOnly: false, openRegistration: true });
+    expect(pub.types.find((t) => t.id === paid.id)).toMatchObject({ couponOnly: false, openRegistration: false });
+    await app.fetch(send("PATCH", `/lp/tickets/types/${off.id}`, { openRegistration: false }));
+    const pub2 = await body<{ types: Array<{ id: string; couponOnly: boolean; openRegistration: boolean }> }>(
+      await app.fetch(get("/lp/internal/tickets", INTERNAL)),
+    );
+    expect(pub2.types.find((t) => t.id === off.id)).toMatchObject({ couponOnly: true, openRegistration: false });
+  });
+
+  it("free sign-up (openRegistration): no coupon, no Stripe, paid at once with a ticket; 1 per email per event", async () => {
+    const stripe = fakeStripe();
+    const { app, repo } = await setup(kind, { stripe });
+    await enable(app);
+    const t = await addType(app, { name: "学生", priceJpy: 0, capacity: 10, openRegistration: true });
+    const paid = await addType(app, { name: "一般", priceJpy: 3000 });
+
+    const res = await app.fetch(checkout({ ticketTypeId: t.id }));
+    expect(res.status).toBe(200);
+    const { redirectUrl } = await body<{ redirectUrl: string }>(res);
+    expect(redirectUrl).toMatch(/\/tickets\/thanks\?order=tko_/);
+    expect(stripe.calls).toHaveLength(0);
+    const orderId = new URL(redirectUrl).searchParams.get("order")!;
+    expect(await repo.getOrder("hokuriku-it-conf.com", orderId)).toMatchObject({ status: "paid", amountJpy: 0, couponId: null });
+    // same ticket rows as any paid order, so the pass / QR / 受付 work unchanged
+    const tickets = await repo.ticketsForOrders([orderId]);
+    expect(tickets).toHaveLength(1);
+    expect(tickets[0]).toMatchObject({ ticketTypeId: t.id, status: "valid" });
+
+    // same address (any case / spaces) → 409 already_registered; a different one is fine
+    const dup = await app.fetch(checkout({ ticketTypeId: t.id, email: " TARO@Example.com " }));
+    expect(dup.status).toBe(409);
+    expect(JSON.stringify(await dup.json())).toContain("already_registered");
+    expect((await app.fetch(checkout({ ticketTypeId: t.id, email: "hanako@example.com" }))).status).toBe(200);
+
+    // one per person, never mixed with a paid line
+    const two = await app.fetch(checkout({ ticketTypeId: t.id, quantity: 2, email: "jiro@example.com" }));
+    expect(two.status).toBe(400);
+    const mixed = await app.fetch(
+      checkout({ email: "jiro@example.com", items: [{ ticketTypeId: t.id, quantity: 1 }, { ticketTypeId: paid.id, quantity: 1 }] }),
+    );
+    expect(mixed.status).toBe(400);
+    expect(JSON.stringify(await mixed.json())).toContain("free_with_paid");
+
+    // the same address may still buy a paid ticket
+    expect((await app.fetch(checkout({ ticketTypeId: paid.id }))).status).toBe(200);
+  });
+
+  it("free sign-up: a refunded (cancelled) sign-up frees the address; a coupon order does not count", async () => {
+    const { app, repo } = await setup(kind);
+    await enable(app);
+    const t = await addType(app, { name: "学生", priceJpy: 0, openRegistration: true });
+    const inv = await addType(app, { name: "招待", priceJpy: 0 });
+    const code = (await issueCoupon(app, inv.id)).code;
+    expect((await app.fetch(checkout({ ticketTypeId: inv.id, couponCode: code }))).status).toBe(200);
+    const first = await body<{ redirectUrl: string }>(await app.fetch(checkout({ ticketTypeId: t.id })));
+    const id = new URL(first.redirectUrl).searchParams.get("order")!;
+    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(409);
+    expect(await repo.markOrderRefunded(id, NOW)).toBe(true);
+    expect((await app.fetch(checkout({ ticketTypeId: t.id }))).status).toBe(200);
+  });
+
+  it("free sign-up: per-sender cap in the window → 429", async () => {
+    const { app } = await setup(kind);
+    await enable(app);
+    const t = await addType(app, { name: "学生", priceJpy: 0, openRegistration: true });
+    const clientKey = "c".repeat(32);
+    for (let i = 0; i < FREE_SIGNUP_PER_CLIENT_MAX; i++) {
+      expect((await app.fetch(checkout({ ticketTypeId: t.id, email: `u${i}@example.com`, clientKey }))).status).toBe(200);
+    }
+    expect((await app.fetch(checkout({ ticketTypeId: t.id, email: "late@example.com", clientKey }))).status).toBe(429);
+    expect((await app.fetch(checkout({ ticketTypeId: t.id, email: "late@example.com", clientKey: "d".repeat(32) }))).status).toBe(200);
   });
 
   it("a coupon on a paid type makes that order 0 yen: paid at once, Stripe never called, seat taken, no revenue", async () => {

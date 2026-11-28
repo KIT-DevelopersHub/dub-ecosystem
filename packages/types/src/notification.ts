@@ -141,6 +141,35 @@ export type FeedbackCategory = "bug" | "idea" | "question" | "other";
  */
 export type InquiryKind = "feedback" | "business_card" | "invite_friend" | "interview" | "other" | "permission_request";
 
+/**
+ * Which client a submission came from (bug triage). "*-app" is only claimed when the Dub
+ * app's WebView marked its UA with {@link DUB_APP_UA_TOKEN}; otherwise the web decides
+ * web-mobile / web-pc from the UA and the viewport.
+ */
+export const FEEDBACK_CLIENTS = ["ios-app", "android-app", "desktop-app", "web-mobile", "web-pc"] as const;
+export type FeedbackClient = (typeof FEEDBACK_CLIENTS)[number];
+
+/**
+ * Mark the Dub app (apps/de1-desktop) appends to its WebView UA:
+ * `DubApp/<platform> <version> (<build>)`, e.g. `DubApp/ios 1.0.2 (3)`.
+ */
+export const DUB_APP_UA_TOKEN = "DubApp";
+export const DUB_APP_PLATFORMS = ["ios", "android", "macos", "windows"] as const;
+export type DubAppPlatform = (typeof DUB_APP_PLATFORMS)[number];
+
+/** Device context auto-attached to a submission. No personal data (no IP, no ids). */
+export interface FeedbackDevice {
+  client: FeedbackClient;
+  os?: string; // "iOS" / "Android" / "macOS" / "Windows" / …
+  osVersion?: string; // "18.1"
+  browser?: string; // "Safari 18.1" / "Chrome 131" / "WebView"
+  screenWidth?: number; // CSS px (viewport)
+  screenHeight?: number;
+  appVersion?: string; // apps only, e.g. "1.0.2"
+  appBuild?: string; // apps only, e.g. "3"
+  userAgent?: string; // raw UA (server caps the length)
+}
+
 export interface CreateFeedbackRequest {
   message: string; // 1..4000
   category?: FeedbackCategory; // default "other"
@@ -150,6 +179,8 @@ export interface CreateFeedbackRequest {
     url?: string; // e.g. https://app.dub/…/events/evt_123
     name?: string; // human screen name, e.g. "イベント詳細"
   };
+  /** Best-effort device context; an invalid one is dropped, never fails the submit. */
+  device?: FeedbackDevice;
 }
 export interface CreateFeedbackResponse {
   id: string;
@@ -164,6 +195,8 @@ export interface FeedbackItem {
   message: string;
   pageUrl: string | null;
   pageName: string | null;
+  /** null for submissions made before device context existed (or without one). */
+  device: FeedbackDevice | null;
   readAt: ISODateTime | null; // admin triage flag (null = unread)
   createdAt: ISODateTime;
 }
