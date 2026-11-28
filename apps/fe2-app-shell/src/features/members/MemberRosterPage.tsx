@@ -1,11 +1,12 @@
 // 運営名簿 — 運営メンバー全員の情報をフラットな一覧（DataTable）で並べる名簿ビュー。
-// 「運営メンバー」タブ(/members: チーム別/組織図) がチーム軸・組織図軸の見せ方なのに対し、
+// 運営メンバータブ(/members) の「表」表示（MembersHubPage がカードと切り替える）。
+// カード表示がチーム軸の見せ方なのに対し、
 // こちらは 1 行 = 1 人で 氏名/ローマ字/学科/学年/役割/ステータス/紐付けアカウント/所属チーム/
 // 連絡先/メール を横並びで見渡す「名簿」ビュー。データ源は member-service (useMembersOverview)
 // ＋ identity-roster (useIdentityUsers, 紐付けアカウント列のラベル) で、/members と同じ Provider・
 // 同じ overview キャッシュを共有する（additive・非破壊）。書き込み(追加/編集/削除/紐付け) は
 // 既存ダイアログ・楽観的 mutation を再利用し、サーバ側で identity:admin を再認可する。
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   PageHeader,
@@ -14,7 +15,6 @@ import {
   Select,
   FormField,
   ConfirmDialog,
-  SkeletonLoader,
   ErrorState,
   Menu,
   useToast,
@@ -28,6 +28,7 @@ import { EventStaffSection } from "./EventStaffPanel.tsx";
 import { useMembersApi } from "./MembersProvider.tsx";
 import { AccountMailPrompt, accountMailTarget, type AccountMailTarget } from "../../lib/accountMail.tsx";
 import { ListView } from "./ListView.tsx";
+import { MembersViewSkeleton } from "./MembersViewSwitch.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { OrgMember } from "./contracts.ts";
@@ -49,7 +50,8 @@ function remindMessage(targets: OrgMember[]): string {
   return `${who}に、未入力の項目を入力するよう通知を送ります。同じ人への通知は1日1回までです。`;
 }
 
-export function MemberRosterPage(): JSX.Element {
+/** viewSwitch = 運営メンバータブの表示切り替え（カード / 表）。見出しの下に置く。 */
+export function MemberRosterPage({ viewSwitch = null }: { viewSwitch?: ReactNode } = {}): JSX.Element {
   // 書き込みは app:members:edit + 編集範囲が メール名簿以外 以上 (members:roster_edit)。
   const { canEdit: canEditApp } = useAppCapability("members");
   const { can } = usePermissions();
@@ -179,7 +181,14 @@ export function MemberRosterPage(): JSX.Element {
     setConfirm(null);
   };
 
-  if (overview.isPending) return <SkeletonLoader testId="member-roster-loading" />;
+  if (overview.isPending) {
+    return (
+      <>
+        {viewSwitch}
+        <MembersViewSkeleton view="table" testId="member-roster-loading" />
+      </>
+    );
+  }
   if (overview.isError) {
     const display = ApiError.isApiError(overview.error)
       ? toDisplayableError(overview.error)
@@ -191,11 +200,11 @@ export function MemberRosterPage(): JSX.Element {
     <div data-testid="member-roster-page">
       {gate.dialog}
       <PageHeader
-        title="運営名簿"
+        title="運営メンバー"
         description={
           canEdit
-            ? "運営メンバー全員の情報を一覧で表示します。行をクリックすると情報を編集できます"
-            : "運営メンバー全員の情報を一覧で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
+            ? "運営メンバー全員の情報を表で表示します。行をクリックすると情報を編集できます"
+            : "運営メンバー全員の情報を表で表示します（氏名・役割・所属チーム・メール・紐付けアカウント）"
         }
         actions={
           <>
@@ -225,6 +234,7 @@ export function MemberRosterPage(): JSX.Element {
           </>
         }
       />
+      {viewSwitch}
 
       <EventStaffSection scoped={overview} canEdit={canEdit} />
 

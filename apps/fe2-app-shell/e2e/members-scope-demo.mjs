@@ -27,8 +27,8 @@ async function tabs(account) {
 
 const expectTabs = {
   usr_scope_org: ["運営メンバー", "組織図"],
-  usr_scope_roster: ["運営メンバー", "組織図", "運営名簿"],
-  usr_demo: ["運営メンバー", "組織図", "運営名簿", "メール名簿"],
+  usr_scope_roster: ["運営メンバー", "組織図"],
+  usr_demo: ["運営メンバー", "組織図", "メール名簿"],
 };
 for (const [account, want] of Object.entries(expectTabs)) {
   const { page, labels } = await tabs(account);

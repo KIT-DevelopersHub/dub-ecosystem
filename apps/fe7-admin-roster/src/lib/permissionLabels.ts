@@ -79,7 +79,7 @@ const PERMISSION_LABELS: Record<string, { label: string; description: string }> 
   "notif:broadcast_publish": { label: "管理者向け通知をメンバーへ公開", description: "「Notification管理」画面で管理者向けの通知を確認し、メンバー全体へ公開・公開解除できるようになります（誰に届くかの一覧もここで見られます）。" },
   "notif:admin": { label: "フィードバック一覧・新機能のお知らせ配信", description: "メンバーから届いたフィードバックの一覧を確認でき、新機能のお知らせ（リリースノート）を全体へ配信できるようになります。" },
   // ↓ ロール管理には出さない鍵（policy.HIDDEN_PERMISSION_KEYS）。実効権限の一覧など別画面用の表示名だけ残す。
-  "members:roster_view": { label: "運営名簿の閲覧", description: "運営名簿のタブと、連絡先などの個人情報を見られます。運営メンバーの閲覧範囲で設定します。" },
+  "members:roster_view": { label: "運営名簿の閲覧", description: "運営メンバーの表（運営名簿）と、連絡先などの個人情報を見られます。運営メンバーの閲覧範囲で設定します。" },
   "members:roster_edit": { label: "運営名簿の編集", description: "本人の情報の編集やアカウントの紐付けができます。運営メンバーの編集範囲で設定します。" },
   "members:mail_view": { label: "メール名簿の閲覧", description: "メール名簿のタブを見られます。運営メンバーの閲覧範囲で設定します。" },
   "members:mail_edit": { label: "メール名簿の編集", description: "ロール管理の編集と「名簿・ロールの管理」も持つロールが、メール名簿を編集できます。運営メンバーの編集範囲で設定します。" },

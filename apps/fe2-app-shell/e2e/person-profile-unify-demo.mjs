@@ -42,7 +42,8 @@ try {
   // 画面下に固定の「デモモード」帯が行の操作ボタンに重なるので、操作の邪魔にならないよう隠す。
   await page.addStyleTag({ content: 'div[role="note"]{display:none !important}' });
   await page.locator('a[href="/members"]').first().click();
-  await page.getByTestId("member-roster-subnav-tab-member-roster").click();
+  await page.getByTestId("member-roster-subnav-tab-members").click();
+  await page.getByTestId("members-view-table").click();
   const table = page.getByTestId("members-table");
   await table.waitFor({ timeout: 20000 });
   await page.getByTestId("member-roster-add-member").click();
@@ -117,7 +118,9 @@ try {
   await prow.getByText(/追加済/).waitFor({ timeout: 10000 });
   await shot(page, "04-participation-list.png");
 
-  await page.getByTestId("member-roster-subnav-tab-member-roster").click();
+  await page.getByTestId("member-roster-subnav-tab-members").click();
+
+  await page.getByTestId("members-view-table").click();
   await table.waitFor({ timeout: 20000 });
   await page.getByTestId("member-roster-search").fill("3EP2-41");
   const mrow = table.getByRole("row").filter({ hasText: "共通 二郎" });

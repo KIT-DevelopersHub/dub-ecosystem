@@ -6,14 +6,17 @@ describe("activeSectionId", () => {
   it("maps each section root path to its id", () => {
     expect(activeSectionId("/members")).toBe("members");
     expect(activeSectionId("/members/org-chart")).toBe("org-chart");
-    expect(activeSectionId("/members/roster")).toBe("member-roster");
     expect(activeSectionId("/admin/users")).toBe("roster");
+  });
+
+  it("運営名簿は運営メンバータブに統合: 旧 /members/roster は運営メンバータブ扱い (#901)", () => {
+    expect(activeSectionId("/members/roster")).toBe("members");
   });
 
   it("keeps the parent tab highlighted on deeper sub-routes", () => {
     expect(activeSectionId("/admin/users/usr_123")).toBe("roster");
-    // /members は運営メンバー、/members/roster は運営名簿（最長一致で運営名簿が勝つ）
-    expect(activeSectionId("/members/roster")).toBe("member-roster");
+    // /members/org-chart は組織図（最長一致で /members より組織図が勝つ）
+    expect(activeSectionId("/members/org-chart")).toBe("org-chart");
     expect(activeSectionId("/members")).toBe("members");
   });
 

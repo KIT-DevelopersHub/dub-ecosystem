@@ -27,7 +27,9 @@ try {
   ok("home -> 運営メンバー reachable; チーム別 row shows 名列番号");
   await shot(page, "00-teams.png");
 
-  await page.getByTestId("member-roster-subnav-tab-member-roster").click();
+  await page.getByTestId("member-roster-subnav-tab-members").click();
+
+  await page.getByTestId("members-view-table").click();
   await page.getByTestId("members-table").waitFor({ timeout: 20000 });
 
   const table = page.getByTestId("members-table");

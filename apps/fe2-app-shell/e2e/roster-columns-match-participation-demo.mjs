@@ -24,7 +24,8 @@ try {
 
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page.locator('a[href="/members"]').first().click();
-  await page.getByTestId("member-roster-subnav-tab-member-roster").click();
+  await page.getByTestId("member-roster-subnav-tab-members").click();
+  await page.getByTestId("members-view-table").click();
   await page.getByTestId("members-table").waitFor();
   const roster = await headersOf(page, "members-table");
   await page.screenshot({ path: join(SHOTS, "roster.png"), fullPage: true });

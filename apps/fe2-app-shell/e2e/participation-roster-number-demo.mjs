@@ -55,7 +55,9 @@ try {
   await row.getByText(/追加済/).waitFor({ timeout: 10000 });
   ok("追加する -> 新規で追加 confirmed");
 
-  await page.getByTestId("member-roster-subnav-tab-member-roster").click();
+  await page.getByTestId("member-roster-subnav-tab-members").click();
+
+  await page.getByTestId("members-view-table").click();
   const members = page.getByTestId("members-table");
   await members.waitFor({ timeout: 20000 });
   await page.getByTestId("member-roster-search").fill("3EP2-26");

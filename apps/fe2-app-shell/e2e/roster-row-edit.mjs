@@ -20,7 +20,7 @@ try {
   await page.goto(FE2, { waitUntil: "networkidle" });
   await page.locator('a[href="/members"]').first().click();
   await page.getByTestId("members-page").waitFor({ timeout: 15000 });
-  await page.getByTestId("member-roster-subnav").getByRole("tab", { name: "運営名簿" }).first().click();
+  await page.getByTestId("members-view-table").click();
   await page.getByTestId("member-roster-page").waitFor({ timeout: 15000 });
   const table = page.getByTestId("members-table");
   await table.waitFor();

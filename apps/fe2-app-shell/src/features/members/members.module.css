@@ -8,6 +8,13 @@
   flex-wrap: wrap;
   margin-bottom: var(--dub-space-4);
 }
+/* 運営メンバータブの表示切り替え（カード / 表）。見出しと本体の間に置く。 */
+.viewBar {
+  display: flex;
+  align-items: center;
+  gap: var(--dub-space-3);
+  margin: 0 0 var(--dub-space-5);
+}
 .toolbarSpacer {
   flex: 1 1 auto;
 }

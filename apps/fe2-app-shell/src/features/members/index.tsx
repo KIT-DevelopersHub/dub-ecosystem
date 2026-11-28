@@ -3,6 +3,7 @@ export { createMembersApi } from "./membersApi.tsx";
 export type { MembersApi } from "./membersApi.tsx";
 export { MembersProvider, MembersApiProvider, useMembersApi } from "./MembersProvider.tsx";
 export { MembersPage } from "./MembersPage.tsx";
+export { MembersHubPage, MembersHub, MemberRosterRedirect } from "./MembersHubPage.tsx";
 export { MemberRosterPage } from "./MemberRosterPage.tsx";
 export { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
 export { MemberRosterSubnav, activeSectionId } from "./MemberRosterNav.tsx";

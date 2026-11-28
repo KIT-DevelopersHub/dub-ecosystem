@@ -11,8 +11,7 @@
 import type { ComponentType } from "react";
 import type { identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
-import { MembersPage } from "./MembersPage.tsx";
-import { MemberRosterPage } from "./MemberRosterPage.tsx";
+import { MembersHubPage, MemberRosterRedirect } from "./MembersHubPage.tsx";
 import { MembersOrgChartPage } from "./MembersOrgChartPage.tsx";
 
 type PermissionKey = identity.PermissionKey;
@@ -34,17 +33,17 @@ export const membersRoutes: MembersSourceRoute[] = [
     // Gate = app:members:view only (ANDed by withAppAccessGate). No route-level
     // identity:read: the per-app key is the authoritative 有効化 gate so a 統括 role can
     // open the roster without the domain key.
+    // カード(チーム別) と 表(運営名簿) を切り替える。表は個人情報を並べるので
+    // members:roster_view (閲覧範囲が メール名簿以外 以上) がある人だけ選べる（MembersHubPage）。
     path: "/members",
-    lazy: () => Promise.resolve({ Component: MembersPage }),
+    lazy: () => Promise.resolve({ Component: MembersHubPage }),
     auth: "required",
   },
   {
-    // 運営名簿: 運営メンバー全員をフラットな一覧で並べる名簿ビュー（/members と同じ Provider・
-    // 共有サブナビ配下）。個人情報を並べるので 閲覧範囲が メール名簿以外 以上のロールだけ。
+    // 旧 運営名簿タブ。/members?view=table へ置き換えて移す（表を見られない人はカードになる）。
     path: "/members/roster",
-    lazy: () => Promise.resolve({ Component: MemberRosterPage }),
+    lazy: () => Promise.resolve({ Component: MemberRosterRedirect }),
     auth: "required",
-    requiredPermissions: ["members:roster_view"],
   },
   {
     // 組織図: 共有サブナビの上タブ（旧 運営メンバー画面の内側タブ）。同じ Provider・同じゲート。

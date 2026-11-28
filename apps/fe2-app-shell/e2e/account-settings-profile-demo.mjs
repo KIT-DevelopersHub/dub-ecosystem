@@ -72,7 +72,8 @@ try {
 
   // 5. 運営名簿の自分の行にも同じ値
   await page.locator('a[href="/members"]').first().click();
-  await page.getByTestId("member-roster-subnav-tab-member-roster").click();
+  await page.getByTestId("member-roster-subnav-tab-members").click();
+  await page.getByTestId("members-view-table").click();
   const table = page.getByTestId("members-table");
   await table.waitFor({ timeout: 20000 });
   const row = table.locator("tr", { hasText: "高岡" }).first();

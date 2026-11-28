@@ -1,6 +1,8 @@
 // 運営メンバー管理 top screen. Hosts the チーム別 view, the toolbar (メンバー追加 / チーム追加)
 // and the shared create/edit dialogs + destructive ConfirmDialog. Read = identity:read (route gate).
 // 組織図 lives in its own top-level subnav tab (/members/org-chart, MembersOrgChartPage).
+// This is the カード view of the 運営メンバー tab; MembersHubPage switches it with the 表
+// view (MemberRosterPage) — the two used to be separate tabs (Issue #901).
 //
 // WRITE = the policy layer's 編集 tier on the 運営メンバー app (app:members:edit) AND
 // identity:admin — the SAME requirement member-service enforces (requireMembersEdit). When
@@ -8,12 +10,11 @@
 // reason banner is shown, so a 閲覧 user never presses a button that would 403.
 // NOTE: the flat 一覧 tab was removed — the per-person list (氏名/ロール/アドレス/ログイン
 // 紐付け) is owned by the ユーザー名簿 side, which the members app is being merged into.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   PageHeader,
   Button,
   ConfirmDialog,
-  SkeletonLoader,
   ErrorState,
 } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
@@ -23,11 +24,13 @@ import { useScopedOverview, useDeleteMember, useDeleteTeam } from "./hooks.ts";
 import { EventStaffSection } from "./EventStaffPanel.tsx";
 import { TeamsView } from "./TeamsView.tsx";
 import { MemberFormDialog } from "./MemberFormDialog.tsx";
+import { MembersViewSkeleton } from "./MembersViewSwitch.tsx";
 import { TeamFormDialog } from "./TeamFormDialog.tsx";
 import type { MemberTeam, OrgMember } from "./contracts.ts";
 import styles from "./members.module.css";
 
-export function MembersPage(): JSX.Element {
+/** viewSwitch = 運営メンバータブの表示切り替え（カード / 表）。見出しの下に置く。 */
+export function MembersPage({ viewSwitch = null }: { viewSwitch?: ReactNode } = {}): JSX.Element {
   const { canEdit } = useAppCapability("members");
   const { can } = usePermissions();
   // 閲覧のみでも書き込みボタンは押せる。押したら権限不足ダイアログ(申請ボタン付き)を出す。
@@ -67,7 +70,14 @@ export function MembersPage(): JSX.Element {
     setConfirm(null);
   };
 
-  if (overview.isPending) return <SkeletonLoader testId="members-loading" />;
+  if (overview.isPending) {
+    return (
+      <>
+        {viewSwitch}
+        <MembersViewSkeleton view="cards" testId="members-loading" />
+      </>
+    );
+  }
   if (overview.isError) {
     const display = ApiError.isApiError(overview.error)
       ? toDisplayableError(overview.error)
@@ -92,6 +102,7 @@ export function MembersPage(): JSX.Element {
             </span>
           }
         />
+        {viewSwitch}
       </div>
 
       <EventStaffSection scoped={overview} canEdit={canEdit} />
