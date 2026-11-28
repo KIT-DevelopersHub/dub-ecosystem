@@ -121,6 +121,33 @@
   min-width: 0;
   color: var(--dub-color-text-primary);
 }
+.actionCard {
+  position: relative;
+}
+.actionOpen {
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+/* Stretch the title button over the card so the whole row opens the action. */
+.actionOpen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.actionOpen:focus-visible {
+  outline: none;
+}
+.actionOpen:focus-visible::after {
+  outline: 2px solid var(--dub-color-border-focus);
+  outline-offset: 2px;
+}
+.actionCardExtra {
+  position: relative;
+  z-index: 1;
+}
 .spacer {
   flex: 1;
 }

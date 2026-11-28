@@ -16,18 +16,26 @@ export function ActionCard({
   const CardExtra = plugin.CardExtra;
 
   return (
-    <div className={styles.actionRow} data-testid={`fe3-actionboard-card-${action.id}`}>
+    <div className={`${styles.actionRow} ${styles.actionCard}`} data-testid={`fe3-actionboard-card-${action.id}`}>
       <Icon name={icon} />
+      {/* The title button stretches over the whole card (::after), so the row is one
+          click target while keyboard/screen readers still get a single button. */}
       <button
         type="button"
-        className={styles.actionTitle}
-        style={{ background: "none", border: "none", textAlign: "left", cursor: "pointer" }}
+        className={`${styles.actionTitle} ${styles.actionOpen}`}
         onClick={() => onOpen?.(action.id)}
       >
         {action.title}
       </button>
-      <span className={styles.badge}>{action.kind}</span>
-      {CardExtra ? <CardExtra action={action} /> : null}
+      {/* Registered kinds show their label; unknown kinds get the generic plugin's. */}
+      <span className={styles.badge} title={action.kind} data-testid={`fe3-actionboard-kindbadge-${action.id}`}>
+        {plugin.label}
+      </span>
+      {CardExtra ? (
+        <div className={styles.actionCardExtra}>
+          <CardExtra action={action} />
+        </div>
+      ) : null}
     </div>
   );
 }
