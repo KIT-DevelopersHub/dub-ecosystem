@@ -14,6 +14,7 @@ import { useApiClient } from "../api/client-context";
 import { listTeams, toDomainTeams } from "../api/endpoints";
 import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
+import { TaskViewTabs } from "../components/TaskViewTabs";
 import styles from "../styles/app.module.css";
 
 // Context lives in its own module so leaf components (AssigneePicker) can read the
@@ -55,13 +56,17 @@ export function TaskWorkspaceRoute() {
   const eventId = ctxEventId ?? parseEventIdFromPath(pathname);
   const initialSelectedTaskId = parseTaskIdFromPath(pathname);
   if (!eventId) return <p className={styles.banner}>イベントが指定されていません。</p>;
+  // #880: ガント and マイタスク (カンバン) are one app — the tabs switch between the two routes.
   return (
-    <TaskWorkspacePage
-      eventId={eventId}
-      permissions={permissions}
-      currentUserId={currentUserId}
-      initialSelectedTaskId={initialSelectedTaskId}
-    />
+    <>
+      <TaskViewTabs value="gantt" eventId={eventId} />
+      <TaskWorkspacePage
+        eventId={eventId}
+        permissions={permissions}
+        currentUserId={currentUserId}
+        initialSelectedTaskId={initialSelectedTaskId}
+      />
+    </>
   );
 }
 
@@ -75,7 +80,7 @@ export function TaskWorkspaceRoute() {
  */
 export function MeTasksRoute() {
   const client = useApiClient();
-  const { currentUserId } = useTaskRoute();
+  const { currentUserId, permissions } = useTaskRoute();
   const [teams, setTeams] = useState<readonly team.Team[]>([]);
 
   useEffect(() => {
@@ -96,7 +101,8 @@ export function MeTasksRoute() {
 
   return (
     <ToastProvider>
-      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} />
+      <TaskViewTabs value="kanban" />
+      <MyTasksPage currentUserId={currentUserId} people={[]} teams={teams} permissions={permissions} />
     </ToastProvider>
   );
 }

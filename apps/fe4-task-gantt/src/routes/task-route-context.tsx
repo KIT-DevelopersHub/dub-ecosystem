@@ -1,6 +1,7 @@
 // TaskRouteContext — current user / permissions / event supplied by the FE2 shell.
 import { createContext, useContext, type ReactNode } from "react";
 import type { common, identity } from "@dub/types";
+import type { TaskViewAvailability } from "../domain/task-hub-view";
 
 export interface TaskRouteContextValue {
   /** current user id (FE2 /me) — scopes the "マイタスク" route. */
@@ -14,6 +15,10 @@ export interface TaskRouteContextValue {
    *  re-run window.location parsing on its own). Optional/undefined for standalone
    *  or the マイタスク route. */
   eventId?: common.EventId | null;
+  /** #880: SPA navigation for the ガント / カンバン tabs (shell router). Omitted ⇒ full page load. */
+  navigate?: (to: string) => void;
+  /** #880: whether each view's launcher app (ガント / マイタスク) is enabled for this role. */
+  views?: TaskViewAvailability;
 }
 
 const TaskRouteContext = createContext<TaskRouteContextValue>({
