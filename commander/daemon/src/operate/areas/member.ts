@@ -315,6 +315,13 @@ export const MEMBER: AreaSpec = {
   ],
   // 人事アプリ (/members/hr/*) は新設したばかり。Commander から操作させるかはフェーズ2で決める。
   pending: [
+    // イベントごとの運営名簿 (/members/events/:eventId/*) は新設したばかり。Commander から操作させるかは後で決める。
+    { service: "member-service", route: "GET /members/events/:eventId/staff" },
+    { service: "member-service", route: "PUT /members/events/:eventId/people/:personId" },
+    { service: "member-service", route: "DELETE /members/events/:eventId/people/:personId" },
+    { service: "member-service", route: "PUT /members/events/:eventId/teams/:teamId" },
+    { service: "member-service", route: "DELETE /members/events/:eventId/teams/:teamId" },
+    { service: "member-service", route: "POST /members/events/:eventId/invitations" },
     { service: "member-service", route: "GET /members/hr/applicants" },
     { service: "member-service", route: "GET /members/hr/applicants/:id" },
     { service: "member-service", route: "POST /members/hr/applicants" },

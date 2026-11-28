@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApiClient, ApiError } from "./api-client.tsx";
 import { createDemoFetch, isDemoEnabled } from "./demo-seed.tsx";
+import { event as evNs } from "@dub/types";
 
 function api() {
   return createApiClient({ baseUrl: "https://demo.local", fetchImpl: createDemoFetch() });
@@ -926,5 +927,68 @@ describe("event AI digest (#879, demo = production default: flag OFF)", () => {
     const ev = await api().request<{ venue: string; capacity: number }>({ method: "GET", path: "/api/v1/events/evt_1" });
     expect(ev.venue).toContain("金沢工業大学");
     expect(ev.capacity).toBe(300);
+  });
+});
+
+describe("使うアプリ (per-event enabled apps) demo seed", () => {
+  type Apps = { enabledApps: string[]; customized: boolean };
+  const get = (id: string) => api().request<Apps>({ method: "GET", path: `/api/v1/events/${id}/apps` });
+
+  const toggles = (apps: string[]) => apps.filter((a) => evNs.isEventToggleableApp(a));
+
+  it("seeds one event with 運営メンバー on, one with the new-event default, one legacy (all on)", async () => {
+    expect(toggles((await get("evt_1")).enabledApps)).toEqual(["events", "gantt", "members", "admin"]);
+    expect(toggles((await get("evt_2")).enabledApps)).toEqual(["events", "gantt", "admin"]);
+    expect((await get("evt_2")).enabledApps).toContain("mail"); // org-wide: always on
+    const legacy = await get("evt_3");
+    expect(legacy.customized).toBe(false);
+    expect(legacy.enabledApps).toContain("mail");
+  });
+
+  it("PUT replaces the set and the event detail carries it; unknown ids are rejected", async () => {
+    const a = api();
+    const saved = await a.request<Apps>({ method: "PUT", path: "/api/v1/events/evt_2/apps", body: { enabledApps: ["gantt", "members"] } });
+    expect(toggles(saved.enabledApps)).toEqual(["events", "gantt", "members"]);
+    const detail = await a.request<{ enabledApps: string[] }>({ method: "GET", path: "/api/v1/events/evt_2" });
+    expect(toggles(detail.enabledApps)).toEqual(["events", "gantt", "members"]);
+    await expect(a.request({ method: "PUT", path: "/api/v1/events/evt_2/apps", body: { enabledApps: ["nope"] } })).rejects.toBeTruthy();
+  });
+});
+
+describe("運営メンバー per event — 招待・参加届のイベント", () => {
+  it("invites an account holder to evt_2 at once and drops 「〇〇の運営に招待されました」 in the inbox", async () => {
+    const a = api();
+    expect((await a.request<{ personIds: string[] }>({ method: "GET", path: "/api/v1/members/events/evt_2/staff" })).personIds).toEqual([]);
+    const res = await a.request<{ staff: { personIds: string[] }; notified: boolean }>({
+      method: "POST",
+      path: "/api/v1/members/events/evt_2/invitations",
+      body: { personId: "member_o4", eventTitle: "運営定例ミーティング" },
+    });
+    expect(res).toMatchObject({ staff: { personIds: ["member_o4"] }, notified: true });
+    const inbox = await a.request<{ items: Array<{ title: string; resourceType: string | null; resourceId: string | null }> }>({
+      method: "GET",
+      path: "/api/v1/notifications/inbox",
+    });
+    expect(inbox.items[0]).toMatchObject({ title: "「運営定例ミーティング」の運営に招待されました", resourceType: "event", resourceId: "evt_2" });
+    // no account -> 400 / already staff -> 409
+    await expect(a.request({ method: "POST", path: "/api/v1/members/events/evt_2/invitations", body: { personId: "member_h2" } })).rejects.toBeInstanceOf(ApiError);
+    await expect(a.request({ method: "POST", path: "/api/v1/members/events/evt_2/invitations", body: { personId: "member_o4" } })).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("a 参加届 submitted for an event puts the person on that event when reflected", async () => {
+    const a = api();
+    const sub = await a.request<{ participation: { id: string; eventId: string | null } }>({
+      method: "POST",
+      path: "/api/v1/members/participation",
+      body: { lastName: "届", firstName: "太郎", schoolEmail: "t@school.ac.jp", gmail: "t@gmail.com", position: "member", eventId: "evt_3" },
+    });
+    expect(sub.participation.eventId).toBe("evt_3");
+    const res = await a.request<{ member: { id: string } }>({
+      method: "POST",
+      path: `/api/v1/members/participation/${sub.participation.id}/resolve`,
+      body: { action: "create" },
+    });
+    const staff = await a.request<{ personIds: string[] }>({ method: "GET", path: "/api/v1/members/events/evt_3/staff" });
+    expect(staff.personIds).toContain(res.member.id);
   });
 });

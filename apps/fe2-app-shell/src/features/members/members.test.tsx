@@ -21,6 +21,7 @@ import { MemberRosterPage } from "./MemberRosterPage.tsx";
 import type { MembersOverview } from "./contracts.ts";
 import { member } from "@dub/types";
 import { ListView } from "./ListView.tsx";
+import { EventStaffDialog } from "./EventStaffPanel.tsx";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 
 /** 人物プロフィール (参加届と共通) を全部未入力にした土台。 */
@@ -708,5 +709,27 @@ describe("MemberRosterPage (運営名簿から編集)", () => {
     await userEvent.click(screen.getByTestId("members-edit-m1"));
     expect(await screen.findByRole("dialog", { name: "権限が不足しています" })).toBeInTheDocument();
     expect(screen.queryByTestId("members-form-dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("EventStaffDialog — このイベントに招待", () => {
+  const withAccount = (id: string, name: string, identityUserId: string | null) => ({ ...OVERVIEW.members[0]!, id, name, roleTitle: null, identityUserId });
+  const full: MembersOverview = {
+    teams: OVERVIEW.teams,
+    members: [withAccount("a1", "口座 一", "usr_a1"), withAccount("a2", "口座 二", "usr_a2"), withAccount("n1", "無垢 三", null)],
+  };
+  const staff = { eventId: "evt_2", personIds: ["a2"], teamIds: [] };
+
+  it("lists only account holders not yet in the event, and inviting posts personId + event title", async () => {
+    const inviteToEvent = vi.fn(() => Promise.resolve({ staff: { ...staff, personIds: ["a1", "a2"] }, notified: true }));
+    const api = makeApi({ inviteToEvent } as Partial<MembersApi>);
+    render(wrap(<EventStaffDialog open onClose={() => {}} eventId="evt_2" staff={staff} full={full} canEdit />, api));
+    expect(screen.getByTestId("members-event-staff-invite-a1")).toBeInTheDocument();
+    expect(screen.queryByTestId("members-event-staff-invite-a2")).toBeNull(); // already staff
+    expect(screen.queryByTestId("members-event-staff-invite-n1")).toBeNull(); // no account
+    expect(screen.getByTestId("members-event-staff-staff-a2")).toBeInTheDocument();
+    expect(screen.getByTestId("members-event-staff-participate-link")).toHaveAttribute("href", "/participate?event=evt_2");
+    await userEvent.click(screen.getByTestId("members-event-staff-invite-a1"));
+    await waitFor(() => expect(inviteToEvent).toHaveBeenCalledWith("evt_2", { personId: "a1", eventTitle: "" }));
   });
 });

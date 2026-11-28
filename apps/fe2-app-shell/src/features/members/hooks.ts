@@ -3,12 +3,13 @@
 // deletes go through a ConfirmDialog in the view and await the server. All keys start
 // with the feature id via queryKeys.feature("members", ...).
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useCurrentEventId } from "@dub/fe3-event-action";
 import { useToast } from "@dub/ui";
 import { queryKeys } from "../../lib/queryKeys.tsx";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
 import { usePermissions } from "../../auth/AuthProvider.tsx";
 import { useMembersApi } from "./MembersProvider.tsx";
-import type { member } from "@dub/types";
+import { member } from "@dub/types";
 import type {
   CreateMemberRequest,
   CreateTeamRequest,
@@ -23,6 +24,113 @@ export const OVERVIEW_KEY: QueryKey = queryKeys.feature("members", "overview");
 export const IDENTITY_USERS_KEY: QueryKey = queryKeys.feature("members", "identity-users");
 
 const EMPTY_OVERVIEW: MembersOverview = { teams: [], members: [] };
+
+/** このイベントの運営メンバー・班 (id だけ)。 */
+export const EVENT_STAFF_KEY = (eventId: string): QueryKey => queryKeys.feature("members", "event-staff", eventId);
+
+/** The header's current event, or null (= 全体の名簿をそのまま見せる、今までどおり)。 */
+export function useEventStaff() {
+  const api = useMembersApi();
+  const { can } = usePermissions();
+  const eventId = useCurrentEventId();
+  const query = useQuery({
+    queryKey: EVENT_STAFF_KEY(eventId ?? ""),
+    queryFn: () => api.getEventStaff(eventId!),
+    enabled: Boolean(eventId) && can("app:members:view"),
+  });
+  return { eventId, query };
+}
+
+/**
+ * The overview the 運営メンバー screens show: with an event selected, only that event's staff
+ * and 班 (picked from the one org-wide roster); with none, the whole roster as before.
+ * `full` is always the org-wide overview (the pool to add from).
+ */
+export function useScopedOverview() {
+  const overview = useMembersOverview();
+  const { eventId, query: staff } = useEventStaff();
+  const scoped = eventId !== null;
+  const data =
+    overview.data && (!scoped ? overview.data : staff.data ? member.scopeOverviewToEvent(overview.data, staff.data) : undefined);
+  return {
+    eventId,
+    staff: staff.data,
+    full: overview.data,
+    data,
+    isPending: overview.isPending || (scoped && staff.isPending),
+    isError: overview.isError || (scoped && staff.isError),
+    error: overview.error ?? staff.error,
+    refetch: () => {
+      void overview.refetch();
+      if (scoped) void staff.refetch();
+    },
+  };
+}
+
+/** このイベントから外す (人) / 班を使う・使わない。楽観的: 先に反映 → 失敗で戻す。 */
+export function useToggleEventStaff() {
+  const api = useMembersApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  type Vars = { eventId: string; kind: "person" | "team"; id: string; on: boolean };
+  return useMutation<member.EventStaff, unknown, Vars, { prev: member.EventStaff | undefined }>({
+    mutationFn: ({ eventId, kind, id, on }) =>
+      kind === "person" ? api.setEventPerson(eventId, id, on) : api.setEventTeam(eventId, id, on),
+    onMutate: async ({ eventId, kind, id, on }) => {
+      const key = EVENT_STAFF_KEY(eventId);
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<member.EventStaff>(key);
+      const base = prev ?? { eventId, personIds: [], teamIds: [] };
+      const field = kind === "person" ? "personIds" : "teamIds";
+      const set = new Set(base[field]);
+      if (on) set.add(id);
+      else set.delete(id);
+      qc.setQueryData<member.EventStaff>(key, { ...base, [field]: [...set] });
+      return { prev };
+    },
+    onError: (err, { eventId }, ctx) => {
+      qc.setQueryData(EVENT_STAFF_KEY(eventId), ctx?.prev);
+      toast.show({ kind: "error", title: messageFor(err, "イベントの運営メンバーを変更できませんでした") });
+    },
+    onSettled: (_d, _e, { eventId }) => {
+      void qc.invalidateQueries({ queryKey: EVENT_STAFF_KEY(eventId) });
+    },
+  });
+}
+
+/** このイベントに招待: アカウントのある人をすぐ運営メンバーに入れ、本人へ通知する。楽観的に先に入れる。 */
+export function useInviteToEvent() {
+  const api = useMembersApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  type Vars = { eventId: string; eventTitle: string; personId: string; name: string };
+  return useMutation<member.InviteEventStaffResponse, unknown, Vars, { prev: member.EventStaff | undefined }>({
+    mutationFn: ({ eventId, eventTitle, personId }) => api.inviteToEvent(eventId, { personId, eventTitle }),
+    onMutate: async ({ eventId, personId }) => {
+      const key = EVENT_STAFF_KEY(eventId);
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<member.EventStaff>(key);
+      const base = prev ?? { eventId, personIds: [], teamIds: [] };
+      qc.setQueryData<member.EventStaff>(key, { ...base, personIds: [...new Set([...base.personIds, personId])] });
+      return { prev };
+    },
+    onSuccess: (res, { eventId, name }) => {
+      qc.setQueryData(EVENT_STAFF_KEY(eventId), res.staff);
+      toast.show(
+        res.notified
+          ? { kind: "success", title: `${name}さんを招待し、通知を送りました` }
+          : { kind: "warning", title: `${name}さんを運営メンバーに入れましたが、通知は送れませんでした` },
+      );
+    },
+    onError: (err, { eventId }, ctx) => {
+      qc.setQueryData(EVENT_STAFF_KEY(eventId), ctx?.prev);
+      toast.show({ kind: "error", title: messageFor(err, "招待できませんでした") });
+    },
+    onSettled: (_d, _e, { eventId }) => {
+      void qc.invalidateQueries({ queryKey: EVENT_STAFF_KEY(eventId) });
+    },
+  });
+}
 
 export function useMembersOverview() {
   const api = useMembersApi();
@@ -82,8 +190,15 @@ function useOverviewMutation<TVars, TData>(config: {
 // ---- teams ----
 export function useCreateTeam() {
   const api = useMembersApi();
+  const qc = useQueryClient();
+  const eventId = useCurrentEventId();
   return useOverviewMutation<CreateTeamRequest, unknown>({
-    mutationFn: (input) => api.createTeam(input),
+    // イベントを選んでいる時に作ったチームは、そのイベントの班にもなる。
+    mutationFn: async (input) => {
+      const res = await api.createTeam(eventId ? { ...input, eventId } : input);
+      if (eventId) void qc.invalidateQueries({ queryKey: EVENT_STAFF_KEY(eventId) });
+      return res;
+    },
     successMessage: "チームを追加しました",
     errorFallback: "チームを追加できませんでした",
   });
@@ -118,8 +233,15 @@ export function useDeleteTeam() {
 // ---- members ----
 export function useCreateMember() {
   const api = useMembersApi();
+  const qc = useQueryClient();
+  const eventId = useCurrentEventId();
   return useOverviewMutation<CreateMemberRequest, unknown>({
-    mutationFn: (input) => api.createMember(input),
+    // イベントを選んでいる時に追加した人は、そのイベントの運営メンバーにもなる。
+    mutationFn: async (input) => {
+      const res = await api.createMember(eventId ? { ...input, eventId } : input);
+      if (eventId) void qc.invalidateQueries({ queryKey: EVENT_STAFF_KEY(eventId) });
+      return res;
+    },
     successMessage: "メンバーを追加しました",
     errorFallback: "メンバーを追加できませんでした",
   });

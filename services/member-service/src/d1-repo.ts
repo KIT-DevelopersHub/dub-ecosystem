@@ -130,6 +130,7 @@ interface ParticipationDbRow {
   school_email: string | null;
   gmail: string | null;
   desired_team_id: string | null;
+  event_id?: string | null;
   position?: string | null;
   desired_activity: string | null;
   note: string | null;
@@ -168,6 +169,7 @@ function toParticipationRow(r: ParticipationDbRow): ParticipationRow {
     schoolEmail: r.school_email ?? "",
     gmail: r.gmail ?? "",
     desiredTeamId: r.desired_team_id,
+    eventId: r.event_id ?? null,
     position: member.isMemberPosition(r.position) ? r.position : null,
     desiredActivity: r.desired_activity as member.DesiredActivity | null,
     note: r.note,
@@ -283,6 +285,7 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     async deleteTeam(id: string): Promise<void> {
       // Detach the team from all people, then remove it. People are kept.
       await db.run(`DELETE FROM member_team_links WHERE team_id = ?`, id);
+      await db.run(`DELETE FROM member_event_teams WHERE team_id = ?`, id);
       await db.run(`DELETE FROM member_teams WHERE id = ?`, id);
     },
     async maxTeamSortOrder(orgId): Promise<number> {
@@ -369,9 +372,9 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
         `INSERT INTO member_participations
           (id, org_id, member_id, name, normalized_name, last_name, first_name, name_kana,
            last_name_kana, first_name_kana, last_name_romaji, first_name_romaji, grade, department, roster_number, student_number, contact, phone,
-           school_email, gmail, desired_team_id, position, desired_activity, note, status, match_kind, review_state,
+           school_email, gmail, desired_team_id, event_id, position, desired_activity, note, status, match_kind, review_state,
            submitted_by, submitted_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(org_id, normalized_name) DO UPDATE SET
            member_id = excluded.member_id,
            name = excluded.name,
@@ -391,6 +394,7 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
            school_email = excluded.school_email,
            gmail = excluded.gmail,
            desired_team_id = excluded.desired_team_id,
+           event_id = excluded.event_id,
            position = excluded.position,
            desired_activity = excluded.desired_activity,
            note = excluded.note,
@@ -402,7 +406,7 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
            updated_at = excluded.updated_at`,
         row.id, row.orgId, row.memberId, row.name, row.normalizedName, row.lastName, row.firstName, row.nameKana,
         row.lastNameKana, row.firstNameKana, row.lastNameRomaji, row.firstNameRomaji, row.grade, row.department, row.rosterNumber, row.studentNumber, row.contact, row.phone,
-        row.schoolEmail, row.gmail, row.desiredTeamId, row.position, row.desiredActivity,
+        row.schoolEmail, row.gmail, row.desiredTeamId, row.eventId, row.position, row.desiredActivity,
         row.note, row.status, row.matchKind, row.reviewState, row.submittedBy, row.submittedAt, row.createdAt, row.updatedAt,
       );
     },
@@ -484,6 +488,35 @@ export function createD1MemberRepo(db: DbClient): MemberRepo {
     },
     async deleteOnboardingMeeting(orgId, teamId): Promise<void> {
       await db.run(`DELETE FROM member_onboarding_meetings WHERE org_id = ? AND team_id = ?`, orgId, teamId ?? "");
+    },
+
+    // ---- 運営メンバー per event ----
+    async getEventStaff(eventId): Promise<{ personIds: string[]; teamIds: string[] }> {
+      const [people, teams] = await Promise.all([
+        db.all<{ person_id: string }>(`SELECT person_id FROM member_event_people WHERE event_id = ? ORDER BY person_id`, eventId),
+        db.all<{ team_id: string }>(`SELECT team_id FROM member_event_teams WHERE event_id = ? ORDER BY team_id`, eventId),
+      ]);
+      return { personIds: people.map((r) => r.person_id), teamIds: teams.map((r) => r.team_id) };
+    },
+    async addEventPerson(eventId, personId, addedBy, addedAt): Promise<void> {
+      await db.run(
+        `INSERT INTO member_event_people (event_id, person_id, added_by, added_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (event_id, person_id) DO NOTHING`,
+        eventId, personId, addedBy, addedAt,
+      );
+    },
+    async removeEventPerson(eventId, personId): Promise<void> {
+      await db.run(`DELETE FROM member_event_people WHERE event_id = ? AND person_id = ?`, eventId, personId);
+    },
+    async addEventTeam(eventId, teamId, addedBy, addedAt): Promise<void> {
+      await db.run(
+        `INSERT INTO member_event_teams (event_id, team_id, added_by, added_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (event_id, team_id) DO NOTHING`,
+        eventId, teamId, addedBy, addedAt,
+      );
+    },
+    async removeEventTeam(eventId, teamId): Promise<void> {
+      await db.run(`DELETE FROM member_event_teams WHERE event_id = ? AND team_id = ?`, eventId, teamId);
     },
   } satisfies MemberRepo;
 }

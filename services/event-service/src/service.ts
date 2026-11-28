@@ -3,6 +3,7 @@
 // thin adapter over this.
 import { DubError, CommonErrorCodes, errors } from "@dub/errors";
 import { event as eventNs } from "@dub/types";
+import { validateSaveEventAppsRequest } from "@dub/validation";
 import type { common, event, auditLog } from "@dub/types";
 import type {
   AppDeps,
@@ -21,6 +22,7 @@ import type {
   EventPageLayoutRow,
   EventPageLayoutResponse,
   SaveEventPageLayoutRequest,
+  EventAppsRow,
   Keyset,
 } from "./types";
 import { ProviderOfflineError } from "./digest/types";
@@ -124,6 +126,11 @@ export class EventService {
   // ---- events ----
   async createEvent(ctx: ReqCtx, body: event.CreateEventRequest): Promise<event.DubEvent> {
     const title = nonEmptyString(body.title, "title");
+    // A new event starts with the default app set (イベント・ガントチャート・ロール管理)
+    // unless the creator picked one. Validated before any write.
+    const enabledApps = validateSaveEventAppsRequest({
+      enabledApps: body.enabledApps ?? [...eventNs.EVENT_DEFAULT_ENABLED_APPS],
+    }).enabledApps;
     const now = this.deps.now();
     const row: EventRow = {
       id: this.deps.newEventId(),
@@ -142,6 +149,7 @@ export class EventService {
       updatedAt: now,
     };
     await this.deps.repo.createEvent(row);
+    await this.deps.repo.putEventApps({ eventId: row.id, apps: enabledApps, updatedBy: ctx.userId, updatedAt: now });
     await this.deps.publisher.publish(
       "event.created",
       { eventId: row.id, title: row.title, phase: row.phase },
@@ -189,7 +197,46 @@ export class EventService {
   async getEvent(_ctx: ReqCtx, id: common.EventId): Promise<event.EventDetail> {
     const ev = await this.loadEvent(id);
     const actions = await this.deps.repo.actionsForEvent(id, INCLUDE_ACTIONS_CAP);
-    return toEventDetail(ev, actions);
+    const apps = await this.deps.repo.getEventApps(id);
+    return { ...toEventDetail(ev, actions), enabledApps: eventNs.resolveEnabledApps(apps?.apps) };
+  }
+
+  // ---- per-event enabled apps (イベント設定 > 使うアプリ) ----
+  private toAppsResponse(id: common.EventId, row: EventAppsRow | null): event.EventAppsResponse {
+    return {
+      eventId: id,
+      enabledApps: eventNs.resolveEnabledApps(row?.apps),
+      customized: row !== null,
+      updatedAt: row?.updatedAt ?? null,
+    };
+  }
+
+  async getEventApps(_ctx: ReqCtx, id: common.EventId): Promise<event.EventAppsResponse> {
+    await this.loadEvent(id); // 404 if missing / cross-org
+    return this.toAppsResponse(id, await this.deps.repo.getEventApps(id));
+  }
+
+  async saveEventApps(ctx: ReqCtx, id: common.EventId, body: unknown): Promise<event.EventAppsResponse> {
+    const ev = await this.loadEvent(id);
+    if (ev.archivedAt) throw errArchivedImmutable(id);
+    // Layer 2: the table proved event:write org-wide-or-scoped; ask WITH this event's scope
+    // so an organizer grant limited to another event cannot reconfigure this one.
+    const ok = await this.deps.scopedAuthz.hasPermission(ctx.userId, this.deps.orgId, {
+      permission: "event:write",
+      resourceType: "event",
+      resourceId: id,
+    });
+    if (!ok) throw new DubError(CommonErrorCodes.FORBIDDEN, "permission denied: event:write", { status: 403 });
+
+    const { enabledApps } = validateSaveEventAppsRequest(body);
+    const prev = await this.deps.repo.getEventApps(id);
+    const row: EventAppsRow = { eventId: id, apps: enabledApps, updatedBy: ctx.userId, updatedAt: this.deps.now() };
+    await this.deps.repo.putEventApps(row);
+    await this.auditWrite(ctx, "event.event.apps_updated", "event", id, {
+      before: eventNs.resolveEnabledApps(prev?.apps),
+      after: enabledApps,
+    });
+    return this.toAppsResponse(id, row);
   }
 
   async listEvents(_ctx: ReqCtx, q: event.ListEventsQuery): Promise<event.ListEventsResponse> {

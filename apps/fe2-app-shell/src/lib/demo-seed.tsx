@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
+import { auth as authValues, event as eventValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 
@@ -193,6 +193,23 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
     actions: [{ id: "act_3", eventId: "evt_2", kind: "announcement", title: "定例アジェンダ共有" }],
   },
 };
+
+// 使うアプリ (per-event enabled apps). In-session like the event edits above.
+// evt_1 = the default set + 運営メンバー, evt_2 = the default set a NEW event gets,
+// evt_3 = never configured (legacy) => every app, exactly like prod's existing events.
+const DEMO_EVENT_APPS: Record<string, { apps: string[]; updatedAt: string }> = {
+  evt_1: { apps: [...eventValues.EVENT_DEFAULT_ENABLED_APPS, "members"], updatedAt: "2026-11-01T00:00:00Z" },
+  evt_2: { apps: [...eventValues.EVENT_DEFAULT_ENABLED_APPS], updatedAt: "2026-11-01T00:00:00Z" },
+};
+function demoEventApps(eventId: string): event.EventAppsResponse {
+  const row = DEMO_EVENT_APPS[eventId];
+  return {
+    eventId,
+    enabledApps: eventValues.resolveEnabledApps(row?.apps),
+    customized: row !== undefined,
+    updatedAt: row?.updatedAt ?? null,
+  };
+}
 
 const EVENT_ACTIONS: Record<string, event.DubAction[]> = {
   evt_1: [
@@ -2913,6 +2930,20 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     if (askId && method === "POST") return json({ status: "disabled", answer: null, sources: [] } satisfies event.AskEventResponse);
   }
 
+  // 使うアプリ save — full replace, unknown ids rejected like event-service.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/apps$/);
+    if (id && method === "PUT") {
+      const apps = (body as { enabledApps?: unknown } | undefined)?.enabledApps;
+      if (!eventValues.isEnabledAppList(apps)) {
+        const err: ErrorResponse = { error: { code: "VALIDATION_FAILED", message: "unknown app id", retryable: false } };
+        return json(err, 400);
+      }
+      DEMO_EVENT_APPS[id] = { apps: eventValues.resolveEnabledApps(apps), updatedAt: isoNow() };
+      return json(demoEventApps(id));
+    }
+  }
+
   // Shared section layout save — version-locked (see DemoSectionLayout above).
   {
     const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
@@ -2986,8 +3017,13 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       if (id) return json(loadDemoSectionLayout(id));
     }
     {
+      const id = seg(/^\/api\/v1\/events\/([^/]+)\/apps$/);
+      if (id) return EVENTS.some((e) => e.id === id) ? json(demoEventApps(id)) : notFound(`GET ${pathname}`);
+    }
+    {
       const id = seg(/^\/api\/v1\/events\/([^/]+)$/);
-      if (id) return EVENT_DETAIL[id] ? json(EVENT_DETAIL[id]) : notFound(`GET ${pathname}`);
+      const ev = id ? EVENT_DETAIL[id] : undefined;
+      if (id) return ev ? json({ ...ev, enabledApps: demoEventApps(id).enabledApps }) : notFound(`GET ${pathname}`);
     }
     // tasks
     if (pathname === "/api/v1/tasks") {
@@ -4397,7 +4433,7 @@ function createMembersStore() {
   // ステータス表示は added＝通常(バッジなし)、invited/considering＝「打診中」、on_leave＝
   // 「休み中」、declined＝「辞退」(名簿一覧では既定非表示・辞退者フィルタで参照)。
   const members: DemoMember[] = [
-    // 本番の運営名簿と同じくらいの量・形(架空の名前): 9 チーム(法人は組織図に出さない)・56 名(採用済み 4 名を含む)・
+    // 本番の運営名簿と同じくらいの量・形(架空の名前): 9 チーム(法人は組織図に出さない)・58 名(採用済み 4 名を含む)・
     // オーガナイザー 14 / リーダー 14(=班 14)・打診中 5 / 休み中 1 / 未所属 1 / 辞退 1。
     // 本番はリーダー(上長)がほぼ未設定なので、多くのリーダーは leaderId を持たない。
     // 統括 7 — オーガナイザー 5(代表・副代表を含む) + メンバー 2。うち 4 人は法人チームも兼任。
@@ -4416,55 +4452,83 @@ function createMembersStore() {
     mk("member_d3", "池田 学", "メンバー", "added", ["team_dev"], 10, null, "情報工学科", "1年", null, "member_d2"),
     mk("member_d4", "上田 拓真", "メンバー", "added", ["team_dev"], 11, null, "情報工学科", "2年", null, "member_d2"),
     mk("member_d5", "遠藤 涼子", "インフラリーダー", "added", ["team_dev"], 12, null, "情報工学科", "M1"),
-    // 当日進行 6 — オーガナイザー 1 / リーダー 4 / メンバー 1(休み中)。
+    // 当日進行 8 — オーガナイザー 1 / リーダー 4 / メンバー 3(休み中 1・アカウントあり 2)。
     mk("member_o1", "久米 宏", "オーガナイザー", "added", ["team_ops"], 13, null, "機械工学科", "3年"),
     mk("member_o2", "中村 蓮", "進行リーダー", "added", ["team_ops"], 14, null, "経営情報学科", "2年"),
     mk("member_o3", "大野 翼", "メンバー", "on_leave", ["team_ops"], 15, null, "機械工学科", "2年", null, "member_o2"),
-    mk("member_o5", "佐々木 誠", "受付リーダー", "added", ["team_ops"], 16, null, "経営情報学科", "3年"),
-    mk("member_o7", "安田 光", "誘導リーダー", "added", ["team_ops"], 17, null, "機械工学科", "2年"),
-    mk("member_o8", "山口 千里", "配信リーダー", "added", ["team_ops"], 18, null, "電気電子工学科", "2年"),
+    // 高橋・渡辺 はアカウント (メール名簿) あり: 「このイベントに招待」の候補になる確認用。
+    mk("member_o4", "高橋 文人", "メンバー", "added", ["team_ops"], 16, null, "機械工学科", "1年", "usr_frank", "member_o2"),
+    mk("member_o6", "渡辺 花", "メンバー", "added", ["team_ops"], 17, null, "機械工学科", "2年", "usr_hana", "member_o5"),
+    mk("member_o5", "佐々木 誠", "受付リーダー", "added", ["team_ops"], 18, null, "経営情報学科", "3年"),
+    mk("member_o7", "安田 光", "誘導リーダー", "added", ["team_ops"], 19, null, "機械工学科", "2年"),
+    mk("member_o8", "山口 千里", "配信リーダー", "added", ["team_ops"], 20, null, "電気電子工学科", "2年"),
     // スポンサー 10 — オーガナイザー 1 / リーダー 2 / メンバー 7。
-    mk("member_s1", "吉岡 誠一", "オーガナイザー", "added", ["team_sponsor"], 19, null, "経営情報学科", "3年"),
-    mk("member_s2", "前田 直樹", "渉外リーダー", "added", ["team_sponsor"], 20, null, "情報工学科", "2年"),
-    mk("member_s3", "松島 花", "メンバー", "invited", ["team_sponsor"], 21, null, "電気電子工学科", "1年", null, "member_s2"),
-    mk("member_s4", "森 健太", "メンバー", "added", ["team_sponsor"], 22, null, "経営情報学科", "2年", null, "member_s2"),
-    mk("member_s5", "今井 美穂", "企画リーダー", "added", ["team_sponsor"], 23, null, "経営情報学科", "2年"),
-    mk("member_s6", "内田 康平", "メンバー", "added", ["team_sponsor"], 24, null, "経営情報学科", "1年", null, "member_s5"),
-    mk("member_s7", "太田 早紀", "メンバー", "added", ["team_sponsor"], 25, null, "情報工学科", "1年", null, "member_s5"),
-    mk("member_s8", "菊地 隼人", "メンバー", "added", ["team_sponsor"], 26, null, "電気電子工学科", "2年"),
-    mk("member_s9", "工藤 茜", "メンバー", "added", ["team_sponsor"], 27, null, "経営情報学科", "1年"),
-    mk("member_s10", "近藤 勇気", "メンバー", "added", ["team_sponsor"], 28, null, "機械工学科", "2年"),
+    mk("member_s1", "吉岡 誠一", "オーガナイザー", "added", ["team_sponsor"], 21, null, "経営情報学科", "3年"),
+    mk("member_s2", "前田 直樹", "渉外リーダー", "added", ["team_sponsor"], 22, null, "情報工学科", "2年"),
+    mk("member_s3", "松島 花", "メンバー", "invited", ["team_sponsor"], 23, null, "電気電子工学科", "1年", null, "member_s2"),
+    mk("member_s4", "森 健太", "メンバー", "added", ["team_sponsor"], 24, null, "経営情報学科", "2年", null, "member_s2"),
+    mk("member_s5", "今井 美穂", "企画リーダー", "added", ["team_sponsor"], 25, null, "経営情報学科", "2年"),
+    mk("member_s6", "内田 康平", "メンバー", "added", ["team_sponsor"], 26, null, "経営情報学科", "1年", null, "member_s5"),
+    mk("member_s7", "太田 早紀", "メンバー", "added", ["team_sponsor"], 27, null, "情報工学科", "1年", null, "member_s5"),
+    mk("member_s8", "菊地 隼人", "メンバー", "added", ["team_sponsor"], 28, null, "電気電子工学科", "2年"),
+    mk("member_s9", "工藤 茜", "メンバー", "added", ["team_sponsor"], 29, null, "経営情報学科", "1年"),
+    mk("member_s10", "近藤 勇気", "メンバー", "added", ["team_sponsor"], 30, null, "機械工学科", "2年"),
     // 会場 4 — オーガナイザー 1 + メンバー 3(採用済みの 1 人を含む)。リーダー無し。
-    mk("member_v1", "清水 洋介", "オーガナイザー", "added", ["team_venue"], 29, null, "建築学科", "3年"),
-    mk("member_2", "佐藤 花子", "会場担当", "added", ["team_venue"], 30, null, "建築学科", "2年", null, "member_v1"),
-    mk("member_v3", "田口 涼太", "メンバー", "added", ["team_venue"], 31, null, "建築学科", "1年", null, "member_v1"),
+    mk("member_v1", "清水 洋介", "オーガナイザー", "added", ["team_venue"], 31, null, "建築学科", "3年"),
+    mk("member_2", "佐藤 花子", "会場担当", "added", ["team_venue"], 32, null, "建築学科", "2年", null, "member_v1"),
+    mk("member_v3", "田口 涼太", "メンバー", "added", ["team_venue"], 33, null, "建築学科", "1年", null, "member_v1"),
     // ネットワーク 3 — オーガナイザー 1 / リーダー 2(上長が設定済みは 1 人だけ)。
-    mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 32, null, "情報工学科", "3年"),
-    mk("member_n3", "川口 隼", "リーダー", "added", ["team_network"], 33, null, "情報工学科", "2年", null, "member_n1"),
-    mk("member_n4", "北村 楓", "リーダー", "added", ["team_network"], 34, null, "電気電子工学科", "2年"),
+    mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 34, null, "情報工学科", "3年"),
+    mk("member_n3", "川口 隼", "リーダー", "added", ["team_network"], 35, null, "情報工学科", "2年", null, "member_n1"),
+    mk("member_n4", "北村 楓", "リーダー", "added", ["team_network"], 36, null, "電気電子工学科", "2年"),
     // 法務会計 2 — オーガナイザー 2 だけ。
-    mk("member_l1", "酒井 理恵", "オーガナイザー", "added", ["team_legal"], 35, null, "経営情報学科", "3年"),
-    mk("member_l2", "柴田 悟", "オーガナイザー", "invited", ["team_legal"], 36, null, "経営情報学科", "M1"),
+    mk("member_l1", "酒井 理恵", "オーガナイザー", "added", ["team_legal"], 37, null, "経営情報学科", "3年"),
+    mk("member_l2", "柴田 悟", "オーガナイザー", "invited", ["team_legal"], 38, null, "経営情報学科", "M1"),
     // 集客広報 14 — オーガナイザー 2 人: 組織図でチームの中が 2 グループに横に分かれ、
     // 各グループの下に自分の班が横に並ぶ(白木 → 広報班・デザイン班 / 岡田 → SNS班・LP班)。
-    mk("member_e1", "白木 彩", "オーガナイザー", "added", ["team_pr"], 37, null, "メディア情報学科", "3年"),
-    mk("member_e10", "岡田 真琴", "オーガナイザー", "added", ["team_pr"], 38, null, "メディア情報学科", "3年"),
-    mk("member_e2", "石井 里奈", "広報リーダー", "added", ["team_pr"], 39, null, "メディア情報学科", "2年", null, "member_e1"),
-    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 40, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
-    mk("member_e4", "藤田 直人", "メンバー", "added", ["team_pr"], 41, null, "メディア情報学科", "1年", null, "member_e2"),
-    mk("member_e7", "村上 千尋", "メンバー", "added", ["team_pr"], 42, null, "メディア情報学科", "2年", null, "member_e2"),
-    mk("member_e5", "中田 桜", "デザインリーダー", "added", ["team_pr"], 43, null, "メディア情報学科", "3年", null, "member_e1"),
-    mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 44, null, "メディア情報学科", "2年", null, "member_e5"),
-    mk("member_e13", "宮本 楓", "メンバー", "added", ["team_pr"], 45, null, "メディア情報学科", "1年", null, "member_e5"),
-    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 46, null, "メディア情報学科", "2年", null, "member_e10"),
-    mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 47, null, "メディア情報学科", "1年", null, "member_e8"),
-    mk("member_e11", "小野 葵", "LPリーダー", "added", ["team_pr"], 48, null, "メディア情報学科", "2年", null, "member_e10"),
-    mk("member_e12", "松井 陽", "メンバー", "added", ["team_pr"], 49, null, "メディア情報学科", "1年", null, "member_e11"),
+    mk("member_e1", "白木 彩", "オーガナイザー", "added", ["team_pr"], 39, null, "メディア情報学科", "3年"),
+    mk("member_e10", "岡田 真琴", "オーガナイザー", "added", ["team_pr"], 40, null, "メディア情報学科", "3年"),
+    mk("member_e2", "石井 里奈", "広報リーダー", "added", ["team_pr"], 41, null, "メディア情報学科", "2年", null, "member_e1"),
+    mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 42, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
+    mk("member_e4", "藤田 直人", "メンバー", "added", ["team_pr"], 43, null, "メディア情報学科", "1年", null, "member_e2"),
+    mk("member_e7", "村上 千尋", "メンバー", "added", ["team_pr"], 44, null, "メディア情報学科", "2年", null, "member_e2"),
+    mk("member_e5", "中田 桜", "デザインリーダー", "added", ["team_pr"], 45, null, "メディア情報学科", "3年", null, "member_e1"),
+    mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 46, null, "メディア情報学科", "2年", null, "member_e5"),
+    mk("member_e13", "宮本 楓", "メンバー", "added", ["team_pr"], 47, null, "メディア情報学科", "1年", null, "member_e5"),
+    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 48, null, "メディア情報学科", "2年", null, "member_e10"),
+    mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 49, null, "メディア情報学科", "1年", null, "member_e8"),
+    mk("member_e11", "小野 葵", "LPリーダー", "added", ["team_pr"], 50, null, "メディア情報学科", "2年", null, "member_e10"),
+    mk("member_e12", "松井 陽", "メンバー", "added", ["team_pr"], 51, null, "メディア情報学科", "1年", null, "member_e11"),
     // 辞退 — 名簿一覧では既定で隠れ、辞退者フィルタでのみ表示される確認用。
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 50),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 52),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 51, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 53, null, "情報工学科", "1年"),
   ];
+
+  // 運営メンバー per event: 名簿とチームは全体で 1 つ。イベントはそこから運営メンバーと班を選ぶ。
+  // evt_1 (北陸ITカンファレンス 2026) = 法人チーム以外の 7 班とその全員、evt_3 (Hackit 秋) = 開発と
+  // 集客広報の 2 班と 7 人だけ、evt_2 (運営定例) = まだ誰も選んでいない。
+  const eventStaff = new Map<string, { people: Set<string>; teams: Set<string> }>();
+  const staffOf = (eventId: string) => {
+    let s = eventStaff.get(eventId);
+    if (!s) eventStaff.set(eventId, (s = { people: new Set(), teams: new Set() }));
+    return s;
+  };
+  {
+    const conf = staffOf("evt_1");
+    for (const t of teams) if (t.id !== "team_corp") conf.teams.add(t.id);
+    for (const m of members) if (m.teamIds.length === 0 || m.teamIds.some((t) => conf.teams.has(t))) conf.people.add(m.id);
+    const hack = staffOf("evt_3");
+    for (const t of ["team_dev", "team_pr"]) hack.teams.add(t);
+    for (const id of ["member_1", "member_d1", "member_d2", "member_d3", "member_e1", "member_e5", "member_e6"]) hack.people.add(id);
+  }
+  const staffJson = (eventId: string) => {
+    const s = staffOf(eventId);
+    return { eventId, personIds: [...s.people].sort(), teamIds: [...s.teams].sort() };
+  };
+  const enroll = (eventId: unknown, personId: string): void => {
+    if (typeof eventId === "string" && eventId !== "") staffOf(eventId).people.add(personId);
+  };
 
   // 本番と同じく、役職(position)を明示していない人が多い(役割の文言から推定される)。
   for (const mem of members) {
@@ -4490,7 +4554,9 @@ function createMembersStore() {
     member_o1: ["くめ", "ひろし"],
     member_o2: ["なかむら", "れん"],
     member_o3: ["おおの", "つばさ"],
+    member_o4: ["たかはし", "ふみと"],
     member_o5: ["ささき", "まこと"],
+    member_o6: ["わたなべ", "はな"],
     member_o7: ["やすだ", "ひかる"],
     member_o8: ["やまぐち", "ちさと"],
     member_s1: ["よしおか", "せいいち"],
@@ -4590,7 +4656,7 @@ function createMembersStore() {
     },
     {
       // 未処理・招待中に該当なし → 「追加する」で新規追加フローを確認できる。
-      id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実",
+      id: "part_seed_2", orgId: ORG, memberId: null, name: "田中 実", normalizedName: "田中実", eventId: "evt_2",
       lastName: "田中", firstName: "実", nameKana: "たなか みのる", lastNameKana: "たなか", firstNameKana: "みのる",
       nameRomaji: "Tanaka Minoru", lastNameRomaji: "Tanaka", firstNameRomaji: "Minoru",
       grade: "2", department: "電気電子工学科", rosterNumber: "2EE1-15", studentNumber: "1401123", contact: "tanaka@school.ac.jp", phone: "080-3333-4444",
@@ -4803,6 +4869,7 @@ function createMembersStore() {
       a.stage = "hired";
       a.memberId = memberId;
       bump(a);
+      enroll(body?.eventId, memberId);
       hrEvent(a.id, "joined", from, "hired", body?.memberId ? "既存の名簿に紐付け" : "名簿に新規追加", nowIso());
       return json({ applicant: { ...a }, memberId });
     }
@@ -4844,6 +4911,7 @@ function createMembersStore() {
       const created = mk(nid("member"), a.name, "メンバー", "added", placeTeams ?? (a.desiredTeamId ? [a.desiredTeamId] : []), members.length, a.email, a.department, a.grade, issued?.identityUserId ?? null, placeLeader);
       members.push(created);
       memberId = created.id;
+      enroll(req.eventId, memberId);
     }
     const from = a.stage;
     a.stage = hrResultValues.DECISION_STAGE[req.decision];
@@ -4891,11 +4959,51 @@ function createMembersStore() {
       return json({ teams: teams.map((t) => ({ ...t })), myTeamIds: [...(me?.teamIds ?? [])] });
     }
 
+    // 運営メンバー per event (member-service と同じ形: id の一覧だけ・入れる/外すは冪等)。
+    let ev = /^\/api\/v1\/members\/events\/([^/]+)\/staff$/.exec(pathname);
+    if (ev && method === "GET") return json(staffJson(decodeURIComponent(ev[1]!)));
+    ev = /^\/api\/v1\/members\/events\/([^/]+)\/(people|teams)\/([^/]+)$/.exec(pathname);
+    if (ev && (method === "PUT" || method === "DELETE")) {
+      const eventId = decodeURIComponent(ev[1]!);
+      const id = decodeURIComponent(ev[3]!);
+      const isPerson = ev[2] === "people";
+      if (method === "PUT" && !(isPerson ? members.some((x) => x.id === id) : teams.some((x) => x.id === id))) {
+        return notFound(`${method} ${pathname}`);
+      }
+      const set = isPerson ? staffOf(eventId).people : staffOf(eventId).teams;
+      if (method === "PUT") set.add(id);
+      else set.delete(id);
+      return json(staffJson(eventId));
+    }
+    // このイベントに招待 (member-service と同じ: アカウントのある人だけ・すぐ入る・本人へ通知)。
+    ev = /^\/api\/v1\/members\/events\/([^/]+)\/invitations$/.exec(pathname);
+    if (ev && method === "POST") {
+      const eventId = decodeURIComponent(ev[1]!);
+      const mem = members.find((x) => x.id === body?.personId);
+      if (!mem) return notFound(`${method} ${pathname}`);
+      if (!mem.identityUserId) {
+        return json({ error: { code: "VALIDATION_FAILED", message: "アカウントの無い人は招待できません。参加届から入ってもらってください", retryable: false } }, 400);
+      }
+      if (staffOf(eventId).people.has(mem.id)) {
+        return json({ error: { code: "MEMBER_EVENT_ALREADY_STAFF", message: "すでにこのイベントの運営メンバーです", retryable: false } }, 409);
+      }
+      staffOf(eventId).people.add(mem.id);
+      const title = (typeof body?.eventTitle === "string" && body.eventTitle.trim()) || "イベント";
+      // デモは 1 人で見るので、招待された本人宛ての通知をこの受信箱にも出して文面を確認できるようにする。
+      NOTIFICATIONS.unshift({
+        id: nid("ntf"), type: "member.event_invited", title: `「${title}」の運営に招待されました`,
+        body: `「${title}」の運営メンバーに追加されました。開いてイベントを確認してください。（デモ: ${mem.name}さん宛ての通知）`,
+        readAt: null, createdAt: new Date().toISOString(), resourceType: "event", resourceId: eventId,
+      });
+      return json({ staff: staffJson(eventId), notified: true });
+    }
+
     // teams
     if (method === "POST" && pathname === "/api/v1/members/teams") {
       const name = String(body?.name ?? "");
       const t: DemoTeam = { id: nid("team"), key: slug(body?.key ?? name) || `team-${teams.length + 1}`, name, color: body?.color ?? null, description: body?.description ?? null };
       teams.push(t);
+      if (typeof body?.eventId === "string" && body.eventId) staffOf(body.eventId).teams.add(t.id);
       return json(t, 201);
     }
     let m = /^\/api\/v1\/members\/teams\/([^/]+)$/.exec(pathname);
@@ -4912,6 +5020,7 @@ function createMembersStore() {
       if (method === "DELETE") {
         teams.splice(teams.indexOf(t), 1);
         for (const mem of members) mem.teamIds = mem.teamIds.filter((id) => id !== t.id);
+        for (const st of eventStaff.values()) st.teams.delete(t.id);
         return json({ ok: true });
       }
     }
@@ -4945,6 +5054,7 @@ function createMembersStore() {
         createdAt: isoNow(), updatedAt: isoNow(),
       };
       members.push(mem);
+      enroll(body?.eventId, mem.id);
       return json(mem, 201);
     }
     // reverse lookup: member linked to an identity user (offboarding fan-out, #1/#2).
@@ -5049,12 +5159,17 @@ function createMembersStore() {
         contact: body?.contact ?? null,
         schoolEmail: profile.schoolEmail ?? "", gmail: profile.gmail ?? "",
         desiredTeamId: body?.desiredTeamId ?? null,
+        eventId: typeof body?.eventId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(body.eventId) ? body.eventId : null,
         position: memberValues.isMemberPosition(body?.position) ? body.position : null,
         status: "submitted", matchKind: existing?.matchKind ?? "created_new", reviewState: existing?.reviewState ?? "pending",
         submittedBy: ME_ID, submittedAt: isoNow(), createdAt: existing?.createdAt ?? isoNow(), updatedAt: isoNow(),
       };
       if (existing) participations[participations.indexOf(existing)] = participation;
       else participations.unshift(participation);
+      // 反映済みの人の再提出 (別のイベントへの参加届) は、そのイベントの運営メンバーにだけ入れる。
+      if (participation.reviewState === "added" && participation.memberId && participation.eventId) {
+        enroll(participation.eventId, participation.memberId);
+      }
       return { participation };
     };
 
@@ -5114,6 +5229,8 @@ function createMembersStore() {
       const p = participations.find((x) => x.id === decodeURIComponent(resMatch[1]!));
       if (!p) return json({ error: { code: "MEMBER_PARTICIPATION_NOT_FOUND", message: "not found", retryable: false } }, 404);
       const action = body?.action;
+      // 省略 = この参加届を出したイベント (実サーバと同じ)。null = どこにも入れない。
+      const resolveEventId = body?.eventId === undefined ? p.eventId : body.eventId;
       if (action === "skip") {
         p.reviewState = "skipped"; p.memberId = null; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: null });
@@ -5139,6 +5256,7 @@ function createMembersStore() {
         }
         mem.version += 1; mem.updatedAt = isoNow();
         p.memberId = mem.id; p.matchKind = "linked_existing"; p.reviewState = "added"; p.updatedAt = isoNow();
+        enroll(resolveEventId, mem.id);
         return json({ participation: { ...p }, member: { ...mem, teamIds: [...mem.teamIds] } });
       }
       if (action === "create") {
@@ -5150,6 +5268,7 @@ function createMembersStore() {
           sortOrder: (members.length + 1) * 1024, version: 1, createdAt: isoNow(), updatedAt: isoNow(),
         };
         members.push(created);
+        enroll(resolveEventId, created.id);
         p.memberId = created.id; p.matchKind = "created_new"; p.reviewState = "added"; p.updatedAt = isoNow();
         return json({ participation: { ...p }, member: { ...created, teamIds: [...created.teamIds] } });
       }
@@ -6943,7 +7062,7 @@ export function createDemoFetch(): typeof fetch {
         if (!perms.includes("members:onboard_mail") || !perms.includes("hr:write")) {
           return problem("FORBIDDEN", "permission denied: hr:write + members:onboard_mail", 403);
         }
-        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown; teamIds?: unknown; leaderId?: unknown };
+        const req = (parsedBody ?? {}) as { decision?: unknown; reason?: unknown; includeReasonInMail?: unknown; localPart?: unknown; teamIds?: unknown; leaderId?: unknown; eventId?: unknown };
         if (!hrResultValues.isInterviewDecision(req.decision)) return problem("VALIDATION_FAILED", "合否を選んでください", 400, [{ field: "decision", reason: "invalid" }]);
         const reason = typeof req.reason === "string" ? req.reason.trim() : "";
         if (!reason) return problem("VALIDATION_FAILED", "理由を入力してください", 400, [{ field: "reason", reason: "required" }]);
@@ -6960,6 +7079,7 @@ export function createDemoFetch(): typeof fetch {
             includeReasonInMail: req.includeReasonInMail === true,
             ...(Array.isArray(req.teamIds) ? { teamIds: req.teamIds.filter((t): t is string => typeof t === "string") } : {}),
             ...(typeof req.leaderId === "string" ? { leaderId: req.leaderId } : {}),
+            ...(typeof req.eventId === "string" ? { eventId: req.eventId } : {}),
           },
           (displayName) => {
             const made = roster.onboard(localPart, displayName);

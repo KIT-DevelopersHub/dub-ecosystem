@@ -3,6 +3,7 @@
 // (design 1-2-6: destructive ops run after ConfirmDialog, no optimism).
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { common, event } from "@dub/types";
+import { event as evNs } from "@dub/types";
 import { useEventApi } from "../context/ApiContext";
 import { useToast } from "@dub/ui";
 import { createOptimisticMutation } from "./useOptimisticMutation";
@@ -187,5 +188,18 @@ export function useAskEvent(eventId: common.EventId) {
   const api = useEventApi();
   return useMutation<event.AskEventResponse, unknown, string>({
     mutationFn: (question) => api.askEvent(eventId, { question }),
+  });
+}
+
+// ---- Event enabled apps: replace the set (optimistic; silent — the switch flipping IS
+// the feedback). Each toggle sends the FULL set computed from the (already optimistic)
+// cache, so quick successive toggles never drop one another. ----
+export function useSaveEventApps(eventId: common.EventId) {
+  const api = useEventApi();
+  return createOptimisticMutation<event.EventAppsResponse, event.SaveEventAppsRequest, event.EventAppsResponse>({
+    mutationFn: (req) => api.saveEventApps(eventId, req),
+    queryKey: eventKeys.apps(eventId),
+    optimisticUpdate: (prev, { enabledApps }) =>
+      prev ? { ...prev, enabledApps: evNs.resolveEnabledApps(enabledApps), customized: true } : prev,
   });
 }

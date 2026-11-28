@@ -123,6 +123,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.saveEventDetails(reqCtx(c), c.req.param("id"), body));
   });
 
+  // ---- per-event enabled apps (イベント設定 > 使うアプリ) ----
+  app.get("/events/:id/apps", async (c) => {
+    return c.json(await svc.getEventApps(reqCtx(c), c.req.param("id")));
+  });
+
+  app.put("/events/:id/apps", async (c) => {
+    const body = await readJson<unknown>(c);
+    return c.json(await svc.saveEventApps(reqCtx(c), c.req.param("id"), body));
+  });
+
   // ---- event section layout (shared D&D order/visibility of the detail sections) ----
   app.get("/events/:id/section-layout", async (c) => {
     return c.json(await svc.getEventSectionLayout(reqCtx(c), c.req.param("id")));

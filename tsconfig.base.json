@@ -22,6 +22,7 @@
     "paths": {
       "@dub/types": ["packages/types/src/index.ts"],
       "@dub/errors": ["packages/errors/src/index.ts"],
+      "@dub/validation": ["packages/validation/src/index.ts"],
       "@dub/observability": ["packages/observability/src/index.ts"],
       "@dub/http": ["packages/http/src/index.ts"],
       "@dub/policy-gate": ["packages/policy-gate/src/index.ts"],

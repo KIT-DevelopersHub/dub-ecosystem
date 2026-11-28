@@ -130,12 +130,15 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 
 // 運営メンバー (名簿): 閲覧 reads, 編集 writes.
 const ROSTER_READS = [
+  "GET /members/events/:eventId/staff",
   "GET /members/org-overview",
   "GET /members/overview",
   "GET /members/people/by-identity/:identityUserId",
   "GET /members/teams",
 ];
 const ROSTER_WRITES = [
+  "DELETE /members/events/:eventId/people/:personId",
+  "DELETE /members/events/:eventId/teams/:teamId",
   "DELETE /members/people/:id",
   "DELETE /members/teams/:id",
   "PATCH /members/people/:id",
@@ -145,6 +148,9 @@ const ROSTER_WRITES = [
   "POST /members/people/:id/identity-link",
   "POST /members/people/:id/profile-reminder",
   "POST /members/teams",
+  "PUT /members/events/:eventId/people/:personId",
+  "POST /members/events/:eventId/invitations",
+  "PUT /members/events/:eventId/teams/:teamId",
 ];
 // 参加届: 自分の届を出す (閲覧) / 他人の届を見る (閲覧 + identity:read) / 反映確定 (編集).
 const PARTICIPATION_SUBMIT = ["POST /members/participation"];

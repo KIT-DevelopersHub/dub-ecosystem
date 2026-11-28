@@ -124,6 +124,8 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /members/org-overview": appLevel("members", "view"),
   // The CANONICAL team list other apps (gantt 等) read for their own team switchers.
   "GET /members/teams": appLevel("members", "view"),
+  // このイベントの運営メンバー・班 (id の一覧だけ。中身は overview / org-overview の範囲で読む)。
+  "GET /members/events/:eventId/staff": appLevel("members", "view"),
   // 名簿行の逆引き (identity user -> member row).
   "GET /members/people/by-identity/:identityUserId": appLevel("members", "view", "members:roster_view"),
 
@@ -145,6 +147,13 @@ export const POLICY_TABLE = definePolicyTable({
   "PATCH /members/people/:id": appLevel("members", "edit", "members:roster_edit"),
   "PATCH /members/people/:id/org": appLevel("members", "edit"),
   "DELETE /members/people/:id": appLevel("members", "edit"),
+  // イベントの運営メンバー・班の選択 (全体の名簿から入れる/外す)。名簿の行自体は書き換えない。
+  "PUT /members/events/:eventId/people/:personId": appLevel("members", "edit"),
+  "DELETE /members/events/:eventId/people/:personId": appLevel("members", "edit"),
+  "PUT /members/events/:eventId/teams/:teamId": appLevel("members", "edit"),
+  // アカウントのある人をこのイベントの運営に招待 (追加＋本人へ in-app 通知)。
+  "POST /members/events/:eventId/invitations": appLevel("members", "edit"),
+  "DELETE /members/events/:eventId/teams/:teamId": appLevel("members", "edit"),
 
   // チーム・役職ロールの一括付与。全員のロール割当を書き換えるので、ロール管理と同じ
   // 「管理 編集 + identity:admin」(identity-roster の POST /identity/users/:id/roles と同格)。

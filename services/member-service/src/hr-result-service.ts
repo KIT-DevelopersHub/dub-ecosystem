@@ -7,6 +7,7 @@
 //  - complete: 不合格なら 不合格 にする。合否のメールを 1 通送り (冪等キーは結果の id)、完了にする。
 import { DubError, errors } from "@dub/errors";
 import { hr, hrForm, hrResult } from "@dub/types";
+import { parseEventScopeId } from "@dub/validation";
 import type { ApplicantRow } from "./hr-repo";
 import type { HrService } from "./hr-service";
 import type { HrResultRepo, ResultRow } from "./hr-result-repo";
@@ -110,7 +111,10 @@ export class HrResultService {
     const a = await this.applicant(applicantId);
     const existing = await this.deps.hrResultRepo.get(applicantId);
     if (existing?.status === "done") return { result: toResult(existing), applicant: toApplicant(a), proceed: false };
-    if (decision === "pass") await this.placement(body);
+    if (decision === "pass") {
+      await this.placement(body);
+      parseEventScopeId(body?.eventId); // 発行の前に形を確かめる (不正なら 400)
+    }
     if (existing) {
       const patch = { decision, reason, includeReasonInMail, createdBy: ctx.userId };
       if (!(await this.deps.hrResultRepo.reclaim(applicantId, patch, this.deps.now(), this.leaseUntil()))) throw errInProgress();
@@ -184,6 +188,8 @@ export class HrResultService {
     if (person.identityUserId !== identityUserId) {
       await this.members.linkIdentity(ctx, memberId, { identityUserId, version: person.version });
     }
+    // 選んだイベントの運営メンバーにも入れる。冪等なので再試行のたびに入れ直してよい。
+    await this.members.enrollInEvent(ctx, parseEventScopeId(body?.eventId), memberId);
     return this.hrSvc.applyResult(ctx, applicantId, "hired", `面談結果: 合格（${address} を発行）`, memberId);
   }
 

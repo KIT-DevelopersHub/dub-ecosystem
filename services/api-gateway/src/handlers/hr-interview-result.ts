@@ -37,6 +37,7 @@ function placementOf(o: Partial<hrResult.RegisterInterviewResultRequest>): hrRes
   return {
     ...(o.teamIds !== undefined ? { teamIds: o.teamIds } : {}),
     ...(o.leaderId !== undefined ? { leaderId: o.leaderId } : {}),
+    ...(o.eventId !== undefined ? { eventId: o.eventId } : {}),
   };
 }
 

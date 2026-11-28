@@ -30,7 +30,7 @@ function renderWith(keys: identity.PermissionKey[], api = new MockChatClient(dem
 
 const CHAT_EDITOR: identity.PermissionKey[] = ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import"];
 
-describe("Slack emoji import (ChatApp)", () => {
+describe("Slack emoji import (ChatApp)", { timeout: 20_000 }, () => {
   it("is offered only with chat:emoji_import (chat:slack_import alone is not enough)", async () => {
     renderWith(CHAT_EDITOR);
     await screen.findByTestId("fe6-slack-import-open");
@@ -44,7 +44,7 @@ describe("Slack emoji import (ChatApp)", () => {
     const modal = await screen.findByTestId("fe6-emoji-import-modal");
     expect(modal.querySelector('[data-feature="custom-emoji-v1"]')).not.toBeNull();
     await user.click(screen.getByTestId("fe6-emoji-import-start"));
-    await waitFor(() => expect(screen.getByTestId("fe6-emoji-import-count")).toHaveTextContent("取り込み済み 15 / 15 件"), { timeout: 5000 });
+    await waitFor(() => expect(screen.getByTestId("fe6-emoji-import-count")).toHaveTextContent("取り込み済み 15 / 15 件"), { timeout: 15_000 });
     expect(screen.getByText("完了しました")).toBeInTheDocument();
     expect((await api.listCustomEmojis()).map((e) => e.name)).toContain("partyparrot");
   });

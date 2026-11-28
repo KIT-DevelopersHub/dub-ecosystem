@@ -164,6 +164,7 @@ const READS = [
   "GET /events",
   "GET /events/:id",
   "GET /events/:id/actions",
+  "GET /events/:id/apps",
   "GET /events/:id/details",
   "GET /events/:id/digest",
   "GET /events/:id/page-layout",
@@ -179,6 +180,7 @@ const WRITES = [
   "PATCH /events/:id",
   "POST /events",
   "POST /events/:id/actions",
+  "PUT /events/:id/apps",
   "PUT /events/:id/details",
   "PUT /events/:id/page-layout",
   "PUT /events/:id/section-layout",
@@ -332,6 +334,8 @@ describe("handler-side event scope: a cross-event id is refused, not served", ()
     ["PUT", (id) => `/events/${id}/page-layout`, { version: 0, data: { version: 1, blocks: [], updatedAt: "x" } }],
     ["GET", (id) => `/events/${id}/actions`, undefined],
     ["POST", (id) => `/events/${id}/actions`, { kind: "task_management", title: "hijacked" }],
+    ["GET", (id) => `/events/${id}/apps`, undefined],
+    ["PUT", (id) => `/events/${id}/apps`, { enabledApps: ["gantt"] }],
   ];
 
   it("refuses all 12 event-scoped routes an out-of-scope event id (404, no data)", async () => {

@@ -6,7 +6,8 @@
 import { useState } from "react";
 import { Button, PageHeader, SegmentedControl, SkeletonLoader, ErrorState } from "@dub/ui";
 import { ApiError, toDisplayableError } from "../../lib/api-client.tsx";
-import { useMembersOverview } from "./hooks.ts";
+import { useScopedOverview } from "./hooks.ts";
+import { useEventTitle } from "../../lib/eventTarget.tsx";
 import { OrgChartView } from "./OrgChartView.tsx";
 import { OrgChartLegacyView } from "./OrgChartLegacyView.tsx";
 import styles from "./members.module.css";
@@ -34,7 +35,9 @@ function saveViewMode(mode: OrgChartViewMode): void {
 }
 
 export function MembersOrgChartPage(): JSX.Element {
-  const overview = useMembersOverview();
+  // イベントを選んでいる時は、そのイベントの運営メンバー・班だけ。
+  const overview = useScopedOverview();
+  const eventTitle = useEventTitle(overview.eventId);
   const [view, setView] = useState<OrgChartViewMode>(readViewMode);
   const changeView = (mode: OrgChartViewMode): void => {
     setView(mode);
@@ -58,7 +61,11 @@ export function MembersOrgChartPage(): JSX.Element {
       <div className={styles.noPrint}>
         <PageHeader
           title="組織図"
-          description="チームとリーダーの上下関係を一枚で表示します（組織図PDFの代替）"
+          description={
+            overview.eventId
+              ? `「${eventTitle ?? "選択中のイベント"}」の運営メンバーと班だけを表示しています（運営メンバー画面で全体の名簿から選べます）`
+              : "チームとリーダーの上下関係を一枚で表示します（組織図PDFの代替）"
+          }
           actions={
             <div className={styles.orgViewActions}>
               <SegmentedControl

@@ -1,7 +1,7 @@
 // In-memory EventRepo: backs unit tests and local `--test` runs. Same keyset
 // semantics as the D1 repo so pagination tests are representative.
 import type { common, event } from "@dub/types";
-import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventSectionLayoutRow, EventPageLayoutRow, Keyset } from "./types";
+import type { EventRepo, EventRow, ActionRow, EventDetailsRow, EventSectionLayoutRow, EventPageLayoutRow, EventAppsRow, Keyset } from "./types";
 
 function afterKeysetById(id: string) {
   return (row: { id: string }) => row.id > id;
@@ -13,6 +13,7 @@ export class InMemoryEventRepo implements EventRepo {
   private details = new Map<common.EventId, EventDetailsRow>();
   private sectionLayouts = new Map<common.EventId, EventSectionLayoutRow>();
   private pageLayouts = new Map<common.EventId, EventPageLayoutRow>();
+  private apps = new Map<common.EventId, EventAppsRow>();
 
   // test/seed helper — bypasses service invariants (e.g. cross-org rows).
   seedEvent(row: EventRow): void {
@@ -145,6 +146,14 @@ export class InMemoryEventRepo implements EventRepo {
     if (curVersion !== expectedVersion) return false;
     this.pageLayouts.set(next.eventId, clonePageLayout(next));
     return true;
+  }
+
+  async getEventApps(eventId: common.EventId): Promise<EventAppsRow | null> {
+    const r = this.apps.get(eventId);
+    return r ? { ...r, apps: [...r.apps] } : null;
+  }
+  async putEventApps(row: EventAppsRow): Promise<void> {
+    this.apps.set(row.eventId, { ...row, apps: [...row.apps] });
   }
 }
 

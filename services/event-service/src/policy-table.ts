@@ -71,6 +71,12 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /events/:id/details": appLevel("events", "view", "event:read"),
   "PUT /events/:id/details": appLevel("events", "edit", "event:write"),
 
+  // ---- per-event enabled apps (イベント設定 > 使うアプリ) ----
+  // Reading is a plain event read (the shell greys launcher tiles from it). Saving is
+  // event:write; the handler re-asks event:write WITH this event's scope (layer 2).
+  "GET /events/:id/apps": appLevel("events", "view", "event:read"),
+  "PUT /events/:id/apps": appLevel("events", "edit", "event:write"),
+
   // ---- shared section layout (order/visibility of the detail sections) ----
   "GET /events/:id/section-layout": appLevel("events", "view", "event:read"),
   "PUT /events/:id/section-layout": appLevel("events", "edit", "event:write"),

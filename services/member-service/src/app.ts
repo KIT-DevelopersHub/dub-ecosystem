@@ -198,6 +198,27 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(await svc.listMentionTeams(reqCtx(c)));
   });
 
+  // ---- 運営メンバー per event: this event's staff / 班, chosen from the org-wide roster ----
+  app.get("/members/events/:eventId/staff", async (c) => {
+    return c.json(await svc.getEventStaff(reqCtx(c), c.req.param("eventId")));
+  });
+  app.put("/members/events/:eventId/people/:personId", async (c) => {
+    return c.json(await svc.setEventPerson(reqCtx(c), c.req.param("eventId"), c.req.param("personId"), true));
+  });
+  app.delete("/members/events/:eventId/people/:personId", async (c) => {
+    return c.json(await svc.setEventPerson(reqCtx(c), c.req.param("eventId"), c.req.param("personId"), false));
+  });
+  app.post("/members/events/:eventId/invitations", async (c) => {
+    const body = await readJson<member.InviteEventStaffRequest>(c);
+    return c.json(await svc.inviteToEvent(reqCtx(c), c.req.param("eventId"), body));
+  });
+  app.put("/members/events/:eventId/teams/:teamId", async (c) => {
+    return c.json(await svc.setEventTeam(reqCtx(c), c.req.param("eventId"), c.req.param("teamId"), true));
+  });
+  app.delete("/members/events/:eventId/teams/:teamId", async (c) => {
+    return c.json(await svc.setEventTeam(reqCtx(c), c.req.param("eventId"), c.req.param("teamId"), false));
+  });
+
   // ---- teams ----
   // GET /members/teams is the CANONICAL team list other apps (e.g. gantt) read to
   // source their own team switchers ({ teams: Team[] }).
