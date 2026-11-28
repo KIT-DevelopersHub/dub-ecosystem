@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@dub/ui";
-import { sponsor, type identity } from "@dub/types";
+import { goal, sponsor, type identity } from "@dub/types";
 import { describe, expect, it, vi } from "vitest";
 import { editorPermissions, FakeAuthProvider, viewerPermissions } from "../../auth/test-support.tsx";
 import { ApiError, createApiClient } from "../../lib/api-client.tsx";
@@ -14,7 +14,7 @@ import { createSponsorApi, type SponsorApi } from "./sponsorApi.tsx";
 import { SponsorApiProvider } from "./SponsorProvider.tsx";
 import { SponsorLeadsScreen } from "./SponsorLeadsScreen.tsx";
 import { SponsorGoalsScreen } from "./SponsorGoalsScreen.tsx";
-import { achievement, currentMonth, monthActuals, monthLabel, shiftMonth, undatedLeads } from "./goals.ts";
+import { undatedLeads } from "./goals.ts";
 import { isOverdue, sortLeads, summarizeLeads, todayIso } from "./leads.ts";
 import { parseAmount, parseDate, parseLeadSheet, parseTsv } from "./leadImport.ts";
 
@@ -317,55 +317,54 @@ describe("月間目標", () => {
     lead({ id: "g", status: "提案済", firstContactOn: "2026-09-01" }),
   ];
 
-  it("counts by the milestone dates of that month, leaving 見送り out of 内諾 and 協賛額", () => {
-    expect(monthActuals(leads, M)).toEqual({ contacted: 2, proposed: 1, agreed: 1, amount: 300000 });
-    expect(monthActuals(leads, "2026-10")).toEqual({ contacted: 1, proposed: 1, agreed: 0, amount: 0 });
+  it("counts the companies whose reached milestone has no date", () => {
     // d (全部空) と g (提案日が空)。未接触と見送りは数えない。
     expect(undatedLeads(leads)).toBe(2);
   });
 
-  it("computes the rate, over 100% included, and none without a target", () => {
-    expect(achievement(1, 3)).toBe(33);
-    expect(achievement(5, 4)).toBe(125);
-    expect(achievement(5, null)).toBeNull();
-    // 丸めで未達が 100% に見えない。
-    expect(achievement(996000, 1000000)).toBe(99);
-  });
-
-  it("uses the Japan calendar for this month", () => {
-    expect(currentMonth(new Date("2026-10-31T15:00:00Z"))).toBe("2026-11");
-    expect(currentMonth(new Date("2026-10-31T14:59:00Z"))).toBe("2026-10");
-  });
-
-  it("moves across years", () => {
-    expect(shiftMonth("2026-01", -1)).toBe("2025-12");
-    expect(shiftMonth("2026-12", 1)).toBe("2027-01");
-    expect(monthLabel("2026-09")).toBe("2026年9月");
-  });
-
-  it("shows the rate of the goals app targets against actuals from the lead list", async () => {
-    const month = currentMonth();
+  it("shows only the sponsor KPIs the goals app set, with the rate from the server", async () => {
+    const month = goal.currentMonth();
+    const row = (metric: goal.GoalMetric, target: number | null, actual: number | null, percent: number | null) => ({ metric, target, actual, percent });
     const api: SponsorApi = {
       ...demoApi(),
-      listGoals: () => Promise.resolve({ goals: [{ month, contacted: 4, proposed: null, agreed: null, amount: 500000 }] }),
-      listLeads: () => Promise.resolve({ leads: [lead({ firstContactOn: `${month}-01`, status: "初回連絡" })] }),
+      listGoals: ({ from, to }) =>
+        Promise.resolve({
+          months: goal.monthsBetween(from, to).map((m) => ({
+            month: m,
+            metrics: m === month
+              ? [row("sponsor_cards", 20, 5, 25), row("sponsor_contacted", null, 1, null), row("sponsor_amount", 500000, 0, 0)]
+              : [],
+          })),
+        }),
     };
     renderScreen(api, ADMIN, <SponsorGoalsScreen />);
-    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-goal-rate-contacted").textContent).toBe("25%"));
-    expect(screen.getByTestId("fe2-sponsor-goal-amount").textContent).toContain("/ ¥500,000");
-    expect(screen.queryByTestId("fe2-sponsor-goal-rate-proposed")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("fe2-sponsor-goal-rate-sponsor_cards").textContent).toBe("25%"));
+    expect(screen.getByTestId("fe2-sponsor-goal-sponsor_amount").textContent).toContain("/ 500,000円");
+    // KPI に置かれていない指標はカードを出さない。
+    expect(screen.queryByTestId("fe2-sponsor-goal-sponsor_contacted")).toBeNull();
+    expect(screen.queryByTestId("fe2-sponsor-goal-sponsor_proposed")).toBeNull();
+  });
+
+  it("says there is no KPI for a month without sponsor KPIs", async () => {
+    const api: SponsorApi = {
+      ...demoApi(),
+      listGoals: ({ from, to }) => Promise.resolve({ months: goal.monthsBetween(from, to).map((m) => ({ month: m, metrics: [] })) }),
+    };
+    renderScreen(api, ADMIN, <SponsorGoalsScreen />);
+    expect(await screen.findByTestId("fe2-sponsor-goals-empty")).toBeTruthy();
+    expect(screen.queryByTestId("fe2-sponsor-goals-history")).toBeNull();
   });
 
   it("cannot set goals here, even with write access, and moves between months", async () => {
     renderScreen(demoApi(), ADMIN, <SponsorGoalsScreen />);
-    expect(await screen.findByTestId("fe2-sponsor-goal-contacted")).toBeTruthy();
+    expect(await screen.findByTestId("fe2-sponsor-goal-sponsor_contacted")).toBeTruthy();
     expect(screen.queryByTestId("fe2-sponsor-goal-edit")).toBeNull();
     expect(screen.queryByTestId("fe2-sponsor-goal-dialog")).toBeNull();
     expect(screen.getByTestId("fe2-sponsor-goals-link").textContent).toBe("目標は目標管理アプリで設定します。設定や変更は、目標管理アプリの権限を持つ人に依頼してください。");
     fireEvent.click(screen.getByTestId("fe2-sponsor-goal-prev"));
-    expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(monthLabel(shiftMonth(currentMonth(), -1)));
+    expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(goal.monthLabel(goal.shiftMonth(goal.currentMonth(), -1)));
     fireEvent.click(screen.getByTestId("fe2-sponsor-goal-today"));
-    expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(monthLabel(currentMonth()));
+    expect(screen.getByTestId("fe2-sponsor-goal-month").textContent).toBe(goal.monthLabel(goal.currentMonth()));
   });
 
   it("stamps today's date on the demo transport when the status advances", async () => {

@@ -153,7 +153,8 @@ describe("スポンサー: 月間目標", () => {
     const viewer = createApp(makeDeps({ authz: fakeAuthz(new Set(["app:sponsor:view", "sponsor:read"] as identity.PermissionKey[])) }));
     const res = await call(viewer, "GET", "/members/sponsor/goals");
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ goals: [] });
+    expect(res.json.months).toHaveLength(6);
+    expect(res.json.months[0].metrics.every((m: { target: number | null }) => m.target === null)).toBe(true);
   });
 });
 

@@ -4,7 +4,7 @@
 // unavailable として返す (止まっている連携を「進捗 0%」に見せない)。
 import type { RequestContext } from "@dub/http";
 import { DubError, errors } from "@dub/errors";
-import { goal, type sponsor } from "@dub/types";
+import { goal } from "@dub/types";
 import type { GoalMetricSources, GoalRepo, GoalRow, MemberMonthCounts, TeamTaskCounts } from "./goal-repo";
 import type { ReqCtx } from "./service";
 import type { AppDeps } from "./types";
@@ -103,9 +103,20 @@ export class GoalService {
     };
   }
 
-  /** スポンサーの「目標」タブに出す目標値。実績はタブが営業進捗から数える。 */
-  async sponsorGoals(): Promise<sponsor.ListGoalsResponse> {
-    return { goals: goal.sponsorGoalsOf(await this.deps.goalRepo.listAll(this.deps.orgId)) };
+  /** スポンサーの「目標」タブ。from〜to の各月の、スポンサー指標の目標値 (全チームの KPI) と実績。既定は今月までの 6 か月。 */
+  async sponsorTab(fromQ: string | undefined, toQ: string | undefined): Promise<goal.SponsorTabResponse> {
+    const { goalRepo, orgId } = this.deps;
+    const to = toQ ?? goal.currentMonth(new Date(this.deps.now()));
+    const from = fromQ ?? goal.shiftMonth(to, -5);
+    if (!goal.isMonth(to)) throw errors.validationFailed([{ field: "to", reason: "invalid" }]);
+    if (!goal.isMonth(from)) throw errors.validationFailed([{ field: "from", reason: "invalid" }]);
+    const months = goal.monthsBetween(from, to);
+    if (months.length === 0 || months.length > goal.SPONSOR_TAB_MONTHS_MAX) throw errors.validationFailed([{ field: "from", reason: "invalid" }]);
+    const rows = (await goalRepo.listAll(orgId)).filter((r) => r.month >= from && r.month <= to);
+    const counts = await Promise.all(months.map((m) => orNull(goalRepo.countMonth(orgId, m))));
+    return {
+      months: months.map((m, i) => goal.sponsorTabMonthOf(m, rows.filter((r) => r.month === m).flatMap((r) => r.kpis), counts[i] ?? null)),
+    };
   }
 
   async put(ctx: ReqCtx, teamId: string, month: string, body: goal.PutGoalRequest): Promise<goal.TeamGoal> {

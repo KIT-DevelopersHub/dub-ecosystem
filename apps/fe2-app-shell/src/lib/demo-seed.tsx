@@ -6459,6 +6459,18 @@ function createGoalsStore(
       const res: goalValues.ListGoalsResponse = { month: m, teams: teams(), goals: rows.filter((r) => r.month === m).map(toGoal) };
       return json(res);
     }
+    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") {
+      const to = url.searchParams.get("to") ?? month;
+      const from = url.searchParams.get("from") ?? goalValues.shiftMonth(to, -5);
+      const res: goalValues.SponsorTabResponse = {
+        months: goalValues.monthsBetween(from, to).map((m) => {
+          const a = actuals("", m);
+          const counts = Object.fromEntries(goalValues.SPONSOR_TAB_METRICS.map((k) => [k, a[k] ?? 0]));
+          return goalValues.sponsorTabMonthOf(m, rows.filter((r) => r.month === m).flatMap((r) => r.kpis), counts);
+        }),
+      };
+      return json(res);
+    }
     const hit = /^\/api\/v1\/members\/goals\/([^/]+)\/(\d{4}-\d{2})$/.exec(pathname);
     if (!hit) return null;
     const [, teamId, m] = hit as unknown as [string, string, string];
@@ -6475,7 +6487,7 @@ function createGoalsStore(
     if (i < 0) rows.push(next); else rows[i] = next;
     return json(toGoal(next));
   }
-  return { handle, sponsorGoals: () => goalValues.sponsorGoalsOf(rows) };
+  return { handle };
 }
 
 // ── スポンサー (member-service /members/sponsor/* の demo) ──────────────────────
@@ -6495,7 +6507,7 @@ function demoCardSvg(company: string, person: string, title: string, accent: str
     `<circle cx="790" cy="150" r="56" fill="${accent}" opacity="0.85"/></svg>`;
 }
 
-function createSponsorStore(me: () => { id: string; displayName: string }, sponsorGoals: () => sponsorValues.MonthlyGoal[]) {
+function createSponsorStore(me: () => { id: string; displayName: string }) {
   // 常に過去 (今日の分も 30 分前) にして、新しく登録した名刺が先頭に来るようにする。
   const at = (daysAgo: number): string => new Date(Date.now() - daysAgo * 86_400_000 - 30 * 60_000).toISOString();
   const enc = new TextEncoder();
@@ -6677,7 +6689,6 @@ function createSponsorStore(me: () => { id: string; displayName: string }, spons
     const mailHit = mailDemo.handle(method, pathname, body);
     if (mailHit) return mailHit;
     if (pathname.startsWith("/api/v1/members/sponsor/leads")) return handleLeads(method, pathname, body, now);
-    if (pathname === "/api/v1/members/sponsor/goals" && method === "GET") return json({ goals: sponsorGoals() });
     if (pathname === "/api/v1/members/sponsor/cards") {
       if (method === "GET") return json({ cards: [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((c) => ({ ...c })) });
       if (method === "POST") {
@@ -6818,7 +6829,7 @@ export function createDemoFetch(): typeof fetch {
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
   const accountingStore = createAccountingStore(() => currentMe().user);
   const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.actuals(m));
-  const sponsorStore = createSponsorStore(() => currentMe().user, goalsStore.sponsorGoals);
+  const sponsorStore = createSponsorStore(() => currentMe().user);
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
   const lpSiteConfigStore = createLpSiteConfigStore({
     publish: lpStore.publish,
@@ -7009,6 +7020,10 @@ export function createDemoFetch(): typeof fetch {
     const hrFormHit = await hrInterviewFormStore.handle(method, url.pathname, url, parsedBody);
     if (hrFormHit) return hrFormHit;
 
+    // スポンサーの目標タブ (/members/sponsor/goals) も目標管理の KPI から作るので先に見る。
+    const goalsHit = goalsStore.handle(method, url.pathname, url, parsedBody);
+    if (goalsHit) return goalsHit;
+
     const sponsorHit = await sponsorStore.handle(method, url.pathname, parsedBody, init?.body, new Headers(init?.headers));
     if (sponsorHit) return sponsorHit;
 
@@ -7024,9 +7039,6 @@ export function createDemoFetch(): typeof fetch {
     }
     const accountingHit = accountingStore.handle(method, url.pathname, parsedBody);
     if (accountingHit) return accountingHit;
-
-    const goalsHit = goalsStore.handle(method, url.pathname, url, parsedBody);
-    if (goalsHit) return goalsHit;
 
     const hit =
       roster.handle(method, url.pathname, url, parsedBody) ??

@@ -137,17 +137,34 @@ describe("目標管理", () => {
     await call(app, "PUT", `/members/goals/${b.id}/${MONTH}`, put([{ metric: "sponsor_contacted", target: 12 }]));
     await call(app, "PUT", `/members/goals/${a.id}/2026-10`, put([{ metric: "sponsor_amount", target: 500 }]));
 
+    goalRepo.counts = { ...goalRepo.counts, sponsor_contacted: 6, sponsor_cards: 3 };
+    const target = (res: { json: goal.SponsorTabResponse }, month: string, metric: goal.GoalMetric) =>
+      res.json.months.find((m) => m.month === month)?.metrics.find((x) => x.metric === metric);
+
     const tab = await call(app, "GET", "/members/sponsor/goals");
     expect(tab.status).toBe(200);
-    expect(tab.json.goals).toEqual([
-      { month: MONTH, contacted: 12, proposed: null, agreed: null, amount: null },
-      { month: "2026-10", contacted: null, proposed: null, agreed: null, amount: 500 },
-    ]);
+    expect(tab.json.months.map((m: goal.SponsorTabMonth) => m.month)).toEqual(["2026-11", "2026-10", "2026-09", "2026-08", "2026-07", "2026-06"]);
+    expect(target(tab, MONTH, "sponsor_contacted")).toEqual({ metric: "sponsor_contacted", target: 12, actual: 6, percent: 50 });
+    expect(target(tab, MONTH, "sponsor_cards")).toEqual({ metric: "sponsor_cards", target: null, actual: 3, percent: null });
+    expect(target(tab, "2026-10", "sponsor_amount")?.target).toBe(500);
+    expect(tab.json.months[0].metrics.some((x: goal.SponsorTabMetric) => x.metric === "tasks_done")).toBe(false);
     // 書き込みのルートは無い (スポンサーアプリから目標は変えられない)。
     expect((await app.request(`http://svc/members/sponsor/goals/${MONTH}`, { method: "PUT", headers: { "x-dub-request-id": "req_test", "x-dub-user-id": "user_caller" } })).status).toBe(404);
 
+    // KPI を足す・消すとタブにもそのまま出る。
+    await call(app, "PUT", `/members/goals/${a.id}/${MONTH}`, put([{ metric: "sponsor_cards", target: 30 }], 1));
     await call(app, "DELETE", `/members/goals/${b.id}/${MONTH}`);
-    expect((await call(app, "GET", "/members/sponsor/goals")).json.goals[0].contacted).toBe(10);
+    const after = await call(app, "GET", `/members/sponsor/goals?from=${MONTH}&to=${MONTH}`);
+    expect(after.json.months).toHaveLength(1);
+    expect(target(after, MONTH, "sponsor_cards")?.target).toBe(30);
+    expect(target(after, MONTH, "sponsor_contacted")?.target).toBeNull();
+  });
+
+  it("rejects a bad sponsor tab range", async () => {
+    const app = createApp(makeDeps({ now: NOW, goalRepo: new InMemoryGoalRepo() }));
+    expect((await call(app, "GET", "/members/sponsor/goals?from=2026-12&to=2026-11")).status).toBe(400);
+    expect((await call(app, "GET", "/members/sponsor/goals?from=2025-01&to=2026-11")).status).toBe(400);
+    expect((await call(app, "GET", "/members/sponsor/goals?to=2026-13")).status).toBe(400);
   });
 
   it("defaults to the current JST month", async () => {

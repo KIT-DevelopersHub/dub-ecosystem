@@ -200,22 +200,7 @@ export function applyLeadMilestones<T extends Pick<LeadFields, "status" | "first
   return out;
 }
 
-// ── 月間目標 ──────────────────────────────────────────────
-
-/** 目標を置く指標。金額だけ円、ほかは社数。 */
-export type GoalMetric = "contacted" | "proposed" | "agreed" | "amount";
-
-export type GoalTargets = Record<GoalMetric, number | null>;
-
-/** 1 か月の目標 (閲覧専用)。目標管理アプリの KPI から作る。null = その指標は目標なし。 */
-export interface MonthlyGoal extends GoalTargets {
-  /** YYYY-MM。 */
-  month: string;
-}
-
-export interface ListGoalsResponse {
-  goals: MonthlyGoal[];
-}
+// 月間目標 (目標タブ) の契約は目標管理の KPI と同じ所に置く: goal.SponsorTabResponse。
 
 // 会社名の照合キー (companyKey) は名刺・営業先・メール連携で共有するので別ファイル。
 export * from "./sponsor-company";

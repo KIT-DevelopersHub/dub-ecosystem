@@ -61,7 +61,7 @@ function fakeApi(overrides: Partial<SponsorApi> = {}): SponsorApi {
     importLeads: unused,
     updateLead: unused,
     removeLead: unused,
-    listGoals: () => Promise.resolve({ goals: [] }),
+    listGoals: () => Promise.resolve({ months: [] }),
     registerContactEmail: unused,
     listLeadActivity: () => Promise.resolve({ activity: [] }),
     mailBackfill: unused,

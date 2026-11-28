@@ -413,7 +413,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.body(null, 204);
   });
   // 目標値は目標管理アプリの KPI が正で、ここは読むだけ。
-  app.get("/members/sponsor/goals", async (c) => c.json(await goalSvc.sponsorGoals()));
+  app.get("/members/sponsor/goals", async (c) => c.json(await goalSvc.sponsorTab(c.req.query("from"), c.req.query("to"))));
   app.get("/members/sponsor/cards", async (c) => c.json(await sponsorSvc.list(reqCtx(c))));
   app.post("/members/sponsor/cards", async (c) => {
     const body = await readJson<sponsor.CreateCardRequest>(c);
