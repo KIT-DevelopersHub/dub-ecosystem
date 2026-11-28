@@ -47,7 +47,7 @@ export function parseTaskIdFromPath(pathname: string): common.TaskId | null {
  * permissions come from TaskRouteContext.
  */
 export function TaskWorkspaceRoute() {
-  const { permissions, eventId: ctxEventId } = useTaskRoute();
+  const { permissions, currentUserId, eventId: ctxEventId } = useTaskRoute();
   // Prefer the shell-supplied reactive event id (updates the same render when the
   // global header switcher navigates to another event); fall back to a
   // window.location parse for standalone mounts / shells that don't feed it.
@@ -56,7 +56,12 @@ export function TaskWorkspaceRoute() {
   const initialSelectedTaskId = parseTaskIdFromPath(pathname);
   if (!eventId) return <p className={styles.banner}>イベントが指定されていません。</p>;
   return (
-    <TaskWorkspacePage eventId={eventId} permissions={permissions} initialSelectedTaskId={initialSelectedTaskId} />
+    <TaskWorkspacePage
+      eventId={eventId}
+      permissions={permissions}
+      currentUserId={currentUserId}
+      initialSelectedTaskId={initialSelectedTaskId}
+    />
   );
 }
 

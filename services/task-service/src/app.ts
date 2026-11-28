@@ -13,8 +13,8 @@
 //
 //  2. INSTANCE LAYER (this file): the decisions that need the request's DATA, which a static
 //     table cannot express — `includeArchived` demanding `task:delete`, the self-scoping of a
-//     bare `GET /tasks`, `origin` being service-only, the origin=github protected fields and
-//     the same-team dependency constraint. Those stay here, next to the row they judge. See
+//     bare `GET /tasks`, `origin` being service-only, the origin=github protected fields,
+//     the same-team dependency constraint and who may edit ONE task (#881 assertCanEditTask). Those stay here, next to the row they judge. See
 //     packages/policy-gate/src/gate.ts's "NOT this layer's job" note and
 //     docs/policy-coverage-inventory.md §3(d).
 import { Hono } from "hono";
@@ -147,6 +147,31 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const principal = principalOf(c);
     if (principal.kind === "service") return true;
     return (await deps.authz(principal.userId, config.orgId, [key])).includes(key);
+  };
+
+  /**
+   * INSTANCE LAYER (#881): may this caller edit THIS task? The table already demanded
+   * `task:write` (or the calendar key); here the row decides (`task.canEditTask` in
+   * @dub/types, FE4 renders the same): 個人担当 ⇒ that person only, チーム担当 ⇒ that team's
+   * members, 担当なし ⇒ the creator; `task:edit_all` (admin / maintainer) edits everything.
+   * Service principals (github-sync) edit everything, as at the entry layer. Cheapest first:
+   * row-only check → edit_all (auth-client cache) → the caller's teams (one member-service
+   * `GET /members/me/mention-teams`, only for a team-assigned task).
+   */
+  const assertCanEditTask = async (c: Context, t: task.Task): Promise<void> => {
+    const principal = principalOf(c);
+    if (principal.kind === "service") return;
+    if (task.canEditTask(t, { userId: principal.userId }, false)) return;
+    if (await holdsKey(c, task.TASK_EDIT_ALL_KEY)) return;
+    if (task.taskEditTeamId(t) !== null) {
+      const teamIds = await deps.member.myTeamIds(ctxOf(c));
+      if (task.canEditTask(t, { userId: principal.userId, teamIds }, false)) return;
+    }
+    throw errors.forbidden("permission denied: task:edit_all", {
+      reason: "not_task_assignee",
+      required: [task.TASK_EDIT_ALL_KEY],
+      missing: [task.TASK_EDIT_ALL_KEY],
+    });
   };
 
   // The authorization layer. First and only — every route below is gated by POLICY_TABLE,
@@ -289,6 +314,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId && body.assigneeTeamId) {
       fe.push({ field: "assigneeTeamId", reason: "assignee_conflict", message: "assigneeId and assigneeTeamId are exclusive" });
     }
+    checkOptString(body.requesterId, "requesterId", fe);
     checkOptString(body.teamId, "teamId", fe);
     checkOptString(body.parentTaskId, "parentTaskId", fe);
     checkOptString(body.wbs, "wbs", fe);
@@ -313,6 +339,10 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId) {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
+    }
+    if (body.requesterId) {
+      const exists = await deps.identity.userExists(ctx, body.requesterId);
+      if (!exists) throw errors.validationFailed([{ field: "requesterId", reason: "not_found" }]);
     }
 
     // 親子は同一チーム: 親を指定して作る子タスクは、親と同じチームでなければならない（親から
@@ -347,6 +377,8 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       dueAt: body.dueAt ?? null,
       origin: (isServiceRole(principal) ? body.origin : undefined) ?? "internal",
       createdBy: actorId,
+      // 依頼者 (#881): omitted ⇒ the creator (今までの「依頼者 = 作成者」), null ⇒ none.
+      requesterId: body.requesterId !== undefined ? body.requesterId : actorId,
       now,
     });
 
@@ -404,6 +436,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.assigneeId && body.assigneeTeamId) {
       fe.push({ field: "assigneeTeamId", reason: "assignee_conflict", message: "assigneeId and assigneeTeamId are exclusive" });
     }
+    checkOptString(body.requesterId, "requesterId", fe);
     checkOptString(body.teamId, "teamId", fe);
     checkOptString(body.parentTaskId, "parentTaskId", fe);
     checkOptString(body.wbs, "wbs", fe);
@@ -411,6 +444,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, current);
     if (body.version !== current.version) throw taskErrors.versionConflict();
 
     // #882: 担当は人 XOR チーム。片方を非 null にしたら、もう片方は空にする。
@@ -447,6 +481,11 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       const exists = await deps.identity.userExists(ctx, body.assigneeId);
       if (!exists) throw errors.validationFailed([{ field: "assigneeId", reason: "not_found" }]);
     }
+    const requesterChanged = body.requesterId !== undefined && body.requesterId !== (current.requesterId ?? null);
+    if (requesterChanged && body.requesterId) {
+      const exists = await deps.identity.userExists(ctx, body.requesterId);
+      if (!exists) throw errors.validationFailed([{ field: "requesterId", reason: "not_found" }]);
+    }
 
     // 親子は同一チーム (整合をサーバでも担保)。teamId か parentTaskId が変わるとき、このタスクと
     // その親・子のチームが食い違わないか検証する。null=未割当同士は一致。フロントは子作成時に
@@ -477,6 +516,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
       priority?: task.TaskPriority;
       assigneeId?: common.UserId | null;
       assigneeTeamId?: common.TeamId | null;
+      requesterId?: common.UserId | null;
       teamId?: common.TeamId | null;
       parentId?: common.TaskId | null;
       wbs?: string | null;
@@ -489,6 +529,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     if (body.priority !== undefined) patch.priority = body.priority;
     if (personChanged || body.assigneeId !== undefined) patch.assigneeId = nextAssigneeId;
     if (teamAssigneeChanged || body.assigneeTeamId !== undefined) patch.assigneeTeamId = nextAssigneeTeamId;
+    if (body.requesterId !== undefined) patch.requesterId = body.requesterId;
     if (body.teamId !== undefined) patch.teamId = body.teamId;
     if (body.parentTaskId !== undefined) patch.parentId = body.parentTaskId;
     if (body.wbs !== undefined) patch.wbs = body.wbs;
@@ -508,7 +549,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const evt = current.eventId ? { eventId: current.eventId } : {};
     const specs: EventSpec[] = [];
     const changed: string[] = [];
-    for (const f of ["title", "description", "priority", "startAt", "dueAt"] as const) {
+    for (const f of ["title", "description", "priority", "requesterId", "startAt", "dueAt"] as const) {
       if (patch[f] !== undefined && current[f] !== updated[f]) changed.push(f);
     }
     if (changed.length > 0) {
@@ -546,6 +587,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, current);
 
     const now = nowIso();
     const ok = await deps.repo.archive(id, now);
@@ -585,6 +627,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
     const id = c.req.param("id");
     const found = await deps.repo.getById(id);
     if (!found) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, found);
 
     const body = await readJson<Partial<task.CreateTaskAttachmentRequest>>(c);
     const fe: FieldError[] = [];
@@ -622,6 +665,9 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
   app.delete("/tasks/:id/attachments/:attachmentId", async (c) => {
     const id = c.req.param("id");
     const attachmentId = c.req.param("attachmentId");
+    const found = await deps.repo.getById(id);
+    if (!found) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, found);
     const ok = await deps.repo.archiveAttachment(id, attachmentId, nowIso());
     if (!ok) throw taskErrors.notFound(attachmentId);
     return c.json({ ok: true });
@@ -647,6 +693,7 @@ export function buildApp(deps: Deps): Hono<{ Variables: PolicyGateVars }> {
 
     const current = await deps.repo.getById(id);
     if (!current) throw taskErrors.notFound(id);
+    await assertCanEditTask(c, current);
     if (body.version !== current.version) throw taskErrors.versionConflict();
 
     // Single-engine dependency validation via @dub/gantt-calc. taskIds = the live

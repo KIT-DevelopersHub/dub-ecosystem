@@ -1,5 +1,6 @@
 // task — task-service namespace. Optimistic-locked CRUD; task_dependencies owned here.
 import type { TaskId, EventId, UserId, TeamId, FileId, ISODateTime, Versioned, Paginated, CursorQuery } from "./common";
+export * from "./task-edit"; // #881: who may edit one task (assignee / creator / task:edit_all)
 
 export type TaskStatus = "todo" | "in_progress" | "blocked" | "done" | "cancelled"; // closed (D6)
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
@@ -50,6 +51,12 @@ export interface Task extends Versioned {
    */
   createdBy?: UserId;
   /**
+   * 依頼者 (#881). Optional and settable: defaults to the creator on create, can be changed
+   * or cleared (null). The "from" of the My Tasks from→to. When set, this user may also edit
+   * the task (see canEditTask). Server always returns it (null = 依頼者なし).
+   */
+  requesterId?: UserId | null;
+  /**
    * Planned start (開始日). Additive/optional; null/absent ⇒ no explicit start — the
    * gantt read model then derives a bar from `dueAt` (deadline-anchored) or a CPM
    * schedule. When BOTH `startAt` and `dueAt` are set the bar spans exactly
@@ -85,6 +92,8 @@ export interface CreateTaskRequest {
   assigneeId?: UserId;
   /** Team assignee (#882). Mutually exclusive with `assigneeId` (both set ⇒ 400). */
   assigneeTeamId?: TeamId | null;
+  /** 依頼者 (#881). Omit ⇒ the caller (creator); null ⇒ 依頼者なし. Must be an existing user. */
+  requesterId?: UserId | null;
   teamId?: TeamId | null;
   /** Planned start (開始日). Additive/optional; omit ⇒ no explicit start. */
   startAt?: ISODateTime | null;
@@ -105,6 +114,8 @@ export interface UpdateTaskRequest extends Versioned {
   /** Team assignee (#882). Setting a non-null value clears `assigneeId` (and vice-versa);
    *  both non-null in one request ⇒ 400 `assignee_conflict`. */
   assigneeTeamId?: TeamId | null;
+  /** 依頼者 (#881). Omit ⇒ unchanged, null ⇒ clear (依頼者なし). */
+  requesterId?: UserId | null;
   teamId?: TeamId | null;
   /** Planned start (開始日). Additive/optional; omit ⇒ unchanged, null ⇒ clear. */
   startAt?: ISODateTime | null;

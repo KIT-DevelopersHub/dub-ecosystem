@@ -18,6 +18,7 @@ import styles from "../styles/app.module.css";
  *   タイトル                （全幅）
  *   ステータス   重要度      （2カラム・同一行）
  *   担当                    （全幅）
+ *   依頼者                  （全幅・任意 #881）
  *   開始日       終了日      （2カラム・同一行）
  *   親タスク                （全幅）
  *   先行タスク              （全幅）
@@ -65,6 +66,10 @@ export interface TaskFormFieldsProps {
   teamId: common.TeamId | null;
   onTeamIdChange: (v: common.TeamId | null) => void;
 
+  /** 依頼者 (#881) — optional (null = なし); defaults to the creator in the modals. */
+  requesterId: common.UserId | null;
+  onRequesterChange: (v: common.UserId | null) => void;
+
   start: string | null;
   onStartChange: (v: string | null) => void;
   due: string | null;
@@ -105,6 +110,8 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
     teams,
     teamId,
     onTeamIdChange,
+    requesterId,
+    onRequesterChange,
     start,
     onStartChange,
     due,
@@ -212,6 +219,20 @@ export function TaskFormFields(props: TaskFormFieldsProps) {
             followAssignee(next);
           }}
           testId={`${idPrefix}-assignee`}
+        />
+      </div>
+
+      {/* 依頼者 (全幅・任意 #881) */}
+      <div className={styles.formFieldFull}>
+        <label className={styles.formLabel} htmlFor={`${idPrefix}-requester`}>
+          依頼者（任意）
+        </label>
+        <Select
+          id={`${idPrefix}-requester`}
+          value={requesterId ?? ""}
+          onChange={(v) => onRequesterChange(v ? (v as common.UserId) : null)}
+          options={[{ value: "", label: "なし" }, ...users.map((u) => ({ value: u.id, label: u.displayName }))]}
+          testId={`${idPrefix}-requester`}
         />
       </div>
 

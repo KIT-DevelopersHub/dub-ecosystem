@@ -75,7 +75,7 @@ const ALL_KEYS = (): identity.PermissionKey[] =>
 const MAINTAINER_KEYS: identity.PermissionKey[] = [
   "identity:read",
   "event:read", "event:write", "event:admin",
-  "task:read", "task:write", "task:delete",
+  "task:read", "task:write", "task:delete", "task:edit_all",
   "file:read", "file:write",
   "notif:send", "notif:admin", "notif:broadcast_publish",
   "notif:receive_admin", "notif:receive_all",

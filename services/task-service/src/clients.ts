@@ -51,6 +51,26 @@ export function createServiceBindingIdentityClient(binding: Fetcher): IdentityCl
   };
 }
 
+// ---- member-service: the caller's teams (#881 team members edit their team's tasks) ----
+export interface MemberClient {
+  /**
+   * Teams of the acting user (`ctx.userId`): `myTeamIds` of member-service
+   * `GET /members/me/mention-teams` — the 名簿 team links, the same source FE4 / My Tasks read.
+   */
+  myTeamIds(ctx: RequestContext): Promise<string[]>;
+}
+
+export function createServiceBindingMemberClient(binding: Fetcher | undefined): MemberClient {
+  if (!binding) return { myTeamIds: async () => [] }; // unbound ⇒ no team grants (fail-closed)
+  const client = createServiceClient(binding, { service: "member-service", caller: "task-service" });
+  return {
+    async myTeamIds(ctx) {
+      const res = await client.get<{ myTeamIds?: string[] }>(ctx, "/members/me/mention-teams");
+      return res.myTeamIds ?? [];
+    },
+  };
+}
+
 // ---- permission source: which of the requested keys does this user hold? ----
 //
 // The gate's `PermissionGranter` port (@dub/policy-gate), i.e. the SAME seam

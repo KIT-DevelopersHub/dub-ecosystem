@@ -10,12 +10,13 @@ import { useGanttData } from "../api/useGanttData";
 import { useGanttRealtime } from "../api/useGanttRealtime";
 import { useGanttView } from "../api/useGanttView";
 import { useTeams } from "../api/useTeams";
+import { useMyTeamIds } from "../api/useMyTeamIds";
 import { useRoster } from "../api/useRoster";
 import { useTaskStore } from "../store/useTaskStore";
 import type { OptimisticPatch } from "../domain/task-store";
 import { emptyFilter, toListTasksQuery, type TaskFilterState } from "../domain/task-query";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
-import { taskCapabilities } from "../domain/permissions";
+import { taskCapabilities, makeCanEditTask, makeCanEditBar, READ_ONLY_TASK_HINT } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
 import { assigneeLabel } from "../domain/assignee";
@@ -55,6 +56,9 @@ export interface TaskWorkspacePageProps {
    *  taskRoutes.tsx). Auto-opens that task's detail panel once it appears in the
    *  loaded list; applied at most once per mount (a later manual selection wins). */
   initialSelectedTaskId?: common.TaskId | null;
+  /** Signed-in user (#881: who may edit which task). Omitted ⇒ legacy all-or-nothing
+   *  `task:write` gating (standalone/demo hosts); the server still enforces per task. */
+  currentUserId?: common.UserId | null;
 }
 
 // Solid fill colours for the sort-group brackets (@dub/tokens hex). Priorities map to
@@ -90,7 +94,7 @@ const FIELD_LABEL: Record<string, string> = {
  * edit/delete) wired through the optimistic store. The former list/board view
  * switch was removed — the gantt is the one canvas.
  */
-export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId = null }: TaskWorkspacePageProps) {
+export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId = null, currentUserId }: TaskWorkspacePageProps) {
   const client = useApiClient();
   const toast = useToast();
   const feedback = useWriteFeedback();
@@ -225,6 +229,24 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   }, [query]);
 
   const tasks = store.list();
+  const myTeamIds = useMyTeamIds(currentUserId);
+
+  // #881: per-task edit rights (assignee / team member / creator / task:edit_all), mirroring task-service.
+  const canEditTaskId =
+    currentUserId === undefined ? () => caps.canWrite : makeCanEditTask(tasks, currentUserId, permissions, myTeamIds);
+  const canEditBar = makeCanEditBar(canEditTaskId, gantt.data?.rows ?? []);
+  /** Drop the ids this viewer may not edit from a bulk op, telling them how many were skipped. */
+  const onlyEditable = (ids: readonly common.TaskId[], check: (id: common.TaskId) => boolean): common.TaskId[] => {
+    const ok = ids.filter(check);
+    if (ok.length < ids.length) {
+      toast.show({
+        kind: "warning",
+        title: `${ids.length - ok.length}件は変更しませんでした`,
+        description: READ_ONLY_TASK_HINT,
+      });
+    }
+    return ok;
+  };
 
   // Deep-link open (⌘K search etc.): once the URL's :taskId appears in the loaded
   // list, select it so the detail panel opens automatically. Applies at most once —
@@ -797,6 +819,9 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
         ...(draft.assigneeTeamId ? { assigneeTeamId: draft.assigneeTeamId } : {}),
+        // 依頼者 (#881): send the form value (null = なし). If the signed-in user is unknown the
+        // form starts empty — omit it then so the server defaults it to the caller.
+        ...(draft.requesterId !== null || currentUserId ? { requesterId: draft.requesterId } : {}),
         ...(teamId ? { teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
@@ -1319,12 +1344,14 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           teamLegend={teamLegend}
           numberById={numberById}
           {...(rowGroupById ? { rowGroupById } : {})}
-          onBulkDelete={caps.canDelete ? onBulkDelete : undefined}
-          onBulkShiftDays={caps.canWrite ? onBulkShiftDays : undefined}
-          onBulkResizeDays={caps.canWrite ? onBulkResizeDays : undefined}
+          onBulkDelete={caps.canDelete ? (ids) => onBulkDelete(onlyEditable(ids, canEditTaskId)) : undefined}
+          onBulkShiftDays={caps.canWrite ? (ids, d) => onBulkShiftDays(onlyEditable(ids, canEditBar), d) : undefined}
+          onBulkResizeDays={caps.canWrite ? (ids, edge, d) => onBulkResizeDays(onlyEditable(ids, canEditBar), edge, d) : undefined}
           onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
           onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
+          canEditBar={canEditBar}
+          readOnlyBarHint={READ_ONLY_TASK_HINT}
           openStateKey={eventId}
           teamNameById={teamNameById}
         />
@@ -1341,6 +1368,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         parentOptions={allTaskOptions}
         scopeTasks={scopeTasks}
         onCreate={onCreate}
+        currentUserId={currentUserId ?? null}
       />
 
       {selectedTask && (
@@ -1349,8 +1377,9 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           task={selectedTask}
           users={assignableUsers}
           teams={teams}
-          canWrite={caps.canWrite}
-          canDelete={caps.canDelete}
+          canWrite={caps.canWrite && canEditTaskId(selectedTask.id)}
+          canDelete={caps.canDelete && canEditTaskId(selectedTask.id)}
+          {...(caps.canWrite && !canEditTaskId(selectedTask.id) ? { readOnlyHint: READ_ONLY_TASK_HINT } : {})}
           parentOptions={detailParentOptions}
           parentTaskId={selectedParentId}
           scopeTasks={scopeTasks}

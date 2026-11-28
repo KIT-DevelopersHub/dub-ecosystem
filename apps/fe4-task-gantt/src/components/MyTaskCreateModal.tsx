@@ -20,6 +20,7 @@ interface MyTaskCreateDraft {
   assigneeId: common.UserId | null;
   /** 担当チーム (#882). Exclusive with assigneeId. Optional for drafts saved before it existed. */
   assigneeTeamId?: common.TeamId | null;
+  requesterId?: common.UserId | null;
   teamId: common.TeamId | null;
   start: string | null;
   due: string | null;
@@ -39,6 +40,8 @@ export interface MyTaskDraft {
   assigneeId: common.UserId | null;
   /** 担当チーム (#882). Exclusive with assigneeId. Optional for drafts saved before it existed. */
   assigneeTeamId?: common.TeamId | null;
+  /** 依頼者 (#881). null = なし. */
+  requesterId: common.UserId | null;
   teamId: common.TeamId | null;
   /** Planned start (開始日). null = no explicit start. Mirrors the gantt create form. */
   startAt: common.ISODateTime | null;
@@ -60,8 +63,8 @@ export interface MyTaskCreateModalProps {
   /** existing tasks with their team — powers the team-scoped 先行タスク picker. */
   scopeTasks: readonly ScopeTask[];
   onCreate: (draft: MyTaskDraft) => Promise<void>;
-  /** preselect the requester's own name in the header hint. */
-  requesterName?: string;
+  /** the signed-in user — the default 依頼者 (#881). */
+  currentUserId?: common.UserId | null;
   /** Event link resolved from context (現在開いているイベント/ビュー). The マイタスク hub
    *  is cross-event, so it has no current event → null (=未紐付け・判断44で許容). Not a
    *  visible field: keeps this form 寸分違わず同一 with the gantt タスク作成. */
@@ -76,16 +79,19 @@ const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
  * "タスクを発行" — anyone can add and issue a task (design ask (a)). Renders the SAME
  * canonical field set/layout as the gantt タスク作成フォーム by delegating to the shared
  * TaskFormFields with the SAME props (no form-specific extra rows: 対象イベント/添付 は撤去済み).
- * イベント紐付けはコンテキストで解決し (defaultEventId)、UI には出さない。The requester
- * (from) is the current user, stamped server-side as created_by.
+ * イベント紐付けはコンテキストで解決し (defaultEventId)、UI には出さない。依頼者 (from,
+ * #881) defaults to the current user and can be changed or cleared in the form.
  */
-export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions, scopeTasks, onCreate, requesterName, defaultEventId = null }: MyTaskCreateModalProps) {
+export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions, scopeTasks, onCreate, currentUserId = null, defaultEventId = null }: MyTaskCreateModalProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialDraft = useMemo(() => peekDraft<MyTaskCreateDraft>(DRAFT_KEY), []);
   const [title, setTitle] = useState(initialDraft?.title ?? "");
   const [status, setStatus] = useState<task.TaskStatus>(initialDraft?.status ?? "todo");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(initialDraft?.assigneeId ?? null);
   const [assigneeTeamId, setAssigneeTeamId] = useState<common.TeamId | null>(initialDraft?.assigneeTeamId ?? null);
+  const [requesterId, setRequesterId] = useState<common.UserId | null>(
+    initialDraft && initialDraft.requesterId !== undefined ? initialDraft.requesterId : currentUserId,
+  );
   const [priority, setPriority] = useState<task.TaskPriority>(initialDraft?.priority ?? "medium");
   const [teamId, setTeamId] = useState<common.TeamId | null>(initialDraft?.teamId ?? null);
   const [start, setStart] = useState<string | null>(initialDraft?.start ?? null);
@@ -109,7 +115,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
     deps.length > 0;
   const draft = useDraftAutosave<MyTaskCreateDraft>({
     storageKey: DRAFT_KEY,
-    value: { title, description, status, priority, assigneeId, assigneeTeamId, teamId, start, due, parentId, deps },
+    value: { title, description, status, priority, assigneeId, assigneeTeamId, requesterId, teamId, start, due, parentId, deps },
     dirty,
   });
 
@@ -119,6 +125,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
     setStatus("todo");
     setAssigneeId(null);
     setAssigneeTeamId(null);
+    setRequesterId(currentUserId);
     setPriority("medium");
     setTeamId(null);
     setStart(null);
@@ -149,6 +156,7 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
         priority,
         assigneeId,
         assigneeTeamId,
+        requesterId,
         teamId,
         startAt: isoFromDateInput(start),
         dueAt: isoFromDateInput(due),
@@ -179,11 +187,6 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
         </div>
       }
     >
-      {requesterName && (
-        <p className={styles.createHint} data-testid="fe4-mytask-create-from">
-          依頼主: <strong>{requesterName}</strong>
-        </p>
-      )}
       <DraftRestoredNotice
         visible={draft.restoredVisible}
         onDiscard={reset}
@@ -206,6 +209,8 @@ export function MyTaskCreateModal({ open, onClose, people, teams, parentOptions,
         onAssigneeChange={setAssigneeId}
         assigneeTeamId={assigneeTeamId}
         onAssigneeTeamIdChange={setAssigneeTeamId}
+        requesterId={requesterId}
+        onRequesterChange={setRequesterId}
         teams={teams}
         teamId={teamId}
         onTeamIdChange={setTeamId}

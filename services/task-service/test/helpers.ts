@@ -7,7 +7,7 @@ import type { PermissionGranter } from "@dub/policy-gate";
 import type { AppConfig } from "../src/env";
 import type { Deps } from "../src/deps";
 import type { TaskRepo, InsertTaskInput, InsertAttachmentInput, TaskPatch, ListFilter, DueSoonRow } from "../src/repo";
-import type { EventClient, EventRef, IdentityClient } from "../src/clients";
+import type { EventClient, EventRef, IdentityClient, MemberClient } from "../src/clients";
 import type { EventPublisher, Auditor } from "../src/events";
 
 interface Rec extends task.Task {
@@ -42,6 +42,7 @@ export class InMemoryTaskRepo implements TaskRepo {
       createdAt: input.now,
       updatedAt: input.now,
       createdBy: input.createdBy,
+      requesterId: input.requesterId ?? null,
       dueSoonNotifiedAt: null,
     };
     this.rows.set(rec.id, rec);
@@ -100,6 +101,7 @@ export class InMemoryTaskRepo implements TaskRepo {
     if (patch.priority !== undefined) r.priority = patch.priority;
     if (patch.assigneeId !== undefined) r.assigneeId = patch.assigneeId;
     if (patch.assigneeTeamId !== undefined) r.assigneeTeamId = patch.assigneeTeamId;
+    if (patch.requesterId !== undefined) r.requesterId = patch.requesterId;
     if (patch.teamId !== undefined) r.teamId = patch.teamId;
     if (patch.parentId !== undefined) r.parentTaskId = patch.parentId;
     if (patch.wbs !== undefined) r.wbs = patch.wbs;
@@ -308,6 +310,16 @@ export class FakeIdentityClient implements IdentityClient {
   }
 }
 
+/** #881: userId -> team ids, as member-service `GET /members/me/mention-teams` returns them. */
+export class FakeMemberClient implements MemberClient {
+  teams = new Map<string, string[]>();
+  lookups = 0;
+  async myTeamIds(ctx: RequestContext): Promise<string[]> {
+    this.lookups++;
+    return this.teams.get(ctx.userId ?? "") ?? [];
+  }
+}
+
 export class FakeIdempotencyStore implements IdempotencyStore {
   seen = new Set<string>();
   async wasProcessed(id: string): Promise<boolean> {
@@ -326,6 +338,7 @@ export interface TestHarness {
   authz: FakeGranter;
   eventClient: FakeEventClient;
   identity: FakeIdentityClient;
+  member: FakeMemberClient;
   idempotency: FakeIdempotencyStore;
   config: AppConfig;
 }
@@ -343,9 +356,10 @@ export function makeHarness(): TestHarness {
   const authz = new FakeGranter();
   const eventClient = new FakeEventClient();
   const identity = new FakeIdentityClient();
+  const member = new FakeMemberClient();
   const idempotency = new FakeIdempotencyStore();
-  const deps: Deps = { config, repo, events, audit, authz: authz.granter, eventClient, identity, idempotency };
-  return { deps, repo, events, audit, authz, eventClient, identity, idempotency, config };
+  const deps: Deps = { config, repo, events, audit, authz: authz.granter, eventClient, identity, member, idempotency };
+  return { deps, repo, events, audit, authz, eventClient, identity, member, idempotency, config };
 }
 
 // ---- request builders ----

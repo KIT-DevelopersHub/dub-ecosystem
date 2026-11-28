@@ -27,6 +27,7 @@ interface TaskCreateDraft {
   assigneeId: common.UserId | null;
   /** 担当チーム (#882). Exclusive with assigneeId. Optional for drafts saved before it existed. */
   assigneeTeamId?: common.TeamId | null;
+  requesterId?: common.UserId | null;
   teamId: common.TeamId | null;
   start: string | null;
   due: string | null;
@@ -41,6 +42,8 @@ export interface TaskDraft {
   assigneeId: common.UserId | null;
   /** 担当チーム (#882). Exclusive with assigneeId. Optional for drafts saved before it existed. */
   assigneeTeamId?: common.TeamId | null;
+  /** 依頼者 (#881). null = なし. */
+  requesterId: common.UserId | null;
   teamId: common.TeamId | null;
   startAt: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
@@ -70,13 +73,15 @@ export interface TaskCreateModalProps {
   initialParentId?: common.TaskId | null;
   /** predecessor ids preset when opened with a dependency already in mind. */
   initialDependsOn?: readonly common.TaskId[];
+  /** the signed-in user — the default 依頼者 (#881). */
+  currentUserId?: common.UserId | null;
 }
 
 // A newly-created task starts in "todo"; only todo-reachable states are offered.
 const CREATE_STATUSES: task.TaskStatus[] = ["todo", "in_progress", "blocked", "done", "cancelled"];
 const PRIORITIES: task.TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn }: TaskCreateModalProps) {
+export function TaskCreateModal({ open, onClose, users, teams, parentOptions, scopeTasks, onCreate, initialDue, initialParentId, initialDependsOn, currentUserId = null }: TaskCreateModalProps) {
   // Seed once from any draft left by an accidental reload; otherwise the usual blank form.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialDraft = useMemo(() => peekDraft<TaskCreateDraft>(DRAFT_KEY), []);
@@ -85,6 +90,9 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
   const [priority, setPriority] = useState<task.TaskPriority>(initialDraft?.priority ?? "medium");
   const [assigneeId, setAssigneeId] = useState<common.UserId | null>(initialDraft?.assigneeId ?? null);
   const [assigneeTeamId, setAssigneeTeamId] = useState<common.TeamId | null>(initialDraft?.assigneeTeamId ?? null);
+  const [requesterId, setRequesterId] = useState<common.UserId | null>(
+    initialDraft && initialDraft.requesterId !== undefined ? initialDraft.requesterId : currentUserId,
+  );
   const [teamId, setTeamId] = useState<common.TeamId | null>(initialDraft?.teamId ?? null);
   const [start, setStart] = useState<string | null>(initialDraft?.start ?? null);
   const [due, setDue] = useState<string | null>(initialDraft?.due ?? null);
@@ -108,7 +116,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     deps.length > 0;
   const draft = useDraftAutosave<TaskCreateDraft>({
     storageKey: DRAFT_KEY,
-    value: { title, description, status, priority, assigneeId, assigneeTeamId, teamId, start, due, parentId, deps },
+    value: { title, description, status, priority, assigneeId, assigneeTeamId, requesterId, teamId, start, due, parentId, deps },
     dirty,
   });
 
@@ -141,6 +149,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
     setPriority("medium");
     setAssigneeId(null);
     setAssigneeTeamId(null);
+    setRequesterId(currentUserId);
     setTeamId(null);
     setStart(null);
     setDue(null);
@@ -165,6 +174,7 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         priority,
         assigneeId,
         assigneeTeamId,
+        requesterId,
         // 子タスク作成時はチームを親に固定（UIは disabled だが念のため送信値も親で確定）。
         teamId: parentId ? teamOf(scopeTasks, parentId) : teamId,
         startAt: isoFromDateInput(start),
@@ -224,6 +234,8 @@ export function TaskCreateModal({ open, onClose, users, teams, parentOptions, sc
         onAssigneeChange={setAssigneeId}
         assigneeTeamId={assigneeTeamId}
         onAssigneeTeamIdChange={setAssigneeTeamId}
+        requesterId={requesterId}
+        onRequesterChange={setRequesterId}
         teams={teams}
         teamId={teamId}
         onTeamIdChange={setTeamId}
