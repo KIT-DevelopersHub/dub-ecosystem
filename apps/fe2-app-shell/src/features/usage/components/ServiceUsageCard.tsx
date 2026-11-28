@@ -7,7 +7,8 @@ import type { CSSProperties } from "react";
 import { toCssVarName } from "@dub/tokens";
 import { Badge, Card, Icon, Stack } from "@dub/ui";
 import type { ServiceUsage } from "../types.ts";
-import { formatPct, formatResetsIn, formatUsage, overflowMeta, statusMeta } from "../usageStatus.ts";
+import { effectiveLevel, formatPct, formatResetsIn, formatUsage, levelMeta, overflowMeta, statusMeta } from "../usageStatus.ts";
+import { EscalationPanel, type IssueLinkState } from "./EscalationPanel.tsx";
 import { UsageGauge } from "./UsageGauge.tsx";
 
 const label: CSSProperties = {
@@ -51,25 +52,31 @@ export interface ServiceUsageCardProps {
   service: ServiceUsage;
   now?: Date;
   testId?: string;
+  /** Open escalation Issue lookup (#902); omitted = no Issue link. */
+  issue?: IssueLinkState;
 }
 
-export function ServiceUsageCard({ service, now, testId }: ServiceUsageCardProps): JSX.Element {
+export function ServiceUsageCard({ service, now, testId, issue }: ServiceUsageCardProps): JSX.Element {
   const meta = statusMeta(service.status);
+  // The badge shows the escalation level when the backend sends it (注意/対策/危険), else the
+  // legacy status. The gauge/pct keep the status colour scale.
+  const level = effectiveLevel(service);
+  const badge = service.level ? levelMeta(level) : meta;
   const overflow = overflowMeta(service.overflowBehavior);
   const unknown = service.status === "unknown";
   const testRoot = testId ?? `fe2-usage-card-${service.metricKey}`;
 
   return (
-    <div data-testid={testRoot} data-status={service.status}>
+    <div data-testid={testRoot} data-status={service.status} data-level={level}>
       <Card>
         <Stack gap={3}>
           {/* header: metric label + status badge */}
           <Stack direction="row" gap={2} align="start" justify="between">
             <span style={label}>{service.label}</span>
-            <Badge tone={meta.tone} testId={`${testRoot}-status`}>
+            <Badge tone={badge.tone} testId={`${testRoot}-status`}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                <Icon name={meta.icon} size="sm" />
-                {meta.label}
+                <Icon name={badge.icon} size="sm" />
+                {badge.label}
               </span>
             </Badge>
           </Stack>
@@ -89,6 +96,14 @@ export function ServiceUsageCard({ service, now, testId }: ServiceUsageCardProps
             status={service.status}
             ariaLabel={`${service.label} 使用率`}
             testId={`${testRoot}-gauge`}
+          />
+
+          {/* run-out estimate + Issue / playbook / paid plan (#902) */}
+          <EscalationPanel
+            service={service}
+            issue={issue ?? { loading: false }}
+            now={now}
+            testId={`${testRoot}-escalation`}
           />
 
           {/* the halt/bill consequence — the key clarity signal */}

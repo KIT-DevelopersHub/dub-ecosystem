@@ -13,10 +13,30 @@
 // "取得できませんでした" state instead. The mock is confined to VITE_DEMO.
 import { ApiError, type ApiClient } from "../../lib/api-client.tsx";
 import { buildMockUsageSummary, buildNeutralUsageSummary } from "./mockUsageSummary.ts";
-import type { UsageSummary, UsageSummaryResult, UsageUnavailableReason } from "./types.ts";
+import type { UsageIssuesResult, UsageSummary, UsageSummaryResult, UsageUnavailableReason } from "./types.ts";
 
 /** Gateway path for the summary (contract: GET /usage/summary, /api/v1 prefixed). */
 export const USAGE_SUMMARY_PATH = "/api/v1/usage/summary" as const;
+
+/** Escalation Issues (#902) live in a PRIVATE repo (they carry real usage), so the browser
+ *  cannot list them without a token. Live cards link to the Issue search there instead
+ *  (`issueSearchUrl` from usage-meter, USAGE_ALERT_REPO); only demo shows a sample Issue. */
+export const USAGE_ALERT_REPO_URL = "https://github.com/KIT-DevelopersHub/dub-docs" as const;
+
+/** Demo build: one illustrative open Issue (the critical KV card). */
+function demoIssues(): UsageIssuesResult {
+  return {
+    available: true,
+    byMetric: {
+      kv_reads_day: {
+        metricKey: "kv_reads_day",
+        number: 1,
+        url: `${USAGE_ALERT_REPO_URL}/issues/1`,
+        title: "[usage:kv_reads_day] KV 読み取り(日)（危険・サンプル）",
+      },
+    },
+  };
+}
 
 export interface UsageApi {
   /** Fetch the current snapshot. Resolves always (mock fallback on failure). */
@@ -25,6 +45,8 @@ export interface UsageApi {
    *  endpoint exists yet, so this is a plain re-GET (contract: "無ければ再GETのみ").
    *  When the gateway later exposes POST /internal/meter/refresh, wire it here. */
   refresh(): Promise<UsageSummaryResult>;
+  /** Open escalation Issues per metric. Resolves always; live = {available:false} (private repo). */
+  getOpenIssues?(): Promise<UsageIssuesResult>;
 }
 
 function isDemo(env: { VITE_DEMO?: string } | undefined): boolean {
@@ -67,8 +89,13 @@ export function createUsageApi(
     }
   }
 
+  async function getOpenIssues(): Promise<UsageIssuesResult> {
+    return demo ? demoIssues() : { available: false, byMetric: {} };
+  }
+
   return {
     getSummary: fetchLive,
     refresh: fetchLive,
+    getOpenIssues,
   };
 }

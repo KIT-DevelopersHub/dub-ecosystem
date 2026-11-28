@@ -20,7 +20,7 @@ import { policyGate, sharedAuthzGranter, type PermissionGranter, type PolicyGate
 import type { Env } from "./env";
 import { collectSnapshot } from "./collect";
 import { POLICY_TABLE } from "./policy-table";
-import { mailReadDb, readLatestCapturedAt, readLatestSnapshot, upsertSnapshot, usageDb } from "./snapshot-repo";
+import { mailReadDb, readGrowthHistory, readLatestCapturedAt, readLatestSnapshot, upsertSnapshot, usageDb } from "./snapshot-repo";
 import { buildSummary } from "./summary";
 import type { UsageSummary } from "./types";
 
@@ -72,8 +72,9 @@ function usageMeterPolicyGate(options: AppOptions): MiddlewareHandler<AppBinding
 async function collectNow(env: Env, d1: NonNullable<Env["DB"]>): Promise<UsageSummary> {
   const now = new Date();
   const rows = await collectSnapshot(env, mailReadDb(d1), now);
-  await upsertSnapshot(usageDb(d1), rows, now);
-  return buildSummary(rows, now, now.toISOString());
+  const db = usageDb(d1);
+  await upsertSnapshot(db, rows, now);
+  return buildSummary(rows, now, now.toISOString(), await readGrowthHistory(db, now), env.USAGE_ALERT_REPO);
 }
 
 function logError(message: string, err: unknown): void {
@@ -118,8 +119,13 @@ export function createApp(options: AppOptions = {}) {
   app.get("/usage/summary", async (c: Context<AppBindings>) => {
     if (!c.env.DB) return c.json({ error: "DB not bound" }, 503);
     const db = usageDb(c.env.DB);
-    const [rows, capturedAt] = await Promise.all([readLatestSnapshot(db), readLatestCapturedAt(db)]);
-    const summary = buildSummary(rows, new Date(), capturedAt);
+    const now = new Date();
+    const [rows, capturedAt, history] = await Promise.all([
+      readLatestSnapshot(db),
+      readLatestCapturedAt(db),
+      readGrowthHistory(db, now),
+    ]);
+    const summary = buildSummary(rows, now, capturedAt, history, c.env.USAGE_ALERT_REPO);
     if (!summary.stale) return c.json(summary);
 
     // Self-heal: stale data means the alarm loop stopped. Re-arm it (kick is INTERNAL and

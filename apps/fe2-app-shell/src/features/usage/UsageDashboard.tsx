@@ -12,7 +12,11 @@ import { queryKeys } from "../../lib/queryKeys.tsx";
 import { useUsageApi } from "./UsageProvider.tsx";
 import { UsageSummaryBanner } from "./components/UsageSummaryBanner.tsx";
 import { ServiceGroup } from "./components/ServiceGroup.tsx";
-import { groupServicesByProvider } from "./usageStatus.ts";
+import { LEVEL_PCT, groupServicesByProvider } from "./usageStatus.ts";
+
+/** Runbook index: the levels, the Issue flow and every metric's playbook (#902). */
+export const USAGE_RUNBOOK_URL =
+  "https://github.com/KIT-DevelopersHub/dub-ecosystem/blob/main/docs/runbooks/11-usage-free-tier/README.md";
 
 function formatGeneratedAt(iso: string): string {
   const d = new Date(iso);
@@ -61,12 +65,30 @@ const staleNoticeStyle: CSSProperties = {
 };
 // Old numbers stay readable but visibly receded, so they never pass for current values.
 const staleGroupsStyle: CSSProperties = { opacity: 0.55 };
+const levelListStyle: CSSProperties = {
+  margin: 0,
+  paddingLeft: toCssVarName("space.5"),
+  fontSize: toCssVarName("font.size.sm"),
+  color: toCssVarName("color.text.secondary"),
+  lineHeight: 1.8,
+};
+const guideLinkStyle: CSSProperties = {
+  fontSize: toCssVarName("font.size.sm"),
+  color: toCssVarName("color.text.link"),
+  fontWeight: toCssVarName("font.weight.medium"),
+};
 
 export function UsageDashboard(): JSX.Element {
   const usageApi = useUsageApi();
   const query = useQuery({
     queryKey: queryKeys.feature("usage", "summary"),
     queryFn: () => usageApi.getSummary(),
+  });
+  // Open escalation Issues (#902): demo only (the live repo is private) — cards fall back to the search link.
+  const issuesQuery = useQuery({
+    queryKey: queryKeys.feature("usage", "issues"),
+    queryFn: () => usageApi.getOpenIssues?.() ?? Promise.resolve({ available: false, byMetric: {} }),
+    staleTime: 5 * 60_000,
   });
 
   const refreshAction = (
@@ -95,6 +117,33 @@ export function UsageDashboard(): JSX.Element {
           このダッシュボードの本当の役割は「請求爆発の防止」よりも、
           <strong>無料枠の上限に達して機能が止まる予兆を早く掴むこと</strong>にあります。
         </p>
+      </Stack>
+    </Card>
+  );
+
+  // What happens near the ceiling: the ladder and where 対策 / 課金 is decided (#902).
+  const escalationGuide = (
+    <Card testId="fe2-usage-escalation-guide">
+      <Stack gap={2}>
+        <strong>上限に近づいたら（対策するか、課金するか）</strong>
+        <ul style={levelListStyle}>
+          <li>
+            <strong>注意</strong>（{LEVEL_PCT.warn}% 以上、またはリセット前に上限に届くペース）: 内訳を見て増えた理由を確かめる
+          </li>
+          <li>
+            <strong>対策</strong>（{LEVEL_PCT.act}% 以上）: 手順書の対策を入れる
+          </li>
+          <li>
+            <strong>危険</strong>（{LEVEL_PCT.critical}% 以上）: 今日中に対策するか、課金を決める
+          </li>
+        </ul>
+        <p style={noteStyle}>
+          注意以上の項目は、非公開の dub-docs リポジトリに GitHub Issue（ラベル area:usage）が自動で作られ、何が使っているか・対策・課金した場合の値段がまとまります（見るには dub-docs の閲覧権限が要ります）。
+          課金は人が決めます（自動では上げません）。
+        </p>
+        <a href={USAGE_RUNBOOK_URL} target="_blank" rel="noopener noreferrer" style={guideLinkStyle} data-testid="fe2-usage-runbook">
+          手順書の一覧を開く
+        </a>
       </Stack>
     </Card>
   );
@@ -143,10 +192,16 @@ export function UsageDashboard(): JSX.Element {
         <UsageSummaryBanner worstStatus={summary.worstStatus} services={summary.services} />
         {notice}
         {reassurance}
+        {source !== "unavailable" && escalationGuide}
         <div data-stale={stale} style={stale ? staleGroupsStyle : undefined}>
           <Stack gap={6} testId="fe2-usage-groups">
             {groups.map((g) => (
-              <ServiceGroup key={g.provider} group={g} />
+              <ServiceGroup
+                key={g.provider}
+                group={g}
+                issues={issuesQuery.data}
+                issuesLoading={issuesQuery.isPending}
+              />
             ))}
           </Stack>
         </div>

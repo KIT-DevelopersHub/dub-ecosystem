@@ -16,7 +16,7 @@ import type { DurableObjectState } from "@cloudflare/workers-types";
 import { consoleSink } from "@dub/observability";
 import { cfConfigured, type Env } from "./env";
 import { collectSnapshot } from "./collect";
-import { mailReadDb, upsertSnapshot, usageDb } from "./snapshot-repo";
+import { mailReadDb, readGrowthHistory, upsertSnapshot, usageDb } from "./snapshot-repo";
 import { buildSummary } from "./summary";
 import { runAlerts, runCollectionFailureAlert, type DedupStore } from "./alerts";
 import type { SnapshotRow } from "./types";
@@ -114,8 +114,9 @@ export class MeterDO {
       consoleSink({ level: "info", message: msg, service: SERVICE, ...(fields ? { fields } : {}) });
 
     const rows = await collectSnapshot(this.env, mailReadDb(this.env.DB), now, log);
-    await upsertSnapshot(usageDb(this.env.DB), rows, now);
-    const summary = buildSummary(rows, now, now.toISOString());
+    const db = usageDb(this.env.DB);
+    await upsertSnapshot(db, rows, now);
+    const summary = buildSummary(rows, now, now.toISOString(), await readGrowthHistory(db, now), this.env.USAGE_ALERT_REPO);
     const alertRes = await runAlerts(this.env, summary, now, this.dedupStore(), log);
     return {
       metrics: rows.length,

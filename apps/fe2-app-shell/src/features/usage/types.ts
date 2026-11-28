@@ -17,13 +17,29 @@
 export type ServiceProvider = "cloudflare" | "resend" | (string & {});
 
 /** Per-metric health. Drives the status color and worst-status roll-up.
- *  ok = comfortable · warn ≥70% · critical ≥90% · unknown = could not be read. */
+ *  ok = comfortable · warn / critical by pct · unknown = could not be read. */
 export type UsageStatus = "ok" | "warn" | "critical" | "unknown";
 
 /** What the upstream does when the quota is exceeded.
  *  halt = request is rejected (HTTP 429), NO automatic charge (Cloudflare free).
  *  bill = usage past the quota is billed (a Paid/metered plan). */
 export type OverflowBehavior = "halt" | "bill";
+
+/** Escalation ladder (#902): warn · act · critical (LEVEL_PCT), raised when the current
+ *  pace runs out before the reset. Drives the GitHub Issue flow (area:usage). */
+export type EscalationLevel = "ok" | "warn" | "act" | "critical" | "unknown";
+
+/** Run-out estimate at the current pace (usage-meter escalation.ts). */
+export interface UsageProjection {
+  /** window = pace inside the daily/monthly window; growth = day-over-day storage growth. */
+  basis: "window" | "growth";
+  /** When the ceiling is reached at this pace; null = not before the reset / not within a year. */
+  exhaustsAt: string | null;
+  /** Window basis: projected % at the reset. */
+  pctAtReset: number | null;
+  /** Pace in the metric's unit per day. */
+  perDay: number;
+}
 
 /** One metered quota line (e.g. "Workers requests / day"). */
 export interface ServiceUsage {
@@ -44,6 +60,15 @@ export interface ServiceUsage {
   resetsAt: string | null;
   overflowBehavior: OverflowBehavior;
   status: UsageStatus;
+  // Additive (#902) — absent from backends that predate it.
+  level?: EscalationLevel;
+  projection?: UsageProjection | null;
+  /** Runbook: causes, how to find the top consumers, mitigations, when to pay. */
+  playbookUrl?: string;
+  /** What paying would cost for this product (a human decides). */
+  paidPlan?: { name: string; price: string };
+  /** GitHub search for this metric's open escalation Issue. */
+  issueSearchUrl?: string;
 }
 
 /** GET /usage/summary response. */
@@ -57,7 +82,23 @@ export interface UsageSummary {
   stale?: boolean;
   /** Worst status across all services — drives the page-level banner. */
   worstStatus: UsageStatus;
+  /** Highest escalation level (#902). */
+  worstLevel?: EscalationLevel;
   services: ServiceUsage[];
+}
+
+/** An open escalation Issue on GitHub (title prefix `[usage:<metricKey>]`). */
+export interface UsageIssue {
+  metricKey: string;
+  number: number;
+  url: string;
+  title: string;
+}
+
+/** Open Issues keyed by metricKey; `available:false` = GitHub could not be read. */
+export interface UsageIssuesResult {
+  available: boolean;
+  byMetric: Record<string, UsageIssue>;
 }
 
 /** Where the currently-shown summary came from.

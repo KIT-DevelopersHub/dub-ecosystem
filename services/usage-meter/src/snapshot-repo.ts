@@ -3,7 +3,10 @@
 // for the Resend send-log COUNT. Daily UPSERT keyed on (provider, metric_key, capture_day).
 import { createDbClient, newId, nowIso, type DbClient } from "@dub/db";
 import type { D1Database } from "@cloudflare/workers-types";
-import { utcDayString } from "./time";
+import { projectionBasis, type HistoryPoint } from "./escalation";
+import { MASTER } from "./limits";
+import type { UsageHistory } from "./summary";
+import { DAY_MS, utcDayString } from "./time";
 import type { SnapshotRow } from "./types";
 
 /** Our own namespace client (usage_ writes + reads). */
@@ -99,12 +102,13 @@ export async function readLatestSnapshot(db: DbClient): Promise<SnapshotRow[]> {
     unit: string;
     overflow_behavior: SnapshotRow["overflow_behavior"];
     status: SnapshotRow["status"];
+    captured_at: string;
   }>(
     // Per metric, the latest known day inside the lookback (one GROUP BY over the window via
     // idx_usage_snapshot_day; the unary + keeps the planner off the (provider, metric_key, day)
     // index, which would walk the whole table to avoid a sort), then one unique-index probe per metric for that day's row.
     // Was a correlated MAX per outer row (~8 index rows each), ~2k rows read per call.
-    `SELECT s.provider, s.metric_key, s.label, s.used, s.limit_value, s.pct, s.unit, s.overflow_behavior, s.status
+    `SELECT s.provider, s.metric_key, s.label, s.used, s.limit_value, s.pct, s.unit, s.overflow_behavior, s.status, s.captured_at
        FROM (
          SELECT provider, metric_key, MAX(capture_day) AS day
            FROM usage_snapshot
@@ -125,5 +129,31 @@ export async function readLatestSnapshot(db: DbClient): Promise<SnapshotRow[]> {
     unit: r.unit,
     overflow_behavior: r.overflow_behavior,
     status: r.status,
+    captured_at: r.captured_at,
   }));
+}
+
+/** Days of history the storage growth projection looks back over. */
+export const GROWTH_LOOKBACK_DAYS = 7;
+
+/** Earlier daily readings of the GROWTH metrics only (D1/R2 storage), for the run-out
+ *  projection. Unique-index range probe: at most (growth metrics x 8 days) rows (~16). */
+export async function readGrowthHistory(db: DbClient, now: Date): Promise<UsageHistory> {
+  const defs = MASTER.filter((d) => projectionBasis(d) === "growth");
+  const out = new Map<string, HistoryPoint[]>();
+  if (defs.length === 0) return out;
+  const since = utcDayString(new Date(now.getTime() - GROWTH_LOOKBACK_DAYS * DAY_MS));
+  const where = defs.map(() => "(provider = ? AND metric_key = ? AND capture_day >= ?)").join(" OR ");
+  const args = defs.flatMap((d) => [d.provider, d.metricKey, since]);
+  const rows = await db.all<{ metric_key: string; capture_day: string; used: number | null }>(
+    `SELECT metric_key, capture_day, used FROM usage_snapshot WHERE (${where}) AND status != 'unknown'`,
+    ...args,
+  );
+  for (const r of rows) {
+    if (r.used === null) continue;
+    const list = out.get(r.metric_key) ?? [];
+    list.push({ day: r.capture_day, used: r.used });
+    out.set(r.metric_key, list);
+  }
+  return out;
 }

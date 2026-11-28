@@ -17,6 +17,10 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
   const iso = (msFromNow: number): string => new Date(now.getTime() + msFromNow).toISOString();
   const HOUR = 3_600_000;
   const DAY = 24 * HOUR;
+  const RUNBOOK = "https://github.com/KIT-DevelopersHub/dub-ecosystem/blob/main/docs/runbooks/11-usage-free-tier";
+  const search = (key: string): string =>
+    `https://github.com/KIT-DevelopersHub/dub-docs/issues?q=${encodeURIComponent(`is:issue is:open label:area:usage in:title "[usage:${key}]"`)}`;
+  const workersPaid = (price: string) => ({ name: "Workers Paid", price });
 
   return {
     generatedAt: now.toISOString(),
@@ -24,6 +28,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
     stale: opts.stale === true,
     // Roll-up = the worst leaf below (a critical metric is present).
     worstStatus: "critical",
+    worstLevel: "critical",
     services: [
       {
         provider: "cloudflare",
@@ -36,6 +41,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: iso(18 * HOUR),
         overflowBehavior: "halt",
         status: "ok",
+        level: "ok", projection: { basis: "window", exhaustsAt: null, pctAtReset: 20.6, perDay: 20_575 }, playbookUrl: `${RUNBOOK}/workers-requests.md`, paidPlan: workersPaid("$5/月（1,000 万リクエスト/月込み、超過 $0.30/100 万）"), issueSearchUrl: search("workers_requests_day"),
       },
       {
         provider: "cloudflare",
@@ -48,6 +54,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: iso(18 * HOUR),
         overflowBehavior: "halt",
         status: "warn",
+        level: "warn", projection: { basis: "window", exhaustsAt: iso(4 * HOUR), pctAtReset: 126.7, perDay: 6_333_333 }, playbookUrl: `${RUNBOOK}/d1-rows-read.md`, paidPlan: workersPaid("$5/月（250 億行読み取り/月込み、超過 $0.001/100 万行）"), issueSearchUrl: search("d1_rows_read_day"),
       },
       {
         provider: "cloudflare",
@@ -60,6 +67,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: iso(18 * HOUR),
         overflowBehavior: "halt",
         status: "critical",
+        level: "critical", projection: { basis: "window", exhaustsAt: iso(HOUR), pctAtReset: 160.8, perDay: 160_833 }, playbookUrl: `${RUNBOOK}/kv.md`, paidPlan: workersPaid("$5/月（1,000 万読み取り/月込み、超過 $0.50/100 万）"), issueSearchUrl: search("kv_reads_day"),
       },
       {
         // Storage metric: no rollover window (resetsAt null) and a byte unit the UI
@@ -75,6 +83,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: null,
         overflowBehavior: "halt",
         status: "warn",
+        level: "act", projection: { basis: "growth", exhaustsAt: iso(5 * DAY), pctAtReset: null, perDay: 270_000_000 }, playbookUrl: `${RUNBOOK}/d1-storage.md`, paidPlan: workersPaid("$5/月（5 GB 込み、超過 $0.75/GB-月）"), issueSearchUrl: search("d1_storage"),
       },
       {
         provider: "resend",
@@ -87,6 +96,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: iso(9 * DAY),
         overflowBehavior: "bill",
         status: "ok",
+        level: "ok", projection: { basis: "window", exhaustsAt: null, pctAtReset: 57.1, perDay: 57 }, playbookUrl: `${RUNBOOK}/email-sending.md`, paidPlan: { name: "Resend Pro", price: "$20/月（5 万通/月込み、超過 $0.90/1,000 通）" }, issueSearchUrl: search("resend_emails_month"),
       },
       {
         provider: "cloudflare",
@@ -99,6 +109,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: null,
         overflowBehavior: "bill",
         status: "unknown",
+        level: "unknown", projection: null, playbookUrl: `${RUNBOOK}/kv.md`, paidPlan: workersPaid("$5/月（保存 1 GB 込み）"), issueSearchUrl: search("workers_kv_storage"),
       },
       {
         provider: "gcp",
@@ -111,6 +122,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: iso(18 * HOUR),
         overflowBehavior: "halt",
         status: "ok",
+        level: "ok", projection: null, playbookUrl: `${RUNBOOK}/google-apis.md`, paidPlan: { name: "課金プランなし（クォータ引き上げ申請）", price: "$0" }, issueSearchUrl: search("gcp_calendar_requests_peak_minute"),
       },
       {
         provider: "gcp",
@@ -123,6 +135,7 @@ export function buildMockUsageSummary(now: Date = new Date(), opts: { stale?: bo
         resetsAt: iso(18 * HOUR),
         overflowBehavior: "halt",
         status: "ok",
+        level: "ok", projection: null, playbookUrl: `${RUNBOOK}/google-apis.md`, paidPlan: { name: "課金プランなし（クォータ引き上げ申請）", price: "$0" }, issueSearchUrl: search("gcp_meet_requests_peak_minute"),
       },
     ],
   };
@@ -150,6 +163,8 @@ export function buildNeutralUsageSummary(now: Date = new Date()): UsageSummary {
       pct: Number.NaN,
       resetsAt: null,
       status: "unknown",
+      level: "unknown",
+      projection: null,
     })),
   };
 }

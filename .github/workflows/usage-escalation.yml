@@ -1,0 +1,83 @@
+name: usage escalation
+
+# WHY (#902): usage-meter only mailed an admin when a free-tier metric got close to its ceiling,
+# so nothing was decided and the mail was forgotten. This turns each such metric into a tracked
+# GitHub Issue (area:usage, P1 / P0 at critical) with what is consuming, the playbook
+# mitigations and what paying would cost, so a human chooses "対策" or "課金".
+#   Levels and projection: services/usage-meter/src/escalation.ts. One open Issue per metric;
+#   at most one post per metric per UTC day unless the level rises.
+# Issues go to a PRIVATE repo (USAGE_ALERT_REPO, default KIT-DevelopersHub/dub-docs) because
+# they carry real usage. This repo is public, so this log prints counts only.
+#   secret USAGE_ALERT_GH_TOKEN: fine-grained PAT, Issues: read and write on the alert repo only.
+#   Not set -> the job does nothing and succeeds; the Worker's in-app notice + mail continue.
+# Reads only: one ~150-row SELECT on usage_snapshot (prod D1, via the existing deploy token)
+# and Cloudflare GraphQL Analytics for the top consumers. Runbook: docs/runbooks/11-usage-free-tier/.
+on:
+  schedule:
+    # every 6 hours (00:17 / 06:17 / 12:17 / 18:17 UTC); usage-meter collects daily + on view.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print the Issues instead of posting them'
+        type: boolean
+        default: false
+
+concurrency:
+  group: usage-escalation
+  cancel-in-progress: false
+
+# Issues are written with USAGE_ALERT_GH_TOKEN in another repo; nothing is written here.
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: alert token set?
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          HAS_TOKEN: ${{ secrets.USAGE_ALERT_GH_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" = "true" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::USAGE_ALERT_GH_TOKEN is not set: no Issues (in-app notice + mail continue)"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  escalate:
+    name: open / update usage Issues
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      USAGE_ALERT_GH_TOKEN: ${{ secrets.USAGE_ALERT_GH_TOKEN }}
+      USAGE_ALERT_REPO: ${{ vars.USAGE_ALERT_REPO || 'KIT-DevelopersHub/dub-docs' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @dub/usage-meter...
+
+      - name: Read usage_snapshot (last 8 days, read-only)
+        working-directory: services/usage-meter
+        run: |
+          SQL=$(pnpm exec tsx scripts/usage-escalation.ts --print-sql)
+          pnpm dlx wrangler@4.35.0 d1 execute dub-core --remote --json --command "$SQL" > "$RUNNER_TEMP/usage-rows.json"
+          echo "rows: $(node -e "const j=require(process.argv[1]);console.log(j.flatMap(r=>r.results||[]).length)" "$RUNNER_TEMP/usage-rows.json")"
+
+      - name: Open / update Issues
+        working-directory: services/usage-meter
+        run: |
+          pnpm exec tsx scripts/usage-escalation.ts --rows "$RUNNER_TEMP/usage-rows.json" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
