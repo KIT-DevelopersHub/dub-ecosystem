@@ -15,12 +15,12 @@ function makeApi(over: Partial<ApiClient["auth"]>): ApiClient {
   } as unknown as ApiClient;
 }
 
-let assignSpy: ReturnType<typeof vi.fn>;
+let replaceSpy: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  assignSpy = vi.fn();
-  // jsdom location.assign is a no-op that warns; replace it so we can assert nav.
+  replaceSpy = vi.fn();
+  // jsdom location.replace is a no-op; stub it to assert nav (replace keeps login out of history).
   Object.defineProperty(globalThis, "location", {
-    value: { ...globalThis.location, assign: assignSpy, pathname: "/", search: "" },
+    value: { ...globalThis.location, replace: replaceSpy, pathname: "/", search: "" },
     writable: true,
     configurable: true,
   });
@@ -37,7 +37,7 @@ describe("LoginScreen — email/password", () => {
     fireEvent.click(screen.getByTestId("fe2-login-submit"));
 
     await waitFor(() => expect(passwordLogin).toHaveBeenCalledWith("admin@dub.local", "demo-admin-pw"));
-    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/dashboard"));
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledWith("/dashboard"));
   });
 
   it("shows an error and does not navigate when credentials are rejected", async () => {
@@ -51,7 +51,7 @@ describe("LoginScreen — email/password", () => {
     fireEvent.click(screen.getByTestId("fe2-login-submit"));
 
     await waitFor(() => expect(screen.getByTestId("fe2-login-error")).toBeInTheDocument());
-    expect(assignSpy).not.toHaveBeenCalled();
+    expect(replaceSpy).not.toHaveBeenCalled();
   });
 
   it("has no Google login button (Google OAuth removed)", () => {
@@ -83,7 +83,7 @@ describe("LoginScreen — staging demo one-click login (VITE_DEMO_AUTOLOGIN)", (
     expect(btn).toBeInTheDocument();
     fireEvent.click(btn);
     await waitFor(() => expect(demoLogin).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(assignSpy).toHaveBeenCalledWith("/dashboard"));
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledWith("/dashboard"));
     vi.unstubAllEnvs();
   });
 });

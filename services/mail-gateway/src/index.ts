@@ -11,11 +11,17 @@ import { headersToMap, type RawInbound } from "./mime";
 import { runScheduledSendDrain } from "./scheduled-send";
 import { kickFreeqDrain } from "./freeq-kick";
 import { isCanaryInbound, runCanary } from "./canary";
+import { isMonitorSlot, runMailMonitor } from "./monitor";
+import { sweepSuppressions } from "./resend-suppressions";
 import { runRowCountSnapshot } from "./row-count";
 import { common } from "@dub/types";
 import { buildAuditEnv, buildDb } from "./deps";
 import { INBOUND_ATTACHMENT_READ_BYTES, INBOUND_RAW_READ_BYTES, SERVICE_NAME } from "./config";
 import type { Env } from "./env";
+import { consoleSink } from "@dub/observability";
+
+// Suppression auto-heal cadence (minutes; on the hour).
+const SUPPRESSION_SWEEP_INTERVAL_MIN = 60;
 
 const app = createApp();
 
@@ -136,7 +142,17 @@ const handler = {
       { db: buildDb(env, ctx.requestId), audit: buildAuditEnv(env), orgId: common.DUB_DEFAULT_ORG_ID, ctx },
       controller.scheduledTime,
     );
+    // Resend suppression auto-heal (MAIL_SUPPRESSION_AUTOHEAL): hourly, never throws. Runs
+    // BEFORE the canary so the on-the-hour probe already goes to a cleared address.
+    if (isMonitorSlot(controller.scheduledTime, SUPPRESSION_SWEEP_INTERVAL_MIN)) {
+      const sweep = await sweepSuppressions(env, buildDb(env, ctx.requestId));
+      if (sweep.enabled && (sweep.removed.length > 0 || sweep.error)) {
+        consoleSink({ level: sweep.error ? "warn" : "info", message: "mail-gateway: suppression sweep", service: SERVICE_NAME, fields: { ...sweep } });
+      }
+    }
     await runCanary(env, controller.scheduledTime);
+    // Mail monitor (#898): list/thread API + real-send failures + heartbeat. Never throws.
+    await runMailMonitor(env, app, controller.scheduledTime);
     await sweepPendingForwards(buildDb(env, ctx.requestId), env, controller.scheduledTime);
   },
 };
