@@ -60,6 +60,8 @@ describe("HomeScreen 本戦 countdown (#858)", () => {
     render(wrap(<HomeScreen api={makeApiWithEvents(OK_HOME, [{ id: "c", title: "北陸ITカンファレンス 2027", startsAt: future }])} />));
     await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("北陸ITカンファレンス 2027"));
     expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("10");
+    expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("開催まで");
+    expect(screen.getByTestId("fe2-kpi-countdown")).not.toHaveTextContent("本戦まで");
   });
 
   it("shows the 未設定 empty state when no conference date is set or it has passed", async () => {
@@ -67,6 +69,7 @@ describe("HomeScreen 本戦 countdown (#858)", () => {
     render(wrap(<HomeScreen api={makeApiWithEvents(home, [{ id: "u", title: "北陸ITカンファレンス 2028", startsAt: null }])} />));
     await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("開催日が未設定です — イベントアプリで入力してください"));
     expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("—");
+    expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("開催まで");
   });
 
   it("ignores dated events that are not the conference", async () => {

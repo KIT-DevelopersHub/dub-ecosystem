@@ -338,7 +338,7 @@ export function HomeScreen({
               <KpiTile
                 testId="fe2-kpi-countdown"
                 icon="clock"
-                label="本戦まで"
+                label="開催まで"
                 value={String(days)}
                 unit="日"
                 status={cdStatus}
@@ -352,7 +352,7 @@ export function HomeScreen({
               <KpiTile
                 testId="fe2-kpi-countdown"
                 icon="clock"
-                label="本戦まで"
+                label="開催まで"
                 value="—"
                 status="info"
                 hint={conferenceQuery.isError ? "取得できませんでした" : COUNTDOWN_UNSET_HINT}
