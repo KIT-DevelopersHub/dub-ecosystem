@@ -50,6 +50,8 @@ export const POLICY_TABLE = definePolicyTable({
   // Mail monitor heartbeat (#898): app-health-monitor reads it over its Service Binding
   // (dead-man's switch for the cron-driven checks). Check states only, no secrets.
   "GET /internal/monitor/heartbeat": INTERNAL,
+  // mail-automation reads the inbound message a mail.message.received names (#852).
+  "GET /internal/messages/:id": INTERNAL,
 
   // ---- Resend delivery-problem webhook (bounce / suppressed / complained / failed / delayed)
   // INTERNAL, not PUBLIC: this Worker has no public hostname. Resend calls api-gateway's
