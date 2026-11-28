@@ -173,6 +173,18 @@ describe("calendar meetings (カレンダー > ミーティング)", () => {
     const sync = await a.request<{ withoutGoogleAccount: unknown[] }>({ method: "POST", path: "/api/v1/meetings/sync" });
     expect(sync.withoutGoogleAccount.length).toBeGreaterThan(0);
   });
+
+  it("#908: キックオフ lists a late joiner as 未招待 until 参加者を再同期, and a member without Gmail stays", async () => {
+    const a = api();
+    type Att = { items: { name: string }[]; notInvited: { name: string; reason: string }[] };
+    const before = await a.request<Att>({ method: "GET", path: "/api/v1/meetings/mtg_kickoff/attendees" });
+    expect(before.notInvited.map((n) => n.reason)).toEqual(["no_email", "pending"]);
+    const res = await a.request<{ invitedAdded: number; notInvited: { reason: string }[] }>({ method: "POST", path: "/api/v1/meetings/mtg_kickoff/sync" });
+    expect(res.invitedAdded).toBe(1);
+    expect(res.notInvited.map((n) => n.reason)).toEqual(["no_email"]);
+    const after = await a.request<Att>({ method: "GET", path: "/api/v1/meetings/mtg_kickoff/attendees" });
+    expect(after.items.some((i) => i.name === "新井 翔太")).toBe(true);
+  });
 });
 
 describe("isDemoEnabled", () => {

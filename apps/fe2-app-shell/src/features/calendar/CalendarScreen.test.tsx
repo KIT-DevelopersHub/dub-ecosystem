@@ -86,8 +86,9 @@ function memoryApi(seed: task.Task[], teamRows: task.Task[] = [], peopleRows: ta
     updateMeeting: vi.fn(),
     deleteMeeting: vi.fn(),
     syncMeetings: vi.fn(),
+    syncMeeting: vi.fn(),
     joinMeeting: vi.fn(),
-    listMeetingAttendees: vi.fn(async () => ({ items: [], responsesAvailable: true })),
+    listMeetingAttendees: vi.fn(async () => ({ items: [], responsesAvailable: true, notInvited: [] })),
   };
   return api;
 }

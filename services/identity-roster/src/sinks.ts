@@ -10,6 +10,7 @@ import { identity, type meeting } from "@dub/types";
 import type { AuditSink, DomainEventSink, RequestCtx, RoleMembershipOutcome, RoleMembershipSink, SessionRevoker } from "./deps";
 import type { Env } from "./env";
 import { AUDIT_TOPIC, outboxQueue } from "./outbox";
+import { enqueue } from "@dub/freeq";
 
 const SERVICE = "identity-roster";
 
@@ -67,7 +68,12 @@ export const ROLE_MEMBERSHIP_TIMEOUT_MS = 10_000;
 /**
  * Role membership changes -> drive-share-service POST /internal/role-membership, synchronously: the
  * caller awaits it, so the role's Drive共有 grants and ミーティング invitations reach (or leave) the user
- * as part of the change. No queue. Without SVC_DRIVE_SHARE (tests, bare deploys) nothing is sent.
+ * as part of the change. Without SVC_DRIVE_SHARE (tests, bare deploys) nothing is sent.
+ *
+ * A call that fails, times out or comes back unfinished is also written to the freeq outbox
+ * (ROLE_MEMBERSHIP_TOPIC, same message id = idempotent), and freeq-drain redelivers it with backoff
+ * (#908: a missed follow used to wait for the hourly sync, or never came for an ended run). The
+ * success path writes nothing, so a normal role change costs no D1 write.
  */
 export function createRoleMembershipSink(
   env: Env,
@@ -98,18 +104,34 @@ export function createRoleMembershipSink(
           body: JSON.stringify(msg),
           signal: abort.signal,
         });
-        if (!res.ok) return fail(msg, `Drive共有・ミーティングへの反映に失敗しました（HTTP ${res.status}）。`);
+        if (!res.ok) return await retryLater(msg, `Drive共有・ミーティングへの反映に失敗しました（HTTP ${res.status}）。`);
         const body = (await res.json().catch(() => null)) as meeting.RoleMembershipFollowResponse | null;
-        if (body && body.complete === false) return fail(msg, (body.problems ?? []).join(" ") || "Drive共有・ミーティングへの反映が一部終わりませんでした。");
+        if (body && body.complete === false) {
+          const message = (body.problems ?? []).join(" ") || "Drive共有・ミーティングへの反映が一部終わりませんでした。";
+          return body.retry ? await retryLater(msg, message) : fail(msg, message);
+        }
         return { ok: true };
       } catch (err) {
         const timedOut = abort.signal.aborted;
-        return fail(msg, timedOut ? `Drive共有・ミーティングへの反映が ${Math.round(timeoutMs / 1000)} 秒以内に終わりませんでした。` : `Drive共有・ミーティングへ届きませんでした（${err instanceof Error ? err.message : String(err)}）。`);
+        return await retryLater(msg, timedOut ? `Drive共有・ミーティングへの反映が ${Math.round(timeoutMs / 1000)} 秒以内に終わりませんでした。` : `Drive共有・ミーティングへ届きませんでした（${err instanceof Error ? err.message : String(err)}）。`);
       } finally {
         clearTimeout(timer);
       }
     },
   };
+
+  /** Fail, and queue the notice for freeq-drain to redeliver. A failed enqueue keeps the plain failure. */
+  async function retryLater(msg: identity.RoleMembershipChangedV1, message: string): Promise<RoleMembershipOutcome> {
+    const db = env.OUTBOX_DB;
+    if (!db) return fail(msg, message);
+    try {
+      await enqueue(db, identity.ROLE_MEMBERSHIP_TOPIC, msg, { id: msg.id });
+      return fail(msg, `${message} 自動で再試行します。`);
+    } catch (err) {
+      console.warn(JSON.stringify({ service: SERVICE, event: "role_membership_enqueue_failed", messageId: msg.id, message: err instanceof Error ? err.message : String(err) }));
+      return fail(msg, message);
+    }
+  }
 }
 
 function fail(msg: identity.RoleMembershipChangedV1, message: string): RoleMembershipOutcome {

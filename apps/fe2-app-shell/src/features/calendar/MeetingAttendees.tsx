@@ -1,9 +1,9 @@
 // 参加者 section of the meeting detail: who is invited and how they answered in Google Calendar
 // (参加 / 不参加 / 未定 / 未返信), like Google Calendar's guest list.
-import { Avatar, Badge, SkeletonList } from "@dub/ui";
+import { Avatar, Badge, Button, SkeletonList } from "@dub/ui";
 import type { BadgeTone } from "@dub/ui";
 import { meeting } from "@dub/types";
-import { useMeetingAttendeesQuery } from "./useMeetings.tsx";
+import { useMeetingAttendeesQuery, useResyncMeetingMutation } from "./useMeetings.tsx";
 
 const TONE: Record<meeting.MeetingResponseStatus, BadgeTone> = {
   accepted: "success",
@@ -15,10 +15,18 @@ const ORDER: readonly meeting.MeetingResponseStatus[] = ["accepted", "tentative"
 
 const muted = { color: "var(--dub-color-text-muted)", fontSize: "var(--dub-font-size-xs)" } as const;
 
-export function MeetingAttendees({ meetingId, date }: { meetingId: string; date: string | undefined }): JSX.Element {
+const NOT_INVITED: Record<meeting.MeetingNotInvitedReason, { label: string; tone: BadgeTone }> = {
+  no_email: { label: "メールアドレス未連携", tone: "warning" },
+  pending: { label: "未招待", tone: "neutral" },
+};
+
+/** `canResync`: show 参加者を再同期 (ミーティング編集 holders). */
+export function MeetingAttendees({ meetingId, date, canResync = false }: { meetingId: string; date: string | undefined; canResync?: boolean }): JSX.Element {
   const q = useMeetingAttendeesQuery(meetingId, date);
+  const resync = useResyncMeetingMutation(meetingId);
   const tid = "calendar-meeting-attendees";
   const items = q.data?.items ?? [];
+  const notInvited = q.data?.notInvited ?? [];
   const showAnswers = q.data?.responsesAvailable ?? false;
   const count = (s: meeting.MeetingResponseStatus) => items.filter((i) => i.response === s).length;
 
@@ -37,6 +45,13 @@ export function MeetingAttendees({ meetingId, date }: { meetingId: string; date:
             {ORDER.filter((s) => count(s) > 0)
               .map((s) => `${meeting.MEETING_RESPONSE_LABELS[s]} ${count(s)}`)
               .join(" · ")}
+          </span>
+        ) : null}
+        {canResync ? (
+          <span style={{ marginLeft: "auto" }}>
+            <Button variant="ghost" size="sm" onClick={() => resync.mutate()} loading={resync.isPending} testId={`${tid}-resync`}>
+              参加者を再同期
+            </Button>
           </span>
         ) : null}
       </div>
@@ -80,6 +95,30 @@ export function MeetingAttendees({ meetingId, date }: { meetingId: string; date:
           </ul>
         </>
       )}
+
+      {notInvited.length > 0 ? (
+        <div data-testid={`${tid}-not-invited`} style={{ display: "flex", flexDirection: "column", gap: "var(--dub-space-2)", paddingTop: "var(--dub-space-2)" }}>
+          <span style={{ fontSize: "var(--dub-font-size-sm)", color: "var(--dub-color-text-primary)" }}>
+            招待できていないメンバー {notInvited.length}人
+          </span>
+          {notInvited.some((n) => n.reason === "no_email") ? (
+            <span style={muted}>名簿に Gmail が登録されていない（または名簿とアカウントがつながっていない）ため、招待を送れません。名簿で Gmail を登録すると次の同期で招待されます。</span>
+          ) : null}
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "var(--dub-space-2)" }}>
+            {notInvited.map((n) => (
+              <li key={n.userId} data-testid={`${tid}-not-invited-row`} style={{ display: "flex", alignItems: "center", gap: "var(--dub-space-3)" }}>
+                <Avatar name={n.name} size="sm" />
+                <span style={{ flex: 1, minWidth: 0, fontSize: "var(--dub-font-size-sm)", color: "var(--dub-color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {n.name}
+                </span>
+                <Badge tone={NOT_INVITED[n.reason].tone} testId={`${tid}-not-invited-reason`}>
+                  {NOT_INVITED[n.reason].label}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }

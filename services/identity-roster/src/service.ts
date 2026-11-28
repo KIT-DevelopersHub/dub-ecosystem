@@ -89,7 +89,16 @@ export class IdentityService {
     return [...set];
   }
 
+  /** Roles held only with a resource scope (not in orgWideRoleIds). */
+  private scopedOnlyRoleIds(assignments: AssignmentRow[]): common.RoleId[] {
+    const orgWide = new Set(this.orgWideRoleIds(assignments));
+    const set = new Set<string>();
+    for (const a of assignments) if ((a.resourceType !== null || a.resourceId !== null) && !orgWide.has(a.roleId)) set.add(a.roleId);
+    return [...set];
+  }
+
   private toIdentityUser(u: UserRow, assignments: AssignmentRow[]): IdentityUserView {
+    const scoped = this.scopedOnlyRoleIds(assignments);
     return {
       id: u.id,
       orgId: u.orgId,
@@ -101,6 +110,7 @@ export class IdentityService {
       status: u.status,
       source: u.source,
       roleIds: this.orgWideRoleIds(assignments),
+      ...(scoped.length > 0 ? { scopedRoleIds: scoped } : {}),
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
     };

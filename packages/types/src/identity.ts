@@ -162,6 +162,9 @@ export interface IdentityUser {
   avatarUrl: string | null;
   status: UserStatus;
   roleIds: RoleId[];
+  /** Roles held only for one resource (e.g. Organizer of one event), so not in `roleIds`. Additive:
+   *  omitted when there are none. Authorization never reads it; ミーティングの招待 does (#908). */
+  scopedRoleIds?: RoleId[];
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
@@ -338,6 +341,12 @@ export interface PutUserManagedRolesResponse {
  *  reach (or leave) that user right then. drive-share re-reads the roster on receipt and is idempotent.
  *  A failure never fails the role change: it is reported back as `propagationWarnings`. */
 export const ROLE_MEMBERSHIP_PATH = "/internal/role-membership";
+
+/** A notice whose synchronous follow failed is retried through the freeq outbox: identity enqueues
+ *  the same RoleMembershipChangedV1 under this topic, and freeq-drain POSTs it to
+ *  ROLE_MEMBERSHIP_ASYNC_PATH, which answers 503 while something is left to retry (#908). */
+export const ROLE_MEMBERSHIP_TOPIC = "identity.role_membership";
+export const ROLE_MEMBERSHIP_ASYNC_PATH = "/internal/role-membership-async";
 
 /** added = the user now counts for these roles (assigned, or became active while holding them);
  *  removed = the user no longer does (revoked, role deleted, disabled / offboarded). */

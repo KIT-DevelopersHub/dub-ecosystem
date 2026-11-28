@@ -3519,6 +3519,23 @@ function seedMeetings(): meeting.Meeting[] {
   ];
 }
 
+/** #908 demo: target members Dub could not invite. 鈴木 一郎 has no 名簿 Gmail (every role / 全体
+ *  meeting); 新井 翔太 joined maintainer after キックオフ was made and is invited by 参加者を再同期. */
+const DEMO_NO_EMAIL = { userId: "usr_carol", name: "鈴木 一郎" } as const;
+const DEMO_LATE_JOINER = { userId: "usr_arai", name: "新井 翔太", meetingId: "mtg_kickoff" } as const;
+const demoResynced = new Set<string>();
+
+function demoNotInvited(m: meeting.Meeting): meeting.MeetingNotInvitedMember[] {
+  const out: meeting.MeetingNotInvitedMember[] = [];
+  if (m.id === DEMO_LATE_JOINER.meetingId && !demoResynced.has(m.id)) {
+    out.push({ userId: DEMO_LATE_JOINER.userId as meeting.MeetingNotInvitedMember["userId"], name: DEMO_LATE_JOINER.name, reason: "pending" });
+  }
+  if (meetingValues.targetsOfMeeting(m).some((t) => t.kind !== "person")) {
+    out.push({ userId: DEMO_NO_EMAIL.userId as meeting.MeetingNotInvitedMember["userId"], name: DEMO_NO_EMAIL.name, reason: "no_email" });
+  }
+  return out.sort((a, b) => a.reason.localeCompare(b.reason));
+}
+
 /** Invitees of a demo meeting with stable, varied answers per occurrence (as if from Google Calendar).
  *  ?meetingAnswers=unavailable previews the "could not read Google" state. */
 function demoMeetingAttendees(m: meeting.Meeting, date: string | null): meeting.ListMeetingAttendeesResponse {
@@ -3538,9 +3555,12 @@ function demoMeetingAttendees(m: meeting.Meeting, date: string | null): meeting.
     };
   });
   if (m.id === "mtg_kickoff") items.push({ userId: null, name: "協賛企業 ご担当者", email: "sponsor@example.com", response: unavailable ? "needsAction" : "tentative", comment: null });
+  if (m.id === DEMO_LATE_JOINER.meetingId && demoResynced.has(m.id)) {
+    items.push({ userId: DEMO_LATE_JOINER.userId as meeting.MeetingAttendee["userId"], name: DEMO_LATE_JOINER.name, email: null, response: "needsAction", comment: null });
+  }
   const order: meeting.MeetingResponseStatus[] = ["accepted", "tentative", "declined", "needsAction"];
   items.sort((a, b) => order.indexOf(a.response) - order.indexOf(b.response) || a.name.localeCompare(b.name, "ja"));
-  return { items, responsesAvailable: !unavailable };
+  return { items, responsesAvailable: !unavailable, notInvited: demoNotInvited(m) };
 }
 
 function createMeetingsDemoStore() {
@@ -3647,6 +3667,15 @@ function createMeetingsDemoStore() {
       const found = read().find((m) => m.id === decodeURIComponent(attendeesM[1]!));
       if (!found) return problem("NOT_FOUND", "meeting not found", 404);
       return json(demoMeetingAttendees(found, url?.searchParams.get("date") ?? null));
+    }
+    const syncOneM = /^\/api\/v1\/meetings\/([^/]+)\/sync$/.exec(pathname);
+    if (method === "POST" && syncOneM) {
+      const found = read().find((m) => m.id === decodeURIComponent(syncOneM[1]!));
+      if (!found) return problem("NOT_FOUND", "meeting not found", 404);
+      const added = found.id === DEMO_LATE_JOINER.meetingId && !demoResynced.has(found.id) ? 1 : 0;
+      demoResynced.add(found.id);
+      const res: meeting.SyncMeetingResponse = { invitedAdded: added, invitedRemoved: 0, notInvited: demoNotInvited(found) };
+      return json(res);
     }
     const one = /^\/api\/v1\/meetings\/([^/]+)$/.exec(pathname);
     if (one) {

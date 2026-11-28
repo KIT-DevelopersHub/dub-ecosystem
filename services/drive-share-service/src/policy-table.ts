@@ -57,6 +57,8 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /driveshare/role-grants/reconcile": GOOGLE_ACCOUNT_EDIT,
   // Role membership changes, called synchronously by identity-roster over a Service Binding (s2s only).
   "POST /internal/role-membership": INTERNAL,
+  // Its freeq redelivery (freeq-drain over a Service Binding, s2s only).
+  "POST /internal/role-membership-async": INTERNAL,
 
   // ---- the Google accounts themselves: Drive共有 の「設定」 ----
   "GET /driveshare/google-account": GOOGLE_ACCOUNT_VIEW,
@@ -70,6 +72,7 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /meetings/targets": MEETINGS_VIEW,
   "POST /meetings": MEETINGS_EDIT,
   "POST /meetings/sync": MEETINGS_EDIT,
+  "POST /meetings/:id/sync": MEETINGS_EDIT,
   "PATCH /meetings/:id": MEETINGS_EDIT,
   "DELETE /meetings/:id": MEETINGS_EDIT,
   "GET /meetings/:id/attendees": MEETINGS_VIEW,

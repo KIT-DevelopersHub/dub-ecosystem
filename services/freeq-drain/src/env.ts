@@ -24,6 +24,7 @@ export interface Env {
   SVC_MOBILE_BFF?: Fetcher; // mo3-mobile-bff   POST /internal/events-async
   SVC_MAIL_AUTOMATION?: Fetcher; // mail-automation POST /internal/events-async (改善#5)
   SVC_CHAT?: Fetcher; // chat-service    POST /internal/events-async (evt.chat, #850 times channel)
+  SVC_DRIVE_SHARE?: Fetcher; // drive-share-service POST /internal/role-membership-async (#908)
 
   // --- write guard (#841): max outbox rows claimed per UTC day (default 3000; "0" pauses) ---
   FREEQ_DAILY_ROW_CAP?: string;
@@ -39,7 +40,8 @@ export type ServiceBindingName =
   | "SVC_GITHUB_SYNC"
   | "SVC_MOBILE_BFF"
   | "SVC_MAIL_AUTOMATION"
-  | "SVC_CHAT";
+  | "SVC_CHAT"
+  | "SVC_DRIVE_SHARE";
 
 // The env keys that hold a freeq outbox D1, drained in this fixed order each tick.
 // ONE entry per PHYSICAL D1: only dub-core and auth-outbox exist. DB_DRIVE / DB_MOBILE are

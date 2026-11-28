@@ -3,7 +3,8 @@
 //
 // Trigger: identity-roster calls POST /internal/role-membership synchronously, inside the request that
 // changes the membership (assign / revoke / 名簿 auto-roles / role delete / (de)activation / offboard),
-// and waits for the answer. No queue: the message only says WHICH roles to re-check — membership is
+// and waits for the answer. A call that fails or is left unfinished (`retry`) is queued by identity on
+// the freeq outbox and redelivered to /internal/role-membership-async (#908). The message only says WHICH roles to re-check — membership is
 // read again from identity / 名簿 here, and every step is idempotent (Drive: the grant ledger + the
 // live permissions; calendar: the invite ledger), so a repeated call changes nothing.
 //
@@ -68,7 +69,11 @@ export function createRoleFollowService(deps: RoleFollowDeps): RoleFollowService
         return { ignored: true, drive: null, calendar: null, complete: true, problems: [] };
       }
       const problems: string[] = [];
+      // A part that threw, ran out of time or was paused can still finish on a retry (the outbox
+      // redelivery); an address Google refused or a missing calendar scope cannot.
+      let retry = false;
       const failed = (part: string, err: unknown) => {
+        retry = true;
         log("role_follow_failed", { messageId: msg.id, userId: msg.userId, change: msg.change, roleIds: msg.roleIds, part, message: err instanceof Error ? err.message : String(err) });
         problems.push(`${part}を反映できませんでした（${err instanceof Error ? err.message : String(err)}）。毎時の同期で再試行します。`);
       };
@@ -79,7 +84,10 @@ export function createRoleFollowService(deps: RoleFollowDeps): RoleFollowService
         if (live) {
           const res = await service.followRoles(msg.roleIds, msg.change, { budgetMs: FOLLOW_DRIVE_BUDGET_MS, maxWrites: FOLLOW_DRIVE_MAX_WRITES });
           drive = { grants: res.grants, shared: res.shared, revoked: res.revoked, held: res.held, refused: res.skipped.length, complete: res.complete };
-          if (!res.complete) problems.push("Drive共有の一部が時間内に終わりませんでした。残りは毎時の同期で反映します。");
+          if (!res.complete) {
+            retry = true;
+            problems.push("Drive共有の一部が時間内に終わりませんでした。残りは毎時の同期で反映します。");
+          }
           if (res.skipped.length > 0) problems.push(`Drive共有で Google が受け付けなかった宛先があります: ${res.skipped.map((s) => `${s.email}（${s.reason}）`).join("、")}`);
           if (msg.change === "removed" && res.held > 0) problems.push("ロールが見つからないか 0 人に見えるため、Drive共有の削除を保留しました。必要なら Drive共有 で付与を外してください。");
           log("role_follow_drive", { messageId: msg.id, userId: msg.userId, change: msg.change, reason: msg.reason, roleIds: msg.roleIds, ...drive, refused: res.skipped });
@@ -96,6 +104,7 @@ export function createRoleFollowService(deps: RoleFollowDeps): RoleFollowService
           // The role calendars' shares are paced (Google limits): the sync writes them shortly.
           await deps.kickCalendar().catch((err: unknown) => log("role_follow_kick_failed", { message: err instanceof Error ? err.message : String(err) }));
           calendar = { meetings: r.meetings, invitedAdded: r.invitedAdded, invitedRemoved: r.invitedRemoved, complete: r.complete && !r.skipped, ...(r.skipped ? { skipped: r.skipped } : {}), sharesPending: true };
+          if (!calendar.complete && r.skipped !== "not_ready") retry = true;
           if (r.skipped === "quota_paused") problems.push("Google カレンダーの利用上限で同期が一時停止中のため、ミーティングの招待は停止明けに反映します。");
           else if (r.skipped === "not_ready") problems.push("Google アカウントにカレンダーの権限が無いため、ミーティングの招待を反映できません。Drive共有 > 設定 で再接続してください。");
           else if (!r.complete) problems.push("ミーティングの招待の一部が時間内に終わりませんでした。残りは毎時の同期で反映します。");
@@ -104,7 +113,7 @@ export function createRoleFollowService(deps: RoleFollowDeps): RoleFollowService
       } catch (err) {
         failed("ミーティングの招待", err);
       }
-      return { drive, calendar, complete: problems.length === 0, problems };
+      return { drive, calendar, complete: problems.length === 0, problems, ...(retry ? { retry } : {}) };
     },
 
     async reconcile(body) {

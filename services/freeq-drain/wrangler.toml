@@ -89,6 +89,10 @@ service = "dub-mail-automation"    # POST /internal/events-async (evt.mail-autom
 binding = "SVC_CHAT"
 service = "dub-chat-service"       # POST /internal/events-async (evt.chat, #850 times channel)
 
+[[services]]
+binding = "SVC_DRIVE_SHARE"
+service = "dub-drive-share-service" # POST /internal/role-membership-async (identity.role_membership, #908)
+
 # --- NO cron trigger. The drain is driven by the FreeqDrainDO alarm (above), which does not
 #     consume a slot on the Workers FREE plan's 5-cron account cap. ---
 

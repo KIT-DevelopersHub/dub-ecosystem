@@ -97,7 +97,7 @@ export function MeetingDetailDialog({
             </div>
           ) : (
             // This occurrence's answers (they can differ per occurrence of a series).
-            <MeetingAttendees meetingId={m.id} date={m.recurrence === "none" ? undefined : jstParts(occurrence.startsAt)?.date} />
+            <MeetingAttendees meetingId={m.id} date={m.recurrence === "none" ? undefined : jstParts(occurrence.startsAt)?.date} canResync={canEdit} />
           )}
           {m.description ? (
             <div style={{ ...row, flexDirection: "column", gap: "var(--dub-space-1)" }}>
