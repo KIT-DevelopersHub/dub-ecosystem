@@ -69,3 +69,6 @@ export {
   type SearchableMenuItem,
 } from "./components/SearchableMenu";
 export { ImpersonateConfirmDialog, type ImpersonateConfirmDialogProps } from "./components/ImpersonateConfirmDialog";
+
+export { AiSidePanel, type AiSidePanelProps, type AiPanelContext, type AiChatSend } from "./components/AiSidePanel";
+export { AI_RELEASE_DATE_LABEL, AI_CHAT_AVAILABLE, AI_UNAVAILABLE_MESSAGE } from "./ai/aiRelease";

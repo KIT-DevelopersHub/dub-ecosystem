@@ -9,7 +9,7 @@ import type { ScopeTask } from "../src/domain/task-hierarchy";
 // ユーザー確定レイアウト（両フォーム共通・共通コンポーネント TaskFormFields）:
 //   タイトル                （全幅）
 //   ステータス   重要度      （2カラム・同一行）
-//   担当         チーム      （2カラム・同一行）
+//   担当                    （全幅・チーム欄は出さない＝担当に従う）
 //   開始日       終了日      （2カラム・同一行）
 //   親タスク                （全幅）
 //   先行タスク              （全幅）
@@ -46,12 +46,17 @@ function precedes(a: Element, b: Element): boolean {
 function assertSpecLayout(prefix: string) {
   // 2カラム対は同一 .formRow（＝同一行・空セルなしで横並び）
   expect(rowOf(`${prefix}-status`)).toBe(rowOf(`${prefix}-priority`));
-  expect(rowOf(`${prefix}-assignee`)).toBe(rowOf(`${prefix}-team`));
   expect(rowOf(`${prefix}-start`)).toBe(rowOf(`${prefix}-due`));
 
-  // 3対の縦の並び順: ステータス行 → 担当行 → 日付行
-  expect(precedes(rowOf(`${prefix}-status`), rowOf(`${prefix}-assignee`))).toBe(true);
-  expect(precedes(rowOf(`${prefix}-assignee`), rowOf(`${prefix}-start`))).toBe(true);
+  // 担当は全幅の1項目。チーム欄は出さない（担当と同じ名前が二重に出るため撤去）。
+  const assignee = screen.getByTestId(`${prefix}-assignee`).closest('[class*="formFieldFull"]');
+  expect(assignee, "担当 is a full-width field").not.toBeNull();
+  expect(screen.queryByTestId(`${prefix}-team`)).toBeNull();
+  expect(screen.queryByLabelText("チーム")).toBeNull();
+
+  // 縦の並び順: ステータス行 → 担当 → 日付行
+  expect(precedes(rowOf(`${prefix}-status`), assignee as Element)).toBe(true);
+  expect(precedes(assignee as Element, rowOf(`${prefix}-start`))).toBe(true);
 
   // 全幅フィールドの並び: 日付行 → 親タスク → 先行タスク → 詳細
   const dateRow = rowOf(`${prefix}-start`);

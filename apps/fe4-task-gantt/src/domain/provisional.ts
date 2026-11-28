@@ -31,6 +31,7 @@ export interface ProvisionalDraft {
   status: task.TaskStatus;
   priority: task.TaskPriority;
   assigneeId: common.UserId | null;
+  assigneeTeamId?: common.TeamId | null;
   teamId: common.TeamId | null;
   startAt: common.ISODateTime | null;
   dueAt: common.ISODateTime | null;
@@ -52,6 +53,7 @@ export function buildProvisionalTask(
     status: draft.status,
     priority: draft.priority,
     assigneeId: draft.assigneeId,
+    assigneeTeamId: draft.assigneeTeamId ?? null,
     teamId: draft.teamId,
     startAt: draft.startAt,
     dueAt: draft.dueAt,

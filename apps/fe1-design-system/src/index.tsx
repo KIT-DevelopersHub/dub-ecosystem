@@ -26,6 +26,8 @@ export type {
   TextareaProps,
   SelectOption,
   SelectProps,
+  SearchableSelectOption,
+  SearchableSelectProps,
   CheckboxProps,
   RadioProps,
   SwitchProps,
@@ -104,6 +106,10 @@ export {
   Switch,
   DatePicker,
 } from "./components/Inputs";
+// Searchable dropdown — every long "pick one" list (people, teams…) uses this (FRONTEND_GUIDE).
+export { SearchableSelect } from "./components/SearchableSelect";
+export { useRecentSelections } from "./utils/recent";
+export type { RecentSelections } from "./utils/recent";
 export { DataTable } from "./components/DataTable";
 export { Pagination, LoadMore } from "./components/Pagination";
 export { Modal, ConfirmDialog, Drawer, ErrorDialog } from "./components/Modal";

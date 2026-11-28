@@ -1,0 +1,102 @@
+name: Ticket flow E2E
+
+# チケット購入 → 決済（Stripe テストモード）→ 発券 → 当日受付 をブラウザで通す（#897）。
+# 毎 PR には付けない（ブラウザ + vite で数分かかる）。API だけの版
+# （packages/e2e-smoke/test/ticket-to-checkin.test.ts）は ci.yml の `pnpm run test` で毎 PR 回る。
+#   - main への push（チケット・受付まわりが変わった時）
+#   - PR に「チケットE2E」ラベルを付けた時（付けている間は push ごとに再実行）
+#   - 毎朝の定期実行と手動実行
+# 外部へは通信しない（Stripe は偽物・sk_test_ 以外は起動時に拒否）。本番キー・本番 D1 は使わない。
+# 失敗したら（PR 以外）Issue を立てて運営に知らせる。手順書: docs/runbooks/10-ticket-flow-e2e-and-rollback.md
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/lp-tickets/**"
+      - "apps/lp-conference-next/worker/**"
+      - "apps/fe2-app-shell/src/features/lp/**"
+      - "apps/fe2-app-shell/e2e/ticket-*"
+      - "apps/fe2-app-shell/playwright.tickets.config.ts"
+      - "packages/e2e-smoke/**"
+      - ".github/workflows/ticket-flow-e2e.yml"
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize, reopened]
+  schedule:
+    - cron: "0 21 * * *" # 06:00 JST
+  workflow_dispatch:
+
+concurrency:
+  group: ticket-flow-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+
+jobs:
+  e2e:
+    name: purchase → payment → ticket → check-in
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'チケットE2E')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24 # node:sqlite（D1 の代わり）
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: API E2E (vitest)
+        run: pnpm --filter @dub/e2e-smoke exec vitest run test/ticket-to-checkin.test.ts
+
+      - name: Build fe2 workspace dependencies
+        working-directory: apps/fe2-app-shell
+        run: pnpm exec turbo run build --filter=@dub/fe2-app-shell^...
+
+      - name: Install Chromium
+        working-directory: apps/fe2-app-shell
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser E2E (Playwright)
+        working-directory: apps/fe2-app-shell
+        env:
+          CI: "1"
+        run: pnpm run e2e:tickets
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ticket-flow-e2e-traces
+          path: apps/fe2-app-shell/e2e/.output/tickets
+          retention-days: 7
+
+      - name: Notify on failure (not for PRs)
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="チケット購入〜受付の E2E が失敗しています"
+          body="$(printf '%s\n\n- 実行: %s\n- コミット: %s\n- 手順書: docs/runbooks/10-ticket-flow-e2e-and-rollback.md' \
+            "購入 → 決済 → 発券 → 受付 のどこかが壊れています。手順書の「1. まず確かめる」から進めてください。" "$RUN_URL" "$GITHUB_SHA")"
+          n=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label "area:tickets" --label "P0"
+          fi

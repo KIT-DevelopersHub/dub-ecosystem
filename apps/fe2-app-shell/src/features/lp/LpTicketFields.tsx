@@ -38,8 +38,7 @@ export function LpTicketFieldsCard({ fields, canEdit }: { fields: LpTicketField[
       locked={["氏名", "メールアドレス"]}
       note={
         <>
-          購入ページのフォームに並ぶ項目です。氏名とメールアドレスは決済と連絡に使うため必ず入力してもらいます。
-          追加の項目は最大 {TICKET_FIELDS_MAX} 個まで。
+          購入フォームの項目です。氏名・メールは必須、追加は最大 {TICKET_FIELDS_MAX} 個まで。
         </>
       }
       testIdPrefix="fe2-lp-ticket-field"
