@@ -31,7 +31,7 @@ import { MemberFormDialog } from "./MemberFormDialog.tsx";
 import { LinkIdentityDialog } from "./LinkIdentityDialog.tsx";
 import type { OrgMember } from "./contracts.ts";
 import { ROSTER_FILTER_OPTIONS, canRemind, hasMissingProfile, matchesRosterFilter, type RosterStatusFilter } from "./memberStatus.ts";
-import { orgChartOrder } from "./orgChartOrder.ts";
+import { organizerIdentityIds, rosterOrder } from "./rosterOrder.ts";
 import { buildRosterTable, exportRoster, type RosterExportFormat } from "./rosterExport.ts";
 import { PROFILE_DISPLAY_COLUMNS } from "../../lib/personProfile.tsx";
 import styles from "./members.module.css";
@@ -105,13 +105,13 @@ export function MemberRosterPage(): JSX.Element {
     return map;
   }, [members]);
 
-  // 表示順 = 組織図順(オーガナイザー→各リーダー→配下→残り)。ステータスで絞ってから
+  // 表示順 = 役職順(Organizer→リーダー→メンバー・同じ役職内は組織図順 #873)。ステータスで絞ってから
   // 並べ替え、最後に検索で絞る(検索は順序を保つ)。既定は「在籍者(辞退以外)」。
   const filteredMembers = useMemo(() => {
     const byStatus = members.filter(
       (m) => matchesRosterFilter(m.status, statusFilter) && (profileFilter === "all" || hasMissingProfile(m)),
     );
-    const ordered = orgChartOrder(byStatus);
+    const ordered = rosterOrder(byStatus, organizerIdentityIds(identityUsers.data?.items ?? []));
     const q = search.trim().toLowerCase();
     if (!q) return ordered;
     // 一覧に出る値 (人物プロフィール列は表示ラベル: 学年は「3年」) をそのまま検索対象にする。
@@ -123,7 +123,7 @@ export function MemberRosterPage(): JSX.Element {
         ...PROFILE_DISPLAY_COLUMNS.map((c) => c.value(m)),
       ].some((v) => v.toLowerCase().includes(q)),
     );
-  }, [members, search, statusFilter, profileFilter]);
+  }, [members, identityUsers.data, search, statusFilter, profileFilter]);
 
   const STATUS_FILTER_OPTIONS: SelectOption<RosterStatusFilter>[] = ROSTER_FILTER_OPTIONS;
 
