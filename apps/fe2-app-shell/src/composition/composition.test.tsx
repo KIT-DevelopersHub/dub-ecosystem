@@ -94,6 +94,7 @@ describe("assembleFeatureModules", () => {
       "hr",
       "sponsor",
       "goals",
+      "accounting",
       "admin",
       "commander",
     ]);

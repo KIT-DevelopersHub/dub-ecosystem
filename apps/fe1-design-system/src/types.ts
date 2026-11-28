@@ -92,7 +92,9 @@ export type IconName =
   | "moon"
   | "monitor"
   // カラー設定 (fe2 設定メニュー → カラー設定ダイアログのエントリ). Additive, closed-union preserved.
-  | "palette";
+  | "palette"
+  // AI アシスタント (fe2 右側の AI パネルの開閉ボタン). Additive, closed-union preserved.
+  | "sparkles";
 
 export interface IconProps extends TestableProps {
   name: IconName;
@@ -199,6 +201,10 @@ export interface TextareaProps extends TestableProps {
   rows?: number;
   invalid?: boolean;
   disabled?: boolean;
+  /** 入力に合わせて高さを伸ばす (スクロールバーを出さない)。`rows` は最小の行数になる。 */
+  autoGrow?: boolean;
+  /** 改行を入れない 1 行の値 (Enter を無視・貼り付けた改行は空白に)。長い文は折り返して表示する。 */
+  singleLine?: boolean;
   "aria-describedby"?: string;
 }
 
@@ -215,6 +221,40 @@ export interface SelectProps<V extends string = string> extends TestableProps {
   placeholder?: string;
   invalid?: boolean;
   disabled?: boolean;
+  "aria-describedby"?: string;
+}
+
+/** One option of SearchableSelect. `group` puts it under a heading (e.g. メンバー / チーム). */
+export interface SearchableSelectOption<V extends string = string> {
+  value: V;
+  label: string;
+  /** Second line (e.g. an email). Also searched. */
+  description?: string;
+  group?: string;
+  disabled?: boolean;
+  testId?: string;
+}
+/** Searchable dropdown (search box at the top of the menu). Same value contract as Select. */
+export interface SearchableSelectProps<V extends string = string> extends TestableProps {
+  id: string;
+  value: V | null;
+  onChange: (value: V) => void;
+  options: SearchableSelectOption<V>[];
+  /** Trigger text when nothing is selected. */
+  placeholder?: string;
+  searchPlaceholder?: string;
+  /** Shown when the query matches nothing. */
+  emptyText?: string;
+  invalid?: boolean;
+  disabled?: boolean;
+  /** Options are still loading — the menu shows a skeleton. */
+  loading?: boolean;
+  /** Values floated to the top (under `pinnedLabel`) while the query is empty — e.g. recent picks. */
+  pinnedValues?: readonly V[];
+  pinnedLabel?: string;
+  /** Render at most this many matches. Default 100. */
+  maxResults?: number;
+  "aria-label"?: string;
   "aria-describedby"?: string;
 }
 
@@ -421,6 +461,7 @@ export interface MenuItem {
   testId?: string;
   tone?: "default" | "danger"; // "danger" styles destructive/離脱 actions (e.g. logout)
   dividerBefore?: boolean; // render a separator above this item (group離脱 actions)
+  badge?: boolean; // attention dot after the label (e.g. 未入力の項目がある アカウント設定)
 }
 export interface MenuProps extends TestableProps {
   label: string; // trigger button text (also the aria-label when iconOnly)
@@ -433,6 +474,10 @@ export interface MenuProps extends TestableProps {
   // AppLauncher/bell controls) instead of a labelled Button. `icon` is required
   // and `label` becomes the button's aria-label; the chevron is dropped.
   iconOnly?: boolean;
+  // Attention dot on the trigger (e.g. an item inside needs the user). `badgeLabel`
+  // is appended to the trigger's aria-label so the dot is not colour-only.
+  badge?: boolean;
+  badgeLabel?: string;
 }
 
 // Toast contract is authoritative here (凍結案 1-4-3). FE2 re-exports useToast;
@@ -461,6 +506,9 @@ export interface AppShellProps extends TestableProps {
   // sidebar in favour of the header AppLauncher, so mail/chat get the full canvas.
   sidebar?: ReactNode;
   header?: ReactNode;
+  // Optional right rail (FE2 の AI パネル). Rendered beside the main column at full
+  // height so opening it narrows the content instead of covering it. Omitted = no rail.
+  aside?: ReactNode;
   children: ReactNode; // main content
 }
 

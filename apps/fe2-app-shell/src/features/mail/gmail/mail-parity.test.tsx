@@ -31,6 +31,9 @@ function fakeApi(over: Partial<MailApi> = {}): MailApi {
     deleteDraft: vi.fn().mockResolvedValue(undefined),
     addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "a.txt", contentType: "text/plain", sizeBytes: 1 }),
     removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
+    listTemplates: vi.fn().mockResolvedValue([]),
+    saveTemplate: vi.fn().mockImplementation((id: string, t: object) => Promise.resolve({ ...t, id, updatedAt: "2026-01-01T00:00:00.000Z" })),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
     listSent: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     getSent: vi.fn(),
     downloadAttachment: vi.fn().mockResolvedValue(new Blob(["bytes"], { type: "application/pdf" })),
@@ -196,7 +199,10 @@ describe("read state", () => {
   });
 
   it("re-syncs when the server refuses, so the true state comes back", async () => {
-    const api = fakeApi({ setReadState: vi.fn().mockRejectedValue(new Error("500")) });
+    // A working counts(): with the default (rejecting) one a foreground sync re-asks the list for its total.
+    const view = { total: 0, unread: 0 };
+    const counts = vi.fn().mockResolvedValue({ inbox: view, mine: view, others: view, starred: view, archive: view, trash: view, blocked: view });
+    const api = fakeApi({ setReadState: vi.fn().mockRejectedValue(new Error("500")), counts });
     mount(api);
     const r = await row();
     fireEvent.mouseEnter(r);

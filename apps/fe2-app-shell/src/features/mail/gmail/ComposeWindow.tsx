@@ -18,7 +18,7 @@
 // on mount so a restored window is reachable to show the notice/beforeunload
 // guard again.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
-import { ConfirmDialog } from "@dub/ui";
+import { ConfirmDialog, Select } from "@dub/ui";
 import type { mail } from "@dub/types";
 import { EmailAddressSelect, type EmailToken, DraftRestoredNotice, useDraftAutosave } from "@dub/app-ui";
 import { newIdempotencyKey, parseRecipients } from "../mailApi.tsx";
@@ -33,7 +33,9 @@ import { addressCandidates } from "./mailModel.ts";
 import { uid, useMailStore, type ComposeState } from "./useMailStore.tsx";
 import { deliver } from "./sendMail.ts";
 import { SchedulePicker } from "./SchedulePicker.tsx";
+import { TemplatePicker } from "./TemplatePicker.tsx";
 import { useServerDraft } from "./useServerDraft.ts";
+import { sendAsLabel, swapSignature, useSendAs } from "./sendAs.ts";
 import { useDraggableWindow, useIsNarrowViewport } from "./useDraggableWindow.ts";
 
 /** localStorage key prefix for a floating compose window's draft — one per compose.id
@@ -71,6 +73,28 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
 
   const removeIcon = <MailIcon name="x" size={12} />;
   const patch = (p: Partial<ComposeState>): void => dispatch({ type: "UPDATE_COMPOSE", id: compose.id, patch: p });
+
+  // 差出人 (共用アドレス): offered on a new mail / forward when the user may send as a shared
+  // address. A reply keeps the server's choice (it answers as the address it was sent to).
+  const sendAs = useSendAs();
+  const fromChoices = !compose.inReplyTo && sendAs && sendAs.length > 1 ? sendAs : null;
+  const fromValue = compose.fromAddress ?? fromChoices?.[0]?.address ?? "";
+  const pickFrom = (address: string): void => {
+    if (!fromChoices) return;
+    const prev = fromChoices.find((o) => o.address === fromValue);
+    const next = fromChoices.find((o) => o.address === address);
+    if (!next) return;
+    const body = swapSignature(compose.body, compose.mode !== "new", prev?.signature, next.signature);
+    patch({ fromAddress: next.kind === "self" ? undefined : next.address, body });
+  };
+  // A From that is not the user's own Cc's them, fixed (the gateway forces it too).
+  const selfAddress = fromChoices?.find((o) => o.kind === "self")?.address;
+  const lockedCc = selfAddress && compose.fromAddress && !compose.inReplyTo && compose.fromAddress !== selfAddress ? [{ email: selfAddress }] : undefined;
+  const withLockedCc = (to: mail.MailAddress[], cc: mail.MailAddress[]): mail.MailAddress[] => {
+    const me = lockedCc?.[0]?.email;
+    if (!me || [...to, ...cc].some((a) => a.email.toLowerCase() === me)) return cc;
+    return [...cc, { email: me }];
+  };
 
   // Attachments live in the shared compose-attachment hook (Gmail parity): clip-pick OR
   // drag-and-drop, forbidden-type/size/count rules with explicit errors, per-file read
@@ -249,7 +273,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     // must not post the same mail twice.
     if (submitted.current) return;
     const to = parseRecipients(compose.to).recipients;
-    const cc = parseRecipients(compose.cc).recipients;
+    const cc = withLockedCc(to, parseRecipients(compose.cc).recipients);
     const bcc = parseRecipients(compose.bcc).recipients;
     const draftSettled = server.stop();
     draft.clear(); // restored from the PendingSend snapshot if the send fails
@@ -261,6 +285,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     if (bcc.length > 0) req.bcc = bcc;
     // Reply/replyAll carry the parent Message-Id so the gateway stamps In-Reply-To/References.
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
+    if (compose.fromAddress && !compose.inReplyTo) req.fromAddress = compose.fromAddress;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
     submitted.current = true;
@@ -274,7 +299,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
   // attachments — the gateway parks the files in R2 and attaches them at delivery.
   const scheduleSend = (when: Date): string | null => {
     const to = parseRecipients(compose.to).recipients;
-    const cc = parseRecipients(compose.cc).recipients;
+    const cc = withLockedCc(to, parseRecipients(compose.cc).recipients);
     const bcc = parseRecipients(compose.bcc).recipients;
     if (to.length === 0) return "宛先を入力してください";
     if (att.hasPending || seeding) return "添付ファイルを処理中です…";
@@ -287,6 +312,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
     if (cc.length > 0) req.cc = cc;
     if (bcc.length > 0) req.bcc = bcc;
     if (compose.inReplyTo) req.inReplyTo = compose.inReplyTo;
+    if (compose.fromAddress && !compose.inReplyTo) req.fromAddress = compose.fromAddress;
     const inputs = att.readyInputs();
     if (inputs.length > 0) req.attachments = inputs;
     const draftSettled = server.stop();
@@ -407,6 +433,22 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             onKeep={draft.acknowledgeRestored}
             testId="fe2-mail-compose-window-draft-notice"
           />
+          {fromChoices ? (
+            <div data-testid="fe2-mail-compose-from-row" style={fromRow}>
+              <label htmlFor={`fe2-mail-compose-from-${compose.id}`} style={fromLabel}>
+                差出人
+              </label>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Select
+                  id={`fe2-mail-compose-from-${compose.id}`}
+                  testId="fe2-mail-compose-from"
+                  value={fromValue}
+                  onChange={pickFrom}
+                  options={fromChoices.map((o) => ({ value: o.address, label: o.kind === "self" ? `${sendAsLabel(o)}（自分）` : sendAsLabel(o) }))}
+                />
+              </div>
+            </div>
+          ) : null}
           <EmailAddressSelect
             variant="flush"
             label="To"
@@ -419,7 +461,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             testId="fe2-mail-compose-to"
             extra={
               <span style={{ display: "flex", gap: 8 }}>
-                {!compose.showCc ? (
+                {!compose.showCc && !lockedCc ? (
                   <button type="button" onClick={() => patch({ showCc: true })} style={ccBtn}>Cc</button>
                 ) : null}
                 {!compose.showBcc ? (
@@ -428,8 +470,19 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
               </span>
             }
           />
-          {compose.showCc ? (
-            <EmailAddressSelect variant="flush" label="Cc" value={compose.cc} onChange={(v) => patch({ cc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-cc" />
+          {compose.showCc || lockedCc ? (
+            <EmailAddressSelect
+              variant="flush"
+              label="Cc"
+              value={compose.cc}
+              onChange={(v) => patch({ cc: v })}
+              parse={parseRecipients}
+              candidates={candidates}
+              removeIcon={removeIcon}
+              renderTokenIcon={recipientIcon}
+              testId="fe2-mail-compose-cc"
+              {...(lockedCc ? { lockedTokens: lockedCc, lockedHint: "差出人を自分以外にした時は、自分にも必ず届きます（外せません）" } : {})}
+            />
           ) : null}
           {compose.showBcc ? (
             <EmailAddressSelect variant="flush" label="Bcc" value={compose.bcc} onChange={(v) => patch({ bcc: v })} parse={parseRecipients} candidates={candidates} removeIcon={removeIcon} renderTokenIcon={recipientIcon} testId="fe2-mail-compose-bcc" />
@@ -487,6 +540,7 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
             >
               <MailIcon name="paperclip" size={18} />
             </button>
+            <TemplatePicker compose={{ subject: compose.subject, body: compose.body }} onInsert={(next) => patch(next)} disabled={seeding} />
             <input
               ref={fileInputRef}
               type="file"
@@ -532,4 +586,6 @@ export function ComposeWindow({ compose, offset }: { compose: ComposeState; offs
 const WINDOW_WIDTH = 500;
 const WINDOW_HEIGHT = 460;
 const hdrBtn: CSSProperties = { all: "unset", cursor: "pointer", display: "inline-flex", padding: 6, color: "var(--dub-color-surface-base)", opacity: 0.85 };
+const fromRow: CSSProperties = { display: "flex", alignItems: "center", gap: 12, padding: "6px 12px", borderBottom: "1px solid var(--dub-color-border-default)", flexShrink: 0 };
+const fromLabel: CSSProperties = { fontSize: "var(--dub-font-size-sm)", color: "var(--dub-color-text-muted)", flexShrink: 0 };
 const ccBtn: CSSProperties = { all: "unset", cursor: "pointer", fontSize: "var(--dub-font-size-xs)", color: "var(--dub-color-text-muted)", fontWeight: 600 };

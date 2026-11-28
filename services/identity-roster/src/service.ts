@@ -74,6 +74,10 @@ export class IdentityService {
    *  stops counting for all of them (role membership lists active users only). */
   private async notifyStatusChange(ctx: RequestCtx, orgId: string, userId: string, before: string, after: string): Promise<void> {
     if ((before === "active") === (after === "active")) return;
+    if (after === "active" && this.d.events) {
+      const u = await this.d.repo.getUser(userId);
+      if (u) await this.d.events.userActivated({ orgId, userId, email: u.email, displayName: u.displayName }, ctx);
+    }
     const roleIds = (await this.d.repo.listAssignmentsByUser(userId, orgId)).map((a) => a.roleId);
     await this.notifyMembership(ctx, orgId, userId, after === "active" ? "added" : "removed", roleIds, after === "active" ? "activate" : "deactivate");
   }
@@ -139,11 +143,13 @@ export class IdentityService {
     };
   }
 
-  private async loadEvalContext(userId: string, orgId: string): Promise<EvalContext> {
+  /** `onlyPermissions`: the caller only asks about these keys, so each role's bundle is loaded
+   *  narrowed to them (identical decisions for those keys, a fraction of the rows read). */
+  private async loadEvalContext(userId: string, orgId: string, onlyPermissions?: readonly string[]): Promise<EvalContext> {
     const user = await this.d.repo.getUser(userId);
     const assignments = user ? await this.d.repo.listAssignmentsByUser(userId, orgId) : [];
     // One roles+permissions read for all of the user's roles (was getRole + permissionsOf per role).
-    const roles = assignments.length > 0 ? await this.d.repo.getRolesByIds(assignments.map((a) => a.roleId)) : [];
+    const roles = assignments.length > 0 ? await this.d.repo.getRolesByIds(assignments.map((a) => a.roleId), onlyPermissions) : [];
     const roleById = new Map<string, RoleRow>(roles.map((r) => [r.id, r]));
     return { user, orgId, roleById, assignments };
   }
@@ -1008,7 +1014,7 @@ export class IdentityService {
     if (!Array.isArray(req.checks) || req.checks.length < 1 || req.checks.length > MAX_BATCH_CHECKS) {
       throw errors.validationFailed([{ field: "checks", reason: req.checks && req.checks.length > MAX_BATCH_CHECKS ? "too_long" : "required", message: `1..${MAX_BATCH_CHECKS}` }]);
     }
-    const ctx = await this.loadEvalContext(req.subjectUserId, req.orgId);
+    const ctx = await this.loadEvalContext(req.subjectUserId, req.orgId, req.checks.map((q) => q.permission).filter(isPermissionKey));
     const evaluatedAt = this.d.now();
     const decisions: identity.AuthzDecision[] = req.checks.map((q) => ({
       allowed: evaluate(ctx, q),
@@ -1040,6 +1046,13 @@ export class IdentityService {
     return { userId, orgId, permissions: effectiveOrgWidePermissions(ctx) };
   }
 
+  /** The subset of `keys` the user holds org-wide — `effectivePermissions` ∩ keys, but reading
+   *  only those keys' rows. Serves the in-process gate (src/in-process-granter.ts). */
+  async heldOrgWidePermissions(userId: string, orgId: string, keys: readonly string[]): Promise<identity.PermissionKey[]> {
+    const ctx = await this.loadEvalContext(userId, orgId, keys);
+    return effectiveOrgWidePermissions(ctx);
+  }
+
   /**
    * Who holds `permission` org-wide: the roles carrying it (with their member counts, as
    * ロール管理 shows them) and the distinct ACTIVE users reached through those roles.
@@ -1054,17 +1067,7 @@ export class IdentityService {
     if (!isPermissionKey(permission)) {
       throw errors.validationFailed([{ field: "key", reason: "not_in_catalog", message: permission }]);
     }
-    const counts = await this.d.repo.roleMemberCounts(orgId);
-    const roles: { id: string; name: string; memberCount: number }[] = [];
-    let cursor: string | undefined;
-    for (let page = 0; page < 50; page++) {
-      const res = await this.d.repo.listRoles(orgId, 100, cursor);
-      for (const r of res.items) {
-        if (r.permissions.includes(permission)) roles.push({ id: r.id, name: r.name, memberCount: counts.get(r.id) ?? 0 });
-      }
-      if (!res.nextCursor) break;
-      cursor = res.nextCursor;
-    }
+    const roles = await this.d.repo.rolesWithPermission(orgId, permission);
     const userIds = await this.d.repo.usersWithOrgWidePermission(orgId, permission);
     return { permission, roles, userIds: [...new Set(userIds)].sort() };
   }

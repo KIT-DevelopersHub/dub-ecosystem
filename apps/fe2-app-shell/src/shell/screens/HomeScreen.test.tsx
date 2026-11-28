@@ -44,6 +44,56 @@ const OK_HOME: gateway.BffHomeResponse = {
   partialErrors: [],
 };
 
+function makeApiWithEvents(home: gateway.BffHomeResponse, future: { id: string; title: string; startsAt: string | null }[]): ApiClient {
+  return {
+    bff: { home: () => Promise.resolve(home) },
+    request: (input: { path: string }) =>
+      input.path === "/api/v1/events"
+        ? Promise.resolve({ items: future.map((e) => ({ ...e, phase: "preparing" })), nextCursor: null })
+        : Promise.reject(new Error("not stubbed")),
+  } as unknown as ApiClient;
+}
+
+describe("HomeScreen 本戦 countdown (#858)", () => {
+  it("reads the date from the conference event", async () => {
+    const future = new Date(Date.now() + 10 * 86_400_000 - 60_000).toISOString();
+    render(wrap(<HomeScreen api={makeApiWithEvents(OK_HOME, [{ id: "c", title: "北陸ITカンファレンス 2027", startsAt: future }])} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("北陸ITカンファレンス 2027"));
+    expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("10");
+  });
+
+  it("shows the 未設定 empty state when no conference date is set or it has passed", async () => {
+    const home = { ...OK_HOME, upcomingEvents: [{ id: "c", title: "北陸ITカンファレンス", phase: "preparing" as const, startsAt: "2026-08-22T01:00:00+09:00" }] };
+    render(wrap(<HomeScreen api={makeApiWithEvents(home, [{ id: "u", title: "北陸ITカンファレンス 2028", startsAt: null }])} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("開催日が未設定です — イベントアプリで入力してください"));
+    expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("—");
+  });
+
+  it("ignores dated events that are not the conference", async () => {
+    const future = new Date(Date.now() + 5 * 86_400_000).toISOString();
+    render(wrap(<HomeScreen api={makeApiWithEvents(OK_HOME, [{ id: "m", title: "Meetup", startsAt: future }])} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("開催日が未設定です"));
+  });
+
+  it("says 取得できませんでした (not 未設定) when the events request fails", async () => {
+    render(wrap(<HomeScreen api={makeApi(OK_HOME)} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-countdown")).toHaveTextContent("取得できませんでした"));
+    expect(screen.getByTestId("fe2-kpi-countdown")).not.toHaveTextContent("未設定");
+  });
+});
+
+describe("HomeScreen load failure (#855)", () => {
+  it("shows an error + 再試行 when /bff/home itself fails, not a dashboard of 0s", async () => {
+    const { ApiError } = await import("../../lib/api-client.tsx");
+    const api = {
+      bff: { home: () => Promise.reject(new ApiError(429, { error: { code: "RATE_LIMITED", message: "m", retryable: true } })) },
+    } as unknown as ApiClient;
+    render(wrap(<HomeScreen api={api} />));
+    expect(await screen.findByTestId("fe2-home-error")).toHaveTextContent("ダッシュボードを読み込めませんでした");
+    expect(screen.queryByTestId("fe2-home-unread-count")).not.toBeInTheDocument();
+  });
+});
+
 describe("HomeScreen", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -84,6 +134,46 @@ describe("HomeScreen", () => {
     // The 無料枠 KPI degrades to a dash; the task card still renders its breakdown.
     expect(screen.getByTestId("fe2-kpi-freetier-value")).toHaveTextContent("—");
     expect(screen.getByTestId("fe2-home-task-segbar")).toBeInTheDocument();
+  });
+
+  it("shows unmeasured free-tier metrics as 取得できません, never 0% (#859)", async () => {
+    // usage-meter answered (no partial error) but could not measure any Cloudflare metric
+    // (e.g. staging without a Cloudflare analytics token) → every pct is null.
+    const home: gateway.BffHomeResponse = {
+      ...OK_HOME,
+      usageSummary: {
+        metrics: [
+          { key: "kv_reads_day", label: "KV 読み取り(日)", pct: null },
+          { key: "workers_requests_day", label: "Workers リクエスト(日)", pct: null },
+        ],
+        worst: null,
+      },
+    };
+    render(wrap(<HomeScreen api={makeApi(home)} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-usage-kv_reads_day-unavailable")).toBeInTheDocument());
+    expect(screen.getByTestId("fe2-usage-kv_reads_day")).toHaveTextContent("取得できません");
+    expect(screen.getByTestId("fe2-usage-kv_reads_day")).not.toHaveTextContent("%");
+    expect(screen.getByTestId("fe2-usage-workers_requests_day")).toHaveTextContent("取得できません");
+    expect(screen.getByTestId("fe2-kpi-freetier-value")).toHaveTextContent("—");
+    expect(screen.getByTestId("fe2-kpi-freetier-value")).not.toHaveTextContent("0%");
+    expect(screen.getByTestId("fe2-kpi-freetier")).toHaveTextContent("取得できません");
+  });
+
+  it("headlines the worst MEASURED metric when only some are unavailable", async () => {
+    const home: gateway.BffHomeResponse = {
+      ...OK_HOME,
+      usageSummary: {
+        metrics: [
+          { key: "kv_reads_day", label: "KV 読み取り(日)", pct: null },
+          { key: "emails_month", label: "メール送信(月)", pct: 12.0 },
+        ],
+        worst: { key: "emails_month", label: "メール送信(月)", pct: 12.0 },
+      },
+    };
+    render(wrap(<HomeScreen api={makeApi(home)} />));
+    await waitFor(() => expect(screen.getByTestId("fe2-kpi-freetier-value")).toHaveTextContent("12%"));
+    expect(screen.getByTestId("fe2-usage-emails_month")).toHaveTextContent("12.0%");
+    expect(screen.getByTestId("fe2-usage-kv_reads_day")).toHaveTextContent("取得できません");
   });
 
   it("shows the empty state when there are no unread notifications", async () => {

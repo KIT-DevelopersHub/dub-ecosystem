@@ -12,6 +12,7 @@ import type {
   LpTicketField,
   LpTicketOrder,
   LpTicketOrdersPage,
+  LpTicketRefundResponse,
   LpTicketTypeInput,
   LpTicketTypeSummary,
   LpTicketsState,
@@ -271,6 +272,48 @@ export function useApproveTicketOrder() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ordersKey, exact: true });
       void qc.invalidateQueries({ queryKey: stateKey, exact: true });
+    },
+  });
+}
+
+/**
+ * 返金（有料）/ 取消（0 円）。先に行を「返金済み」にし、失敗で戻す。
+ * Stripe の返金が未完了（refund_pending）ならサーバーの行（支払い済みのまま）に戻し、完了は webhook で反映されると伝える。
+ * 販売数・売上・クーポンの使用数はサーバー集計を取り直す。
+ */
+export function useRefundTicketOrder() {
+  const api = useLpApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const ordersKey = lpTicketOrdersKey();
+  const stateKey = lpTicketsKey();
+  return useMutation<LpTicketRefundResponse, unknown, { id: string }, { prev: OrderPages | undefined }>({
+    mutationFn: ({ id }) => api.refundTicketOrder(id),
+    onMutate: async ({ id }) => {
+      await qc.cancelQueries({ queryKey: ordersKey, exact: true });
+      const prev = qc.getQueryData<OrderPages>(ordersKey);
+      if (prev) qc.setQueryData<OrderPages>(ordersKey, replaceOrder(prev, id, (o) => ({ ...o, status: "refunded" })));
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ordersKey, ctx.prev);
+      toast.show({ kind: "error", title: messageFor(err, "返金・取消できませんでした") });
+    },
+    onSuccess: ({ result, order }) => {
+      qc.setQueryData<OrderPages>(ordersKey, (old) => (old ? replaceOrder(old, order.id, () => order) : old));
+      if (result === "refund_pending") {
+        toast.show({ kind: "info", title: `${order.buyerName} さんの返金を受け付けました。Stripe で完了すると「返金済み」になります` });
+      } else {
+        toast.show({
+          kind: "success",
+          title: result === "cancelled" ? `${order.buyerName} さんの申し込みを取り消しました` : `${order.buyerName} さんに返金しました`,
+        });
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ordersKey, exact: true });
+      void qc.invalidateQueries({ queryKey: stateKey, exact: true });
+      void qc.invalidateQueries({ queryKey: lpTicketCouponsKey(), exact: true });
     },
   });
 }

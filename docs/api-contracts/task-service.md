@@ -78,6 +78,7 @@ single-task endpoint.
 | `status` | `TaskStatus` | `todo` \| `in_progress` \| `blocked` \| `done` \| `cancelled` (closed set). |
 | `priority` | `TaskPriority` | `low` \| `medium` \| `high` \| `urgent`. Default `medium`. |
 | `assigneeId` | string \| null | A user id, or null (unassigned). |
+| `assigneeTeamId` | string \| null | Team assignee (担当チーム, #882). Exclusive with `assigneeId` — see §4.6. |
 | `dueAt` | ISODateTime \| null | ISO-8601 UTC. |
 | `origin` | `TaskOrigin` | `internal` \| `github`. See §5 protection. |
 | `archivedAt` | ISODateTime \| null | Non-null once soft-deleted. |
@@ -117,6 +118,7 @@ Cursor-paged (`_conventions.md` §5). Query params:
 |---|---|---|
 | `eventId` | string | Scopes to one event. **Required** unless listing your own tasks (see below). |
 | `assigneeId` | string | Filter by assignee. |
+| `assigneeTeamId` | string | Comma-separated team ids (#882). Alone = a team scope (like `teamId`, no `eventId` needed). With `assigneeId` the two are **ORed**: `?assigneeId=me&assigneeTeamId=t1,t2` = "assigned to me or to one of my teams" (the My Tasks 担当 lens). |
 | `status` | string | Repeatable and/or comma-separated: `?status=todo,blocked` or `?status=todo&status=blocked`. Each value must be a valid `TaskStatus`. |
 | `includeArchived` | `"true"` | Include soft-deleted tasks. Requires `task:delete`. |
 | `limit` | integer | Default 50, max 200. `>200` → `400 VALIDATION_FAILED` (`{ field: "limit", reason: "too_large" }`). |
@@ -404,3 +406,27 @@ status, editing the status-transition table or the protected-field set — requi
 bump or a frozen-decision review (`_conventions.md` §9). This file is the task-service
 component contract; `_conventions.md` + `auth.md` are the cross-cutting foundation it
 builds on.
+
+
+---
+
+## 4.6 担当チーム (team assignee, #882)
+
+A task's 担当 is a person **XOR** a team **XOR** nobody.
+
+- `assigneeTeamId` (create / PATCH) hands the task to a team. Setting a non-null
+  `assigneeTeamId` clears `assigneeId`, and setting a non-null `assigneeId` clears
+  `assigneeTeamId`. Both non-null in one request → `400 VALIDATION_FAILED`
+  (`{ field: "assigneeTeamId", reason: "assignee_conflict" }`).
+- It is **not** `teamId` (the owning team / gantt scope). A task owned by team A may be
+  handed to team B. Team existence is not checked server-side (same as `teamId`).
+- `task.assigned` is emitted on any assignee change and carries `assigneeTeamId` when set
+  (`assigneeId` is then `null`).
+- **My Tasks**: the 担当 lens lists `assigneeId = me` ∪ `assigneeTeamId ∈ my teams`
+  (the client reads `myTeamIds` from `GET /members/me/mention-teams` and sends both params).
+- **Notifications (decision)**: a team assignment is **not** fanned out to each member
+  (notification has no team roster binding, and a per-member burst on every team hand-off
+  is noise). Members see the task in My Tasks instead. Revisit if teams ask for it.
+- origin=github: handing a github task to a team would clear its protected person
+  assignee, so a user doing that gets `422 TASK_GITHUB_ORIGIN_READONLY`.
+- D1: `infra/d1/migrations/task/0006_task_assignee_team.sql` (additive column + index).

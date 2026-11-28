@@ -10,6 +10,7 @@ import type { MailProvider } from "./provider";
 import type { MailBlobStore } from "./attachments";
 import type { RetryOptions } from "./retry";
 import type { SponsorSyncPort } from "./sponsor-sync";
+import type { NewMailNotifyPort } from "./new-mail-notify";
 
 // The publish targets publishEvent(env, ...) needs: keyed by the frozen queue binding
 // names in @dub/events CONSUMER_QUEUE_BINDINGS. The string index signature keeps it
@@ -31,6 +32,11 @@ export interface SendDeps {
   audit: AuditEnv;
   orgId: string;
   fromAddress: string;
+  /** Display name for the From header (共用アドレス, 0027). Absent/null = the bare address. */
+  fromName?: string | null;
+  /** Shared address this send goes out as (共用アドレス, 0027), stored on the send log so the
+   *  recipient's reply also reaches the sender. Absent/null = not a shared-mailbox send. */
+  sharedMailbox?: string | null;
   ctx: RequestContext;
   /** Owner (Sent-folder account scope): the user who composed the send, or null for a
    *  pure system/automation send with no human on the call. Persisted on the send-log so
@@ -74,6 +80,8 @@ export interface InboundDeps {
   sharedAddress?: string | null;
   /** スポンサーのメール連携 (member-service への通知)。初めて保存したメールだけ知らせる。Absent => 知らせない。 */
   sponsor?: SponsorSyncPort;
+  /** 新着メールの通知 (#869, notification-service POST /notify)。Absent => 知らせない。 */
+  newMailNotify?: NewMailNotifyPort;
 }
 
 // Normalized inbound message parsed from a raw RFC822 message (Email Routing).

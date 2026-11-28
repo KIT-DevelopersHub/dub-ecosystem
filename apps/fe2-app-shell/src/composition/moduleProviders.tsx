@@ -114,8 +114,10 @@ export function NotificationProviders({ api, children }: { api: ApiClient; child
     const notifApi = createNotificationClient(api);
     return {
       api: notifApi,
+      // A link may carry a query (新着メール → /mail?open=<id>); the router takes it as `search`.
       navigate: (path: string) => {
-        void navigate({ to: path });
+        const [to, query] = path.split("?", 2);
+        void navigate(query ? { to: to!, search: Object.fromEntries(new URLSearchParams(query)) } : { to: path });
       },
       toast: {
         show: (kind, message) => toast.show({ kind, title: message }),

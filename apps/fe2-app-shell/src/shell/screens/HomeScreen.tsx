@@ -21,22 +21,25 @@ import { useSetCurrentEventId } from "@dub/fe3-event-action";
 import type { ApiClient } from "../../lib/api-client.tsx";
 import type { HomeWidget } from "../../modules/types.tsx";
 import { useBffHome } from "../../bff/useBffHome.tsx";
+import { useConferenceEvents } from "./dashboard/useConferenceEvents.ts";
 import { useRecentVisits } from "../useVisitTracker.tsx";
 import { saveSelectedEvent } from "../../features/gantt/selectedEventStore.ts";
 import { renderHomeWidget } from "./HomeWidgetFrame.tsx";
+import { LoadErrorState } from "../LoadErrorState.tsx";
 import { KpiTile } from "./dashboard/KpiTile.tsx";
 import { RegularMeetingsCard } from "./dashboard/RegularMeetingsCard.tsx";
 import { Meter, SegmentBar } from "./dashboard/DashboardCharts.tsx";
 import {
-  CONFERENCE,
   daysUntil,
   freeTierFromMetrics,
+  pickConference,
   statusMeta,
   taskCompletionPct,
   taskSegmentsFromCounts,
   taskTotal,
   usageStatusFromPct,
   worstFreeTier,
+  FREE_TIER_UNAVAILABLE_LABEL,
   type MetricStatus,
 } from "./dashboard/dashboardData.ts";
 
@@ -70,6 +73,7 @@ const APP_TILES: AppTile[] = [
   { id: "hr", label: "人事", desc: "面談・採用・オンボーディング", icon: "user", path: "/hr" },
   { id: "sponsor", label: "スポンサー", desc: "名刺と営業の進捗・目標をチームで共有", icon: "folder", path: "/sponsor" },
   { id: "goals", label: "目標管理", desc: "チームの月間目標と KPI の進捗", icon: "flag", path: "/goals" },
+  { id: "accounting", label: "会計", desc: "領収書の発行者情報（所在地・登録番号）", icon: "file", path: "/accounting" },
 ];
 
 /** One clickable app tile. Renders as an anchor (real href for accessibility /
@@ -118,6 +122,9 @@ function completionStatus(pct: number): MetricStatus {
   if (pct >= 30) return "warn";
   return "critical";
 }
+
+/** Shown when no upcoming 本戦 has a date (the source of truth is the イベントアプリ). */
+export const COUNTDOWN_UNSET_HINT = "開催日が未設定です — イベントアプリで入力してください";
 
 /** Countdown urgency: ≤3d 逼迫, ≤7d 注意, else 情報. */
 function countdownStatus(days: number): MetricStatus {
@@ -221,7 +228,7 @@ export function HomeScreen({
   // from the shell router (main.tsx wires router.navigate). Absent in unit tests.
   onNavigate?: (path: string) => void;
 }): JSX.Element {
-  const { data, isPending, errorFor, refetch } = useBffHome(api);
+  const { data, isPending, error: homeError, errorFor, refetch } = useBffHome(api);
   // Drives the same "current event" selection the header's イベント switcher
   // (GlobalEventSwitcher) and the Event app hub (/events → EventHubPage) read —
   // see openEvent() below.
@@ -237,6 +244,7 @@ export function HomeScreen({
   const membersError = errorFor("member-service");
 
   const events = data?.upcomingEvents ?? [];
+  const conferenceQuery = useConferenceEvents(api);
   const unread = data?.unreadCount ?? 0;
 
   // Live dashboard aggregates from /bff/home. A source in partialErrors leaves its
@@ -245,6 +253,9 @@ export function HomeScreen({
   const hasTasks = data?.taskSummary !== undefined && !taskError;
   const freeTier = usageError ? [] : freeTierFromMetrics(data?.usageSummary?.metrics ?? []);
   const worst = worstFreeTier(freeTier);
+  // Metrics exist but none could be measured (e.g. usage-meter has no Cloudflare token)
+  // → say so instead of showing "データがありません" or a fake 0%.
+  const freeTierUnavailable = freeTier.length > 0 && worst === null;
   const orgMembers = membersError ? undefined : data?.orgStats?.members;
   const orgTeams = membersError ? undefined : data?.orgStats?.teams;
 
@@ -281,7 +292,10 @@ export function HomeScreen({
   };
 
   // ── derived KPI values ────────────────────────────────────────────────────────
-  const days = daysUntil(CONFERENCE.dateISO);
+  // 本戦 = the conference event's startsAt, i.e. the 開始日時 entered in the イベントアプリ.
+  // No upcoming date → an explicit 未設定 tile (never a hardcoded fallback date).
+  const conference = pickConference([...events, ...conferenceQuery.events]);
+  const days = conference ? daysUntil(conference.dateISO) : null;
   const cdStatus = days === null ? "info" : countdownStatus(days);
   const completion = taskCompletionPct(segments);
   const compStatus = completionStatus(completion);
@@ -289,6 +303,16 @@ export function HomeScreen({
   const unreadStatus: MetricStatus = notificationsError ? "info" : unread > 0 ? "warn" : "good";
 
   const rootRef = useViewportFit<HTMLElement>();
+
+  // The whole /bff/home call failed: say so (+ 再試行) instead of a dashboard of 0s.
+  if (homeError) {
+    return (
+      <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">
+        <PageHeader testId="fe2-home-header" title="ダッシュボード" />
+        <LoadErrorState error={homeError} onRetry={refetch} subject="ダッシュボード" testId="fe2-home-error" />
+      </main>
+    );
+  }
 
   return (
     <main ref={rootRef} data-testid="fe2-home" className="fe2-home fe2-dashboard">
@@ -310,15 +334,30 @@ export function HomeScreen({
           </>
         ) : (
           <>
-            <KpiTile
-              testId="fe2-kpi-countdown"
-              icon="clock"
-              label="本戦まで"
-              value={days === null ? "—" : String(days)}
-              unit="日"
-              status={cdStatus}
-              hint={`${CONFERENCE.name}・${CONFERENCE.dateLabel}`}
-            />
+            {conference && days !== null ? (
+              <KpiTile
+                testId="fe2-kpi-countdown"
+                icon="clock"
+                label="本戦まで"
+                value={String(days)}
+                unit="日"
+                status={cdStatus}
+                hint={`${conference.name}・${conference.dateLabel}`}
+              />
+            ) : conferenceQuery.isPending ? (
+              <div className="fe2-kpi fe2-kpi-skeleton" data-testid="fe2-kpi-countdown-skeleton">
+                <SkeletonLoader lines={3} />
+              </div>
+            ) : (
+              <KpiTile
+                testId="fe2-kpi-countdown"
+                icon="clock"
+                label="本戦まで"
+                value="—"
+                status="info"
+                hint={conferenceQuery.isError ? "取得できませんでした" : COUNTDOWN_UNSET_HINT}
+              />
+            )}
             <KpiTile
               testId="fe2-kpi-tasks"
               icon="check-square"
@@ -335,7 +374,15 @@ export function HomeScreen({
               value={worst ? `${Math.round(worst.pct)}%` : "—"}
               status={worstStatus}
               {...(worst ? { meter: { pct: worst.pct, status: worstStatus, ariaLabel: "無料枠の最逼迫指標" } } : {})}
-              hint={usageError ? "取得できませんでした" : worst ? worst.label : "データがありません"}
+              hint={
+                usageError
+                  ? "取得できませんでした"
+                  : worst
+                    ? worst.label
+                    : freeTierUnavailable
+                      ? FREE_TIER_UNAVAILABLE_LABEL
+                      : "データがありません"
+              }
             />
             <KpiTile
               testId="fe2-kpi-unread"
@@ -401,6 +448,22 @@ export function HomeScreen({
             ) : (
               <ul className="fe2-usage-list">
                 {freeTier.map((m) => {
+                  if (m.pct === null) {
+                    return (
+                      <li key={m.key} className="fe2-usage-row" data-testid={`fe2-usage-${m.key}`}>
+                        <div className="fe2-usage-top">
+                          <span className="fe2-usage-label">{m.label}</span>
+                          <span
+                            className="fe2-usage-pct"
+                            data-testid={`fe2-usage-${m.key}-unavailable`}
+                            style={{ color: toCssVarName("color.gray.400") }}
+                          >
+                            {FREE_TIER_UNAVAILABLE_LABEL}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  }
                   const st = usageStatusFromPct(m.pct);
                   const meta = statusMeta(st);
                   return (

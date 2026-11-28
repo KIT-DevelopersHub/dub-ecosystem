@@ -195,7 +195,7 @@ export function NotificationManagePage(): ReactNode {
   return (
     <Stack gap={4} testId="fe5-manage-page">
       <PageHeader
-        title="Notification管理"
+        title="通知管理"
         description="管理者向けの通知を確認し、「メンバーへ公開」でメンバー全体に配信します。公開済みの通知は「公開解除」でメンバーから取り下げられます。"
         testId="fe5-manage-header"
       />

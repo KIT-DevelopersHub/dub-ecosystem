@@ -11,6 +11,7 @@ import { InMemoryHrFormRepo } from "../src/hr-form-repo";
 import { InMemoryHrInterviewRepo } from "../src/hr-interview-repo";
 import { InMemoryHrResultRepo } from "../src/hr-result-repo";
 import { InMemoryGoalRepo } from "../src/goal-repo";
+import { InMemoryAccountingRepo } from "../src/accounting-repo";
 import { InMemorySponsorRepo, type SponsorImageStore } from "../src/sponsor-repo";
 import { InMemorySponsorLeadRepo } from "../src/sponsor-lead-repo";
 import { InMemorySponsorMailRepo } from "../src/sponsor-mail-repo";
@@ -44,6 +45,8 @@ export function adminGrants(): Set<identity.PermissionKey> {
     ...policy.keysForAppLevel("sponsor", "edit"),
     ...policy.keysForAppLevel("goals", "edit"),
     "goals:read",
+    ...policy.keysForAppLevel("accounting", "edit"),
+    "accounting:read",
     "sponsor:read",
     "sponsor:write",
     "sponsor:admin",
@@ -94,6 +97,7 @@ export function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps & { repo: In
     newSponsorMailId: (prefix) => `${prefix}_${String(seq++).padStart(6, "0")}`,
     goalRepo: new InMemoryGoalRepo(),
     goalSources: { teamTasks: async () => [], lpVisitors: async () => 0 },
+    accountingRepo: new InMemoryAccountingRepo(),
     ...overrides,
   };
   return Object.assign(deps, { repo });

@@ -792,6 +792,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       couponId: null,
       paymentMethod: null,
       preview: false,
+      receiptName: null,
     };
     expect((await repo.insertOrderIfAvailable(orphan, new Map(), "2026-10-07T00:00:00.000Z")).ok).toBe(true);
     clock.set("2026-10-07T03:38:00.000Z");
@@ -1289,6 +1290,7 @@ describe.each<RepoKind>(["memory", "d1"])("lp tickets (%s repo)", (kind) => {
       couponId: c.id,
       paymentMethod: null,
       preview: false,
+      receiptName: null,
     });
     const since = "2026-10-07T00:00:00.000Z";
     expect(await repo.insertOrderIfAvailable(order("o1"), new Map(), since)).toEqual({ ok: true });

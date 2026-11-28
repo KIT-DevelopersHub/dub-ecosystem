@@ -14,6 +14,12 @@ import type { AuditEnv, EventPublishEnv, InboundDeps, SendDeps } from "./types";
 import type { ArchiveForwardDeps, GmailForwardDeps } from "./gmail-forward";
 import { userForwardDisabled, type UserForwardDeps } from "./user-forward";
 import { sponsorSyncDisabled, sponsorSyncVia, type SponsorSyncPort } from "./sponsor-sync";
+import { newMailNotifyDisabled, newMailNotifyVia, type NewMailNotifyPort } from "./new-mail-notify";
+
+/** 新着メールの通知先 (SVC_NOTIFICATION)。未結線か MAIL_NEW_MAIL_NOTIFY=off なら undefined。 */
+function newMailNotifyPort(env: Env): NewMailNotifyPort | undefined {
+  return env.SVC_NOTIFICATION && !newMailNotifyDisabled(env.MAIL_NEW_MAIL_NOTIFY) ? newMailNotifyVia(env.SVC_NOTIFICATION) : undefined;
+}
 
 /** スポンサーのメール連携の通知先 (SVC_MEMBER)。未結線か MAIL_SPONSOR_SYNC=off なら undefined。 */
 function sponsorPort(env: Env): SponsorSyncPort | undefined {
@@ -52,6 +58,8 @@ export function buildSendDeps(
   // Owner (Sent-folder account scope): the signed-in user's id for a user-facing send,
   // or null for a pure system/automation send.
   ownerUserId: string | null = null,
+  // 共用アドレス (0027): the From's display name and the shared address it goes out as.
+  identity: { fromName?: string | null; sharedMailbox?: string | null } = {},
 ): SendDeps {
   const blobs = buildBlobs(env);
   return {
@@ -61,6 +69,8 @@ export function buildSendDeps(
     audit: buildAuditEnv(env),
     orgId: common.DUB_DEFAULT_ORG_ID,
     fromAddress: fromOverride ?? env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
+    ...(identity.fromName ? { fromName: identity.fromName } : {}),
+    ...(identity.sharedMailbox ? { sharedMailbox: identity.sharedMailbox } : {}),
     ctx,
     ownerUserId,
     // Archive CC: env override, else the frozen default. An explicit empty string
@@ -91,6 +101,7 @@ export function buildInboundDeps(env: Env, ctx: RequestContext): InboundDeps {
     archiveAddress: env.MAIL_ARCHIVE_CC ?? DEFAULT_ARCHIVE_CC_ADDRESS,
     sharedAddress: env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS,
     ...spread("sponsor", sponsorPort(env)),
+    ...spread("newMailNotify", newMailNotifyPort(env)),
   };
 }
 

@@ -27,6 +27,8 @@ export interface ComposeState {
    *  SendMailRequest.inReplyTo so In-Reply-To/References are stamped and the thread links.
    *  Undefined for a brand-new compose or a forward. */
   inReplyTo?: string;
+  /** The From picked in compose (共用アドレス). Undefined = the default (the user's own address). */
+  fromAddress?: string;
   /** True when this window edits a draft already on the server. */
   persisted?: boolean;
   /** Stored files to pull in on open: a forward's originals, or a reopened draft's. */
@@ -196,6 +198,9 @@ export interface MailState {
   /** True while the list is (re)loading for a page change or the first load — shows the
    *  skeleton. Background refetches leave it false so the list never flickers. */
   listLoading: boolean;
+  /** The last list fetch failed (429/5xx/network). Cleared by the next HYDRATE. With no
+   *  threads loaded, ThreadList shows the error state + 再試行 — never "メールはありません" (#855). */
+  listError: unknown;
   searchResults: SearchState;
   /** The viewer's sender block list (GET /mail/blocks), newest first. Mutated optimistically
    *  by useSenderBlocks; `threads[].blocked` is re-derived from it on every change. */
@@ -260,11 +265,12 @@ export type MailAction =
   | { type: "HYDRATE_COUNTS"; counts: mail.MailFolderCounts }
   | { type: "PAGE_NEXT"; source: PageSource }
   | { type: "PAGE_PREV"; source: PageSource }
-  | { type: "LIST_FAILED" } // a list fetch failed: drop the skeleton, keep current threads
+  | { type: "LIST_FAILED"; error?: unknown } // a list fetch failed: drop the skeleton, keep current threads
   | { type: "SET_THREAD_MESSAGES"; threadId: string; messages: MailMsg[] } // fill full bodies on open
   | { type: "APPLY_FLAGS"; flags: { threadId: string; starred: boolean; archived: boolean; trashed: boolean; purged: boolean; noReplyAt?: string | null }[] } // restore server-persisted star/archive/trash/purge/返信不要
   | { type: "HYDRATE_SCHEDULED"; scheduled: mail.ScheduledSendListItem[] } // replace the Scheduled folder list
   | { type: "REQUEST_SYNC" } // ask the hydration hook to re-fetch (post-send)
+  | { type: "RETRY_LIST" } // 再試行 after a failed list load (skeleton + re-fetch)
   // ---- sender block list ----
   | { type: "HYDRATE_BLOCKS"; blocks: mail.MailSenderBlock[] }
   | { type: "BLOCKS_FAILED" }
@@ -395,7 +401,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
       };
     }
     case "LIST_FAILED":
-      return { ...state, listLoading: false };
+      return { ...state, listLoading: false, listError: action.error ?? new Error("list fetch failed") };
     case "SET_LABEL": {
       const viewChanged = serverViewOf(state.folder, action.label) !== serverViewOf(state.folder, state.labelFilter);
       return {
@@ -693,6 +699,7 @@ function baseReducer(state: MailState, action: MailAction): MailState {
             }
           : {}),
         listLoading: false,
+        listError: null,
         checked: new Set(),
         undo: null,
         openThreadId: threads.some((t) => t.id === state.openThreadId) ? state.openThreadId : null,
@@ -724,6 +731,9 @@ function baseReducer(state: MailState, action: MailAction): MailState {
       return { ...state, scheduled: action.scheduled };
     case "REQUEST_SYNC":
       return { ...state, syncNonce: state.syncNonce + 1 };
+    case "RETRY_LIST":
+      // 再試行 from the list error state: show the skeleton again, then re-fetch.
+      return { ...state, syncNonce: state.syncNonce + 1, listLoading: true, listError: null };
     case "HYDRATE_COUNTS": {
       const countsBaseline: Partial<Record<FolderId, number>> = {};
       for (const f of COUNTED_FOLDERS) countsBaseline[f] = clientUnread(state.threads, f);
@@ -766,6 +776,7 @@ export const initialMailState: MailState = {
   drafts: [],
   pager: { inbox: FIRST_PAGE, sent: FIRST_PAGE },
   listLoading: true,
+  listError: null,
   searchResults: NO_SEARCH,
   blocks: [],
   blocksStatus: "loading",

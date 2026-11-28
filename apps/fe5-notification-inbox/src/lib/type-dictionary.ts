@@ -19,16 +19,16 @@ export interface NotificationTypeDisplay {
 // Ordered most-generic-first; resolution picks the longest match regardless of
 // array order, but keeping it readable helps maintenance.
 export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
-  { pattern: "*", label: "Notification", icon: "info", group: "system" },
-  { pattern: "task.*", label: "Task", icon: "task", group: "task" },
-  { pattern: "task.assigned", label: "Task assigned to you", icon: "task", group: "task" },
-  { pattern: "task.due_soon", label: "Task due soon", icon: "alert", group: "task" },
-  { pattern: "task.completed", label: "Task completed", icon: "check", group: "task" },
-  { pattern: "event.*", label: "Event", icon: "calendar", group: "event" },
-  { pattern: "event.invited", label: "Event invitation", icon: "calendar", group: "event" },
-  { pattern: "event.reminder", label: "Event reminder", icon: "calendar", group: "event" },
-  { pattern: "system.*", label: "System", icon: "info", group: "system" },
-  { pattern: "system.announcement", label: "Announcement", icon: "megaphone", group: "system" },
+  { pattern: "*", label: "通知", icon: "info", group: "system" },
+  { pattern: "task.*", label: "タスク", icon: "task", group: "task" },
+  { pattern: "task.assigned", label: "タスクが割り当てられました", icon: "task", group: "task" },
+  { pattern: "task.due_soon", label: "タスクの期限が近づいています", icon: "alert", group: "task" },
+  { pattern: "task.completed", label: "タスクが完了しました", icon: "check", group: "task" },
+  { pattern: "event.*", label: "イベント", icon: "calendar", group: "event" },
+  { pattern: "event.invited", label: "イベントへの招待", icon: "calendar", group: "event" },
+  { pattern: "event.reminder", label: "イベントのリマインダー", icon: "calendar", group: "event" },
+  { pattern: "system.*", label: "システム", icon: "info", group: "system" },
+  { pattern: "system.announcement", label: "お知らせ", icon: "megaphone", group: "system" },
   // Admin-facing operational types (Notification管理). Grouped under システム so the genre
   // filter classifies them without a new group; explicit patterns give a readable label
   // instead of the raw machine name.
@@ -38,9 +38,15 @@ export const NOTIFICATION_TYPE_DISPLAY: NotificationTypeDisplay[] = [
   // NotificationGroup (the group enum stays task/event/system/release; チャット gets its
   // own CATEGORY/tab below instead) — grouped under システム here only for the preference
   // matrix's generic row label.
-  { pattern: "chat.*", label: "Chat", icon: "message-square", group: "system" },
+  { pattern: "chat.*", label: "チャット", icon: "message-square", group: "system" },
   { pattern: "chat.mention", label: "チャットでメンションされました", icon: "message-square", group: "system" },
   { pattern: "chat.dm", label: "ダイレクトメッセージ", icon: "message-square", group: "system" },
+  // 新着メール (mail-gateway -> POST /notify, mail.MAIL_RECEIVED_NOTIFY_TYPE).
+  { pattern: "mail.*", label: "メール", icon: "inbox", group: "system" },
+  { pattern: "mail.received", label: "新しいメールが届きました", icon: "inbox", group: "system" },
+  // LP管理 (lp-analytics). スポンサー資料請求 → app:sponsor:edit holders (lpSponsor.LP_SPONSOR_NOTIFY_TYPE).
+  { pattern: "lp.*", label: "LP管理", icon: "megaphone", group: "system" },
+  { pattern: "lp.sponsor_inquiry", label: "スポンサーの資料請求", icon: "megaphone", group: "system" },
   // Release notes (new-feature announcements). Its own group so it gets a dedicated
   // "新機能" filter chip and a distinct 🎉 badge in the inbox.
   { pattern: "release", label: "🎉 新機能", icon: "megaphone", group: "release" },
@@ -82,9 +88,9 @@ export function resolveTypeDisplay(type: NotificationType): ResolvedTypeDisplay 
 // The prefix-group filter options for the inbox filter bar (test 3).
 export const NOTIFICATION_GROUP_PREFIXES: { group: NotificationGroup; prefix: string; label: string }[] = [
   { group: "release", prefix: "release", label: "新機能" },
-  { group: "task", prefix: "task.", label: "Tasks" },
-  { group: "event", prefix: "event.", label: "Events" },
-  { group: "system", prefix: "system.", label: "System" },
+  { group: "task", prefix: "task.", label: "タスク" },
+  { group: "event", prefix: "event.", label: "イベント" },
+  { group: "system", prefix: "system.", label: "システム" },
 ];
 
 // Display order + section metadata for the grouped inbox. Notifications keep their
@@ -110,11 +116,12 @@ export const NOTIFICATION_GROUP_META: Record<NotificationGroup, { label: string;
 //   - フィードバック (feedback)  = feedback/feedback.*     (in-app feedback → admin notification, config.FEEDBACK_NOTIFY_TYPE)
 //   - メール (mail)              = mail.*                  (mail-gateway / mail-automation)
 //   - チャット (chat)            = chat.*                  (fe6-chat @mention / DM, via chat.message.created)
+//   - スポンサー (sponsor)       = lp.sponsor_inquiry      (LP の資料請求 → lp-analytics)
 //   - その他 (other)             = everything else (tasks/events/system/…): shown only under "All"
 // The taxonomy is intentionally separate from NotificationGroup above (which stays the
 // per-app display grouping used by preferences + the type dictionary). Categories are what the
 // user asked the tabs to reflect.
-export type NotificationCategory = "app_update" | "mail" | "participation" | "feedback" | "chat" | "other";
+export type NotificationCategory = "app_update" | "mail" | "participation" | "sponsor" | "feedback" | "chat" | "other";
 
 // The tab selector value: a concrete category or "all" (no filtering).
 export type CategoryFilter = NotificationCategory | "all";
@@ -124,6 +131,7 @@ export type CategoryFilter = NotificationCategory | "all";
 // First match wins; order the more specific prefixes first if they ever overlap.
 const CATEGORY_RULES: { match: string; category: NotificationCategory }[] = [
   { match: "member.participation", category: "participation" },
+  { match: "lp.sponsor_inquiry", category: "sponsor" },
   { match: "feedback", category: "feedback" },
   { match: "mail", category: "mail" },
   { match: "deploy", category: "app_update" },
@@ -153,6 +161,7 @@ export interface NotificationCategoryMeta {
 export const NOTIFICATION_CATEGORY_META: Record<NotificationCategory, NotificationCategoryMeta> = {
   app_update: { label: "アプリアップデート", icon: "megaphone", tone: "brand" },
   participation: { label: "参加届", icon: "user", tone: "success" },
+  sponsor: { label: "スポンサー", icon: "megaphone", tone: "warning" },
   feedback: { label: "フィードバック", icon: "message-square", tone: "warning" },
   mail: { label: "メール", icon: "at-sign", tone: "info" },
   chat: { label: "チャット", icon: "message-square", tone: "info" },
@@ -163,6 +172,7 @@ export const NOTIFICATION_CATEGORY_META: Record<NotificationCategory, Notificati
 export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
   "app_update",
   "participation",
+  "sponsor",
   "feedback",
   "mail",
   "chat",
@@ -174,6 +184,7 @@ export const NOTIFICATION_CATEGORY_ORDER: NotificationCategory[] = [
 export const NOTIFICATION_CATEGORY_TABS: { id: CategoryFilter; label: string }[] = [
   { id: "all", label: "すべて" },
   { id: "participation", label: NOTIFICATION_CATEGORY_META.participation.label },
+  { id: "sponsor", label: NOTIFICATION_CATEGORY_META.sponsor.label },
   { id: "app_update", label: NOTIFICATION_CATEGORY_META.app_update.label },
   { id: "feedback", label: NOTIFICATION_CATEGORY_META.feedback.label },
   { id: "mail", label: NOTIFICATION_CATEGORY_META.mail.label },

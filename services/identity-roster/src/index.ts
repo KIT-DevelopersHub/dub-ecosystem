@@ -6,7 +6,7 @@ import { common } from "@dub/types";
 import { createApp } from "./app";
 import { D1IdentityRepo } from "./repo/d1-repo";
 import { D1WebauthnRepo } from "./repo/webauthn";
-import { createAuditSink, createRoleMembershipSink, createSessionRevoker } from "./sinks";
+import { createAuditSink, createRoleMembershipSink, createDomainEventSink, createSessionRevoker } from "./sinks";
 import type { Env } from "./env";
 
 // Typed against the ambient Request/Response (shared by Hono + the Workers
@@ -26,6 +26,7 @@ const handler = {
         audit: createAuditSink(env),
         revoker: createSessionRevoker(env),
         membership: createRoleMembershipSink(env, { now: nowIso, newId }),
+        events: createDomainEventSink(env),
         now: nowIso,
         newId,
         defaultOrgId,

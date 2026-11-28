@@ -10,6 +10,7 @@ import {
   lpFieldAnswerProblem,
   type LpFieldType,
 } from "../../../packages/types/src/lp.ts";
+import { LP_TICKET_RECEIPT_NAME_MAX } from "../../../packages/types/src/lp-tickets.ts";
 import { escapeHtml } from "./html.ts";
 import { SHARE_OPEN_BUTTON, renderShareDialog } from "./share.ts";
 
@@ -72,6 +73,8 @@ export interface CheckoutInput {
   answers: Record<string, string>;
   /** Normalized code; only set on a coupon order (the server re-checks it). */
   couponCode?: string;
+  /** 領収書の宛名（任意）。空なら送らない。 */
+  receiptName?: string;
 }
 
 /** A code the server accepted (POST /lp/internal/tickets/coupon). Display only: the server decides. */
@@ -104,6 +107,8 @@ const COUPON_RAW_MAX = 40;
 /** Same normalization as lp-analytics (upper case, spaces / hyphens dropped). */
 const COUPON_CODE_RE = /^[A-Z0-9]{4,32}$/;
 export const COUPON_FIELD = "couponCode";
+/** 領収書の宛名（任意・有料の注文だけフォームに出す）。 */
+export const RECEIPT_FIELD = "receiptName";
 export const COUPON_MSG = {
   required: "クーポンコードを入力してください",
   invalid: "クーポンコードが正しくないか、利用できません",
@@ -330,6 +335,7 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig, c
   const values: FormValues = {
     name: (form.get("name") ?? "").trim(),
     email: (form.get("email") ?? "").trim(),
+    [RECEIPT_FIELD]: (form.get(RECEIPT_FIELD) ?? "").trim(),
   };
   for (const t of config.types) {
     const key = qtyInputName(t.id);
@@ -380,6 +386,9 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig, c
   else if (values.name.length > NAME_MAX) errors.name = `氏名は${NAME_MAX}文字以内で入力してください`;
   if (!values.email) errors.email = "メールアドレスを入力してください";
   else if (values.email.length > EMAIL_MAX || !EMAIL_RE.test(values.email)) errors.email = "メールアドレスの形式が正しくありません";
+  if (values[RECEIPT_FIELD]!.length > LP_TICKET_RECEIPT_NAME_MAX) {
+    errors[RECEIPT_FIELD] = `宛名は${LP_TICKET_RECEIPT_NAME_MAX}文字以内で入力してください`;
+  }
 
   const answers: Record<string, string> = {};
   for (const f of config.fields) {
@@ -402,6 +411,7 @@ export function parseCheckoutForm(form: URLSearchParams, config: TicketConfig, c
   if (Object.keys(errors).length > 0) return { ok: false, spam: false, values, errors };
   const input: CheckoutInput = { items, name: values.name, email: values.email, answers };
   if (coupon) input.couponCode = coupon.code;
+  if (values[RECEIPT_FIELD]) input.receiptName = values[RECEIPT_FIELD];
   return { ok: true, values, input };
 }
 
@@ -524,7 +534,7 @@ function detailKey(field: string, ids: Set<string>, typeIds: Set<string>): strin
     const id = field.slice("items.".length);
     return typeIds.has(id) ? qtyInputName(id) : "items";
   }
-  if (field === "name" || field === "email") return field;
+  if (field === "name" || field === "email" || field === RECEIPT_FIELD) return field;
   const id = field.startsWith("answers.") ? field.slice("answers.".length) : field;
   return ids.has(id) ? fieldInputName(id) : null;
 }
@@ -1261,6 +1271,18 @@ function fixedField(key: "name" | "email", label: string, values: FormValues, er
   );
 }
 
+/** 領収書の宛名（任意）。メールの領収書リンクから後で 1 回だけ入れることもできる。 */
+function receiptField(values: FormValues, errors: FormErrors): string {
+  const key = RECEIPT_FIELD;
+  const aria = errors[key] ? ` aria-invalid="true" aria-describedby="${key}-err"` : "";
+  return (
+    `<div class="field${errors[key] ? " bad" : ""}"><label class="lbl" for="${key}">領収書の宛名（任意）</label>` +
+    '<p class="hint">会社名など。購入後のメールにある領収書のページから、後で入れることもできます。</p>' +
+    `<input type="text" id="${key}" name="${key}" value="${escapeHtml(values[key] ?? "")}" maxlength="${LP_TICKET_RECEIPT_NAME_MAX}" placeholder="株式会社〇〇" autocomplete="organization"${aria}>` +
+    `${errMsg(errors, key)}</div>`
+  );
+}
+
 export interface TicketsPageOptions {
   config: TicketConfig;
   values?: FormValues;
@@ -1388,6 +1410,7 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
     '<section class="card rv"><div class="shead"><span class="no">02</span><h2>参加者情報</h2><p>確認メールをお送りします</p></div>' +
     `<div class="two">${fixedField("name", "氏名", values, errors)}${fixedField("email", "メールアドレス", values, errors)}</div>` +
     extra +
+    (hasPaid ? receiptField(values, errors) : "") +
     `<div class="hp" aria-hidden="true"><label>空欄のままにしてください<input type="text" name="${HONEYPOT}" tabindex="-1" autocomplete="off"></label></div>` +
     "</section></div>" +
     '<aside class="sum rv" aria-label="お申し込み内容"><div class="sum-card">' +

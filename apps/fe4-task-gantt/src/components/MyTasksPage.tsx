@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { common, identity, task, team } from "@dub/types";
 import { Button, useToast } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
-import { listTasks, createTask, updateTask, replaceDependencies, resolveUsers } from "../api/endpoints";
+import { listTasks, createTask, updateTask, replaceDependencies, resolveUsers, listMyTeamIds } from "../api/endpoints";
+import { isAssignedToMe } from "../domain/assignee";
 import type { ScopeTask } from "../domain/task-hierarchy";
 import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cache";
 import {
@@ -50,10 +51,24 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
   const [tasks, setTasks] = useState<task.Task[]>([]);
   const [users, setUsers] = useState<UserCache>(() => createUserCache(people));
   const [loading, setLoading] = useState(true);
+  // A failed load is an error state + 再試行, never "タスクがありません" (#855).
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<task.Task | null>(null);
   const reqSeq = useRef(0);
+  // Teams I belong to (#882): the 担当 lens also lists tasks handed to one of them.
+  // null = still loading (the first load waits so the list does not flash then grow).
+  const [myTeamIds, setMyTeamIds] = useState<common.TeamId[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    listMyTeamIds(client)
+      .then((ids) => alive && setMyTeamIds(ids))
+      .catch(() => alive && setMyTeamIds([])); // best-effort: fall back to person-only
+    return () => {
+      alive = false;
+    };
+  }, [client]);
 
   const teamNames = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
 
@@ -84,18 +99,22 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
 
   // fetch the lens' task set (one or two self-scoped queries, merged + deduped).
   const load = useCallback(async () => {
+    if (myTeamIds === null) return; // keep the skeleton until my teams are known
     const seq = ++reqSeq.current;
     setLoading(true);
     try {
-      const queries = lensQueries(currentUserId, lens);
+      const queries = lensQueries(currentUserId, lens, myTeamIds);
       const pages = await Promise.all(queries.map((q) => listTasks(client, q)));
       if (seq !== reqSeq.current) return; // a newer load superseded this one
       const merged = mergeTasks(...pages.map((p) => p.items));
       setTasks(merged);
+      setLoadError(null);
+    } catch (e) {
+      if (seq === reqSeq.current) setLoadError(e);
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [client, currentUserId, lens]);
+  }, [client, currentUserId, lens, myTeamIds]);
 
   useEffect(() => {
     void load();
@@ -157,6 +176,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
       status: draft.status,
       priority: draft.priority,
       assigneeId: draft.assigneeId,
+      assigneeTeamId: draft.assigneeTeamId ?? null,
       teamId: draft.teamId,
       parentTaskId: draft.parentTaskId,
       createdBy: currentUserId,
@@ -169,7 +189,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
       version: 1,
     };
     // only surface it in the current lens if it belongs there.
-    const belongs = lens === "all" || lens === "requested" || (lens === "assigned" && draft.assigneeId === currentUserId);
+    const belongs = lens === "all" || lens === "requested" || (lens === "assigned" && isAssignedToMe({ assigneeId: draft.assigneeId, assigneeTeamId: draft.assigneeTeamId ?? null }, currentUserId, myTeamIds ?? []));
     if (belongs) setTasks((prev) => [optimistic, ...prev]);
     try {
       const created = await createTask(client, {
@@ -178,6 +198,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         ...(draft.description !== null ? { description: draft.description } : {}),
         priority: draft.priority,
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
+        ...(draft.assigneeTeamId ? { assigneeTeamId: draft.assigneeTeamId } : {}),
         ...(draft.teamId ? { teamId: draft.teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
@@ -260,6 +281,8 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         users={users}
         teamNames={teamNames}
         loading={loading}
+        loadError={loadError}
+        onRetry={() => void load()}
         onSelect={setSelected}
         onComplete={onComplete}
         visibleCount={visibleCount}

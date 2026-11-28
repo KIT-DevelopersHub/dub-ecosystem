@@ -25,6 +25,7 @@ import {
 } from "./mailModel.ts";
 import { MailIcon } from "./icons.tsx";
 import { SenderAvatar } from "./SenderAvatar.tsx";
+import { LoadErrorState } from "../../../shell/LoadErrorState.tsx";
 import { PAGE_SIZE, canSelectAllInView, pageSourceOf, selectOrdered, useMailStore, type PagerState, type PageSource } from "./useMailStore.tsx";
 import { useBulkAction, useReadState } from "./useReadState.tsx";
 import { useSenderBlocks } from "./useSenderBlocks.tsx";
@@ -793,6 +794,16 @@ export function ThreadList(): JSX.Element {
           <div style={{ fontSize: "var(--dub-font-size-sm)" }}>
             {search.status === "failed" ? "検索に失敗しました。時間をおいてもう一度お試しください。" : `「${state.search.trim()}」に一致するメールはありません。`}
           </div>
+        </div>
+      ) : visible.length === 0 && state.listError ? (
+        // Load failed: an error + 再試行, not "メールはありません" (#855).
+        <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          <LoadErrorState
+            error={state.listError}
+            subject="メール"
+            onRetry={() => dispatch({ type: "RETRY_LIST" })}
+            testId="fe2-mail-list-error"
+          />
         </div>
       ) : visible.length === 0 ? (
         <div

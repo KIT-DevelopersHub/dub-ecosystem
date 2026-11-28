@@ -65,7 +65,7 @@ describe("route coverage (POLICY_TABLE <-> router)", () => {
 const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   // + 0020 / 0021 / 0023 / 0024 / 0027: chat:delete_channel, chat:slack_import, chat:emoji_import,
   // chat:manage_sections and chat:change_visibility are admin-only by default.
-  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:manage_sections", "chat:change_visibility"],
+  admin: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate", "chat:delete_channel", "chat:slack_import", "chat:emoji_import", "chat:times", "chat:manage_sections", "chat:change_visibility"],
   maintainer: ["app:chat:view", "app:chat:edit", "chat:create", "chat:moderate"],
   organizer: ["app:chat:view", "chat:create"],
   member: ["app:chat:view", "chat:create"],
@@ -93,7 +93,7 @@ function allowedRoutes(keys: identity.PermissionKey[]): string[] {
 // roles can reach this", which a matrix test should show rather than hide.
 const PUBLIC_ROUTES = ["GET /health"];
 // Reachable by ANY role: INTERNAL is a different axis from permissions entirely.
-const INTERNAL_ROUTES = ["POST /internal/system-messages"];
+const INTERNAL_ROUTES = ["POST /internal/events-async", "POST /internal/system-messages"];
 
 // チャット = 閲覧. Note POST /chat/channels/:id/read is here: it writes only the CALLER's own
 // read state, so a 閲覧 role must be able to clear its own unread badge.
@@ -142,6 +142,9 @@ const SLACK_IMPORT = [
 // Slack custom emoji import: 編集 + chat:emoji_import (admin only by default).
 const EMOJI_IMPORT = ["POST /chat/custom-emojis/slack-import"];
 
+// times channels in chat (#850): 編集 + chat:times (admin only by default).
+const TIMES = ["GET /chat/times/preview", "POST /chat/times/bulk"];
+
 // Org-wide sidebar sections: reading is in READS; organizing them rewrites every member's
 // sidebar, so 編集 + chat:manage_sections (admin only by default).
 const MANAGE_SECTIONS = [
@@ -153,7 +156,7 @@ const MANAGE_SECTIONS = [
 
 const READ_ONLY = [...PUBLIC_ROUTES, ...READS].sort();
 const EDITOR = [...PUBLIC_ROUTES, ...READS, ...WRITES, ...CREATE, ...MODERATE].sort();
-const FULL = [...EDITOR, ...DELETE_CHANNEL, ...CHANGE_VISIBILITY, ...SLACK_IMPORT, ...EMOJI_IMPORT, ...MANAGE_SECTIONS].sort();
+const FULL = [...EDITOR, ...DELETE_CHANNEL, ...CHANGE_VISIBILITY, ...SLACK_IMPORT, ...EMOJI_IMPORT, ...TIMES, ...MANAGE_SECTIONS].sort();
 
 describe("role x endpoint matrix (frozen)", () => {
   // Changing a rule changes one of these arrays — a visible diff in review.

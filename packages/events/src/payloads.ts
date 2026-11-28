@@ -29,7 +29,13 @@ export interface ActionArchivedPayload { actionId: ActionId; eventId: EventId }
 export interface TaskEventContext { taskId: TaskId; eventId?: EventId }
 export interface TaskCreatedPayload extends TaskEventContext {}
 export interface TaskUpdatedPayload extends TaskEventContext { changed: string[] }
-export interface TaskAssignedPayload extends TaskEventContext { assigneeId: UserId | null }
+export interface TaskAssignedPayload extends TaskEventContext {
+  assigneeId: UserId | null;
+  /** Team assignee (#882, additive). Set when the task was handed to a team; then
+   *  `assigneeId` is null. Notification does not fan this out per member (see
+   *  docs/api-contracts/task-service.md「担当チーム」). */
+  assigneeTeamId?: string | null;
+}
 export interface TaskStatusChangedPayload extends TaskEventContext { previousStatus: task.TaskStatus; status: task.TaskStatus }
 export interface TaskDueSoonPayload extends TaskEventContext { dueAt: ISODateTime }
 export interface TaskArchivedPayload extends TaskEventContext {}
@@ -66,6 +72,11 @@ export interface ChatMessageCreatedPayload {
 export interface ChatMessageDeletedPayload { channelId: ChannelId; messageId: MessageId }
 export interface ChatChannelCreatedPayload { channelId: ChannelId; name: string }
 export interface ChatMemberChangedPayload { channelId: ChannelId; userId: UserId; change: "added" | "removed" }
+
+// ---- identity ----
+// invited -> active (identity-roster provision / activateInvited). #850: chat-service creates
+// the member's times channel in Dub chat. Email is carried so the consumer needs no identity lookup.
+export interface IdentityUserActivatedPayload { userId: UserId; orgId: string; email: string; displayName: string }
 
 // ---- file / drive ----
 export interface FileRegisteredPayload { fileId: FileId }

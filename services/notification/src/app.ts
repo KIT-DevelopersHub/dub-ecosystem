@@ -221,6 +221,9 @@ export function createApp(options: CreateAppOptions = {}) {
           ...(parsed.recipientAudiences && parsed.recipientAudiences.length > 0
             ? { audiences: parsed.recipientAudiences }
             : {}),
+          ...(parsed.recipientPermissions && parsed.recipientPermissions.length > 0
+            ? { permissions: [...parsed.recipientPermissions] }
+            : {}),
         },
         title: parsed.title,
         body: parsed.body,

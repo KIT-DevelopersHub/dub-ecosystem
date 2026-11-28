@@ -192,7 +192,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
   interface Page<T> { items: T[] }
   const roles = (a: ReturnType<typeof api>) => a.request<Page<Role>>({ method: "GET", path: "/api/v1/identity/roles" });
 
-  it("serves the 3 agreed tiers admin / maintainer / member and the 97-key catalog", async () => {
+  it("serves the 3 agreed tiers admin / maintainer / member and the 102-key catalog", async () => {
     const a = api();
     const list = await roles(a);
     expect(list.items.filter((r) => r.isSystem).map((r) => r.name)).toEqual(["admin", "maintainer", "member"]);
@@ -201,7 +201,7 @@ describe("admin RBAC console (interactive roster surface)", () => {
     expect(lead?.name).toBe("統括");
     expect(lead?.mailVisibleRoleIds).toEqual(["role_maintainer", "role_member"]);
     const catalog = await a.request<unknown[]>({ method: "GET", path: "/api/v1/identity/permissions/catalog" });
-    expect(catalog).toHaveLength(97);
+    expect(catalog).toHaveLength(102);
   });
 
   it("① permission-matrix edit: PATCH a system role is rejected, a custom role persists", async () => {
@@ -603,6 +603,27 @@ describe("chat channel delete + org-wide sections (demo store)", () => {
   });
 });
 
+describe("times チャンネル (#850, Dub chat)", () => {
+  interface Item { userId: string; channelName: string | null; channelId: string | null; status: string }
+  it("previews without creating, then creates one owned chat channel per active member", async () => {
+    const a = api();
+    const p = await a.request<{ items: Item[]; recordedCount: number }>({ method: "GET", path: "/api/v1/chat/times/preview" });
+    expect(p.items.length).toBeGreaterThan(0);
+    expect(p.items.every((i) => i.status === "planned" && i.channelName?.startsWith("times-"))).toBe(true);
+    const listNames = async () => (await a.request<{ name: string }[]>({ method: "GET", path: "/api/v1/chat/channels" })).map((c) => c.name);
+    expect((await listNames()).some((n) => n.startsWith("times-"))).toBe(false);
+    let remaining = 1;
+    for (let i = 0; remaining > 0 && i < 20; i++) {
+      remaining = (await a.request<{ results: Item[]; remaining: number }>({ method: "POST", path: "/api/v1/chat/times/bulk", body: {} })).remaining;
+    }
+    const names = (await listNames()).filter((n) => n.startsWith("times-"));
+    expect(names).toHaveLength(p.items.length);
+    expect(new Set(names).size).toBe(names.length);
+    const again = await a.request<{ items: Item[]; recordedCount: number }>({ method: "GET", path: "/api/v1/chat/times/preview" });
+    expect(again).toMatchObject({ items: [], recordedCount: p.items.length });
+  });
+});
+
 describe("カスタム絵文字 (Slack emoji import demo)", () => {
   interface Emoji { name: string; aliasOf: string | null }
   interface Result { total: number; imported: number; nextAfter: string | null }
@@ -882,5 +903,28 @@ describe("参加届からのアカウント発行 (人事・members:onboard_mail
       const err = await onboard(api(), { localPart: "x" }).catch((e: unknown) => e);
       expect(ApiError.isApiError(err) && err.status).toBe(403);
     });
+  });
+});
+
+describe("event AI digest (#879, demo = production default: flag OFF)", () => {
+  it("GET returns the no-LLM preview with a 食い違い; run is 409; ask answers disabled", async () => {
+    const st = await api().request<{ enabled: boolean; digest: unknown; preview: { lines: { link: string }[]; discrepancies: unknown[] } }>({
+      method: "GET",
+      path: "/api/v1/events/evt_1/digest",
+    });
+    expect(st.enabled).toBe(false);
+    expect(st.digest).toBeNull();
+    expect(st.preview.lines.length).toBeGreaterThan(0);
+    expect(st.preview.lines.every((l) => l.link !== "")).toBe(true);
+    expect(st.preview.discrepancies.length).toBe(1);
+    await expect(api().request({ method: "POST", path: "/api/v1/events/evt_1/digest/run" })).rejects.toBeTruthy();
+    const ask = await api().request<{ status: string }>({ method: "POST", path: "/api/v1/events/evt_1/ask", body: { question: "会場は？" } });
+    expect(ask.status).toBe("disabled");
+  });
+
+  it("the demo conference event carries structured venue / capacity", async () => {
+    const ev = await api().request<{ venue: string; capacity: number }>({ method: "GET", path: "/api/v1/events/evt_1" });
+    expect(ev.venue).toContain("金沢工業大学");
+    expect(ev.capacity).toBe(300);
   });
 });

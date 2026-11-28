@@ -36,6 +36,7 @@ import {
   type TicketTypeDraft,
   type TicketTypeDraftErrors,
 } from "./lpTickets.ts";
+import { LpHelp, LpTitleWithHelp } from "./LpHelp.tsx";
 import styles from "./lp.module.css";
 
 const EMPTY_DRAFT: TicketTypeDraft = {
@@ -210,7 +211,18 @@ export function LpTicketTypesCard({
       testId="fe2-lp-ticket-types"
       header={
         <div className={styles.cardHeaderRow}>
-          <span className={styles.sectionTitle}>券種</span>
+          <LpTitleWithHelp
+            title="券種"
+            titleClassName={styles.sectionTitle}
+            help={
+              <LpHelp label="券種の説明" testId="fe2-lp-ticket-types-help">
+                <ul>
+                  <li>販売数・残り・定員はすべて「枚数」です（1 回の購入で複数枚・複数の券種を買えます）。</li>
+                  <li>対象日が同じ券種は購入ページでもまとめて表示されます。</li>
+                </ul>
+              </LpHelp>
+            }
+          />
           {canEdit ? (
             <Button
               variant="secondary"
@@ -234,9 +246,6 @@ export function LpTicketTypesCard({
         />
       ) : (
         <Stack gap={5} testId="fe2-lp-ticket-types-table">
-          <span className={styles.note}>
-            販売数・残り・定員はすべて「枚数」です（1 回の購入で複数枚・複数の券種を買えます）。対象日が同じ券種は購入ページでもまとめて表示されます。
-          </span>
           {showGroups ? (
             groups.map((g, i) => (
               <section key={g.dayLabel || "__none__"} className={styles.ticketDayGroup} data-testid={`fe2-lp-ticket-day-group-${i}`}>

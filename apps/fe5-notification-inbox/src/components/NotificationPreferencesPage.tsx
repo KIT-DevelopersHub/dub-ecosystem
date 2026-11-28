@@ -12,7 +12,7 @@ export function NotificationPreferencesPage(): ReactNode {
   return (
     <Stack gap={4} testId="fe5-prefs-page">
       <PageHeader
-        title="Notification settings"
+        title="通知設定"
         actions={
           <Button
             variant="primary"
@@ -21,7 +21,7 @@ export function NotificationPreferencesPage(): ReactNode {
             disabled={prefs.loading}
             testId="fe5-prefs-save"
           >
-            Save changes
+            変更を保存
           </Button>
         }
         testId="fe5-prefs-header"

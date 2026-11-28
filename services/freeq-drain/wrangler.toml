@@ -85,11 +85,19 @@ service = "mo3-mobile-bff"         # POST /internal/events-async (evt.mobile-bff
 binding = "SVC_MAIL_AUTOMATION"
 service = "dub-mail-automation"    # POST /internal/events-async (evt.mail-automation, 改善#5)
 
+[[services]]
+binding = "SVC_CHAT"
+service = "dub-chat-service"       # POST /internal/events-async (evt.chat, #850 times channel)
+
 # --- NO cron trigger. The drain is driven by the FreeqDrainDO alarm (above), which does not
 #     consume a slot on the Workers FREE plan's 5-cron account cap. ---
 
 [vars]
 ENVIRONMENT = "production"
+# #841: max outbox rows the drain claims per UTC day (D1 free tier = 100k rows written/day,
+# reset 09:00 JST). Normal traffic ~100-300/day; a backlog beyond this stays pending and
+# drains on later days. "0" pauses delivery.
+FREEQ_DAILY_ROW_CAP = "3000"
 
 [env.preview.vars]
 ENVIRONMENT = "preview"

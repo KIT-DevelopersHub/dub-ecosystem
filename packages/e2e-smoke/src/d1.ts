@@ -22,6 +22,10 @@ const sqlFile = (rel: string): string =>
 export function allSchemas(): string[] {
   return [
     EVENT_SCHEMA_MIGRATION.up,
+    // #879: the event repo now INSERT/SELECTs venue/capacity, and the digest tables ship
+    // alongside — apply the physical migrations so the seeded D1 matches production.
+    sqlFile("../../../infra/d1/migrations/event/0005_event_venue_capacity.sql"),
+    sqlFile("../../../infra/d1/migrations/event/0006_event_ai_digest.sql"),
     ...TASK_MIGRATIONS.map((m) => m.up),
     // #260: the gantt WBS/team columns (team_id/parent_id/wbs) live in a physical
     // migration that is intentionally NOT mirrored into TASK_MIGRATIONS (pinned to
@@ -32,6 +36,7 @@ export function allSchemas(): string[] {
     // PR-C: planned start (task_tasks.start_at). Same rationale as 0004 — the repo now
     // SELECT/INSERTs start_at, so the seeded smoke D1 must apply this physical migration.
     sqlFile("../../../infra/d1/migrations/task/0005_task_start_at.sql"),
+    sqlFile("../../../infra/d1/migrations/task/0006_task_assignee_team.sql"),
     sqlFile("../../../services/notification/db/0001_notif.sql"),
     sqlFile("../../../services/notification/db/0002_feedback.sql"),
     sqlFile("../../../services/notification/db/0003_freeq_outbox.sql"),
@@ -64,6 +69,24 @@ export function allSchemas(): string[] {
     sqlFile("../../../services/mail-gateway/db/0023_user_forward.sql"),
     sqlFile("../../../services/mail-gateway/db/0024_team_list.sql"),
     sqlFile("../../../services/mail-gateway/db/0025_drafts_inline_cid.sql"),
+    sqlFile("../../../services/mail-gateway/db/0026_mail_templates.sql"),
+    sqlFile("../../../services/mail-gateway/db/0027_shared_mailbox.sql"),
+    sqlFile("../../../services/mail-gateway/db/0028_send_log_status_created_idx.sql"),
+    sqlFile("../../../services/mail-gateway/db/0029_mail_monitor_state.sql"),
+  ];
+}
+
+/**
+ * The dedicated `dub-tickets` D1 (LP チケット: 注文・券・受付). Same rule as allSchemas(): one
+ * sqlFile line per physical migration in services/lp-tickets/db, in id order. A new migration there
+ * must be added here too (test/ticket-to-checkin.test.ts fails when one is missing).
+ */
+export function ticketsSchemas(): string[] {
+  return [
+    sqlFile("../../../services/lp-tickets/db/0001_init.sql"),
+    sqlFile("../../../services/lp-tickets/db/0002_delivery.sql"),
+    sqlFile("../../../services/lp-tickets/db/0003_checkin.sql"),
+    sqlFile("../../../services/lp-tickets/db/0004_refund_mail.sql"),
   ];
 }
 

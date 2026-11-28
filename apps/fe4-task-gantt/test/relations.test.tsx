@@ -26,7 +26,7 @@ const TEAMS: team.Team[] = [
 ];
 
 describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + ADR-0007 team scope)", () => {
-  it("selecting a team scopes the predecessor options to that team (across scopes)", () => {
+  it("choosing a team 担当 scopes the predecessor options to that team (across scopes)", () => {
     render(
       <TaskCreateModal
         open
@@ -38,8 +38,9 @@ describe("TaskCreateModal — 親タスク then 先行タスク (feature #1 + AD
         onCreate={async () => {}}
       />,
     );
-    // choose team A (the dependency boundary — parent no longer scopes deps)
-    fireEvent.change(screen.getByTestId("fe4-create-team"), { target: { value: "A" } });
+    // team A as 担当 → the task's team follows it (the dependency boundary)
+    fireEvent.click(screen.getByTestId("fe4-create-assignee-trigger"));
+    fireEvent.click(screen.getByTestId("fe4-create-assignee-option-team:A"));
     const depInput = screen.getByTestId("fe4-create-deps-input");
     fireEvent.focus(depInput);
     fireEvent.change(depInput, { target: { value: "子" } }); // matches 子1/子2/子D by title

@@ -79,6 +79,7 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
 | `FormError` | `role="alert"` のフォームエラー段落（空なら何も描画しない） | FE7 招待・付与・アドレス発行 |
 | `SearchableMenu` | 検索欄つきドロップダウン（候補の絞り込み・矢印キー/Enter・対象外は理由付き disabled・読み込み中はスケルトン） | FE2 ヘッダーのメンバー切り替え（代理表示） |
 | `ImpersonateConfirmDialog` | 「このメンバーとして表示」の確認ダイアログ（文言を一本化） | FE7 メール名簿・FE2 ヘッダー |
+| `AiSidePanel` | 右側の AI パネル（今見ているものの文脈・本文スロット・質問欄。送信関数は注入・AI が使えない間は入力を無効にして公開予定を案内・スマホは全画面シート） | FE2 ヘッダーの AI ボタン |
 
 ## 3. 新しいコンポーネントの足し方
 
@@ -143,6 +144,14 @@ DevHub (Dub) フロントエンド（FE2〜FE8）の設計・実装規約。**UI
   `renderOverlay?`／`onReorder(event)` を渡し、**並び順の確定ロジック（フラットな `arrayMove`か、
   ツリーの兄弟内移動か）は呼び出し側が `onReorder` で持つ**（例: `apps/fe4-task-gantt` のガントは
   兄弟スコープに写像して既存の順序 API に渡す）。ドラッグの見た目/操作は変えず、確定だけ差し替える。
+- **長い「1つ選ぶ」リスト（人・チームなど）はコアの検索つきドロップダウンで組む**: フォームの
+  担当者・メンバー選択のように候補が多い単一選択は `@dub/ui` の **`SearchableSelect`**
+  （メニュー最上部に検索欄・矢印/Home/End/Enter・`group` で見出し分け・`loading` でスケルトン・
+  該当なしの空表示・Modal 内でも切れない portal 表示・Esc で Modal ごと閉じない）を使う。
+  `value`/`onChange`/`options` の契約は `Select` と同じ。「最近選んだ人」を上に出すときは
+  **`useRecentSelections(storageKey)`**（localStorage・try/catch 済み・利用者ごとに key を分ける）の
+  `recent` を `pinnedValues` に渡し、確定時に `remember(value)` を呼ぶ。少数の固定択一
+  （ステータス・重要度など）は従来どおり `Select` / `SegmentedControl`。手本: FE4 `TaskFormFields` の担当。
 - **モーダル（ダイアログ）はコアで組む**: 画面に重ねて出す確認・フォーム・詳細などの
   モーダルは `@dub/ui` の **`Modal`**（汎用）・**`ConfirmDialog`**（破壊的操作の確認ゲート）・
   **`ErrorDialog`**（失敗理由の明示）・**`Drawer`**（横から出るパネル）を使う。**独自の

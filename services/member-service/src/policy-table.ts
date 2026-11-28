@@ -55,6 +55,10 @@ export const POLICY_TABLE = definePolicyTable({
   // identity:read of the poster would break @team mentions for ordinary members.
   "GET /members/internal/team-members": INTERNAL,
 
+  // チーム名, mail-gateway -> member-service. A team mailing list picked as the From goes out as
+  // `チーム名 <list@…>`; the scheduled drain asks with no user, so key-free like team-members.
+  "GET /members/internal/team-names": INTERNAL,
+
   // 名簿の Gmail 逆引き, drive-share-service -> member-service. カレンダー > ミーティングの招待先
   // (and the shared calendar ACL) are each member's 名簿 Gmail. Key-free like team-members: the
   // reconcile runs hourly as a system actor (no user), and the edge 404s /members/internal/.
@@ -238,6 +242,13 @@ export const POLICY_TABLE = definePolicyTable({
   "POST /members/sponsor/leads/:id/contact-emails": appLevel("sponsor", "edit", "sponsor:write"),
   "GET /members/sponsor/leads/:id/activity": appLevel("sponsor", "view", "sponsor:read"),
   "POST /members/sponsor/leads/mail-backfill": appLevel("sponsor", "edit", "sponsor:admin"),
+
+  // 会計: 団体の発行者情報。閲覧 + accounting:read で読める。変更は 編集 のみ (領収書に印字されるので詳細キーで絞らずアプリ単位)。
+  "GET /members/accounting/issuer": appLevel("accounting", "view", "accounting:read"),
+  "PUT /members/accounting/issuer": appLevel("accounting", "edit"),
+  // 領収書 (lp-tickets) が発行者欄を読む。購入者の公開ページ経由で呼ばれ、操作する本人がいないのでキー無しの INTERNAL
+  // (team-members と同じ理由)。返すのは領収書に印字する公開情報だけ。gateway は /members/internal/ を 404 にする。
+  "GET /members/internal/accounting/issuer": INTERNAL,
 
   // 目標管理。閲覧 + goals:read で全チームの進捗 (件数だけで個人情報は含まない) を読める。編集は 編集 のみ。
   "GET /members/goals": appLevel("goals", "view", "goals:read"),

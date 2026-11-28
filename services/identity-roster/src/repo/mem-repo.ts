@@ -107,11 +107,12 @@ export class MemIdentityRepo implements IdentityRepo {
     const r = this.roles.get(roleId);
     return r ? { ...r, permissions: [...r.permissions] } : null;
   }
-  async getRolesByIds(roleIds: readonly string[]): Promise<RoleRow[]> {
+  async getRolesByIds(roleIds: readonly string[], onlyPermissions?: readonly string[]): Promise<RoleRow[]> {
+    const only = onlyPermissions ? new Set(onlyPermissions) : null;
     const out: RoleRow[] = [];
     for (const id of new Set(roleIds)) {
       const r = this.roles.get(id);
-      if (r) out.push({ ...r, permissions: [...r.permissions] });
+      if (r) out.push({ ...r, permissions: only ? r.permissions.filter((p) => only.has(p)) : [...r.permissions] });
     }
     return out;
   }
@@ -161,6 +162,13 @@ export class MemIdentityRepo implements IdentityRepo {
       holders.add(a.userId);
     }
     return new Map([...perRole].map(([roleId, holders]) => [roleId, holders.size]));
+  }
+  async rolesWithPermission(orgId: string, permission: identity.PermissionKey) {
+    const counts = await this.roleMemberCounts(orgId);
+    return [...this.roles.values()]
+      .filter((r) => r.orgId === orgId && r.permissions.includes(permission))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map((r) => ({ id: r.id, name: r.name, memberCount: counts.get(r.id) ?? 0 }));
   }
 
   async listAssignmentsByUser(userId: string, orgId: string): Promise<AssignmentRow[]> {

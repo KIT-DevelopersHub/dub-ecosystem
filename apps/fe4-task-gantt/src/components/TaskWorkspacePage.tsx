@@ -18,6 +18,7 @@ import { createUserCache, ensureUsers, type UserCache } from "../domain/user-cac
 import { taskCapabilities } from "../domain/permissions";
 import { fieldErrorMap, errorSurface } from "../domain/error-mapping";
 import { buildProvisionalTask, provisionalGanttRow, provisionalTaskId } from "../domain/provisional";
+import { assigneeLabel } from "../domain/assignee";
 import { scopeTasksFromRows, directParentOf, teamOf } from "../domain/task-hierarchy";
 import { childProgressByParent } from "../domain/child-progress";
 import { rollupRowDates, scaleChildrenForParentResize } from "../domain/timeline-axis";
@@ -76,6 +77,7 @@ const FIELD_LABEL: Record<string, string> = {
   status: "ステータス",
   priority: "重要度",
   assigneeId: "担当",
+  assigneeTeamId: "担当",
   teamId: "チーム",
   parentTaskId: "親タスク",
   dependsOnIds: "先行タスク",
@@ -270,6 +272,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   // team accent colour per task (team-grouped rows), and a legend of the teams
   // actually present on the board — drives the row stripe / bar cap / legend chips.
   const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t] as const)), [teams]);
+  const teamNameById = useMemo(() => new Map(teams.map((t) => [t.id as string, t.name] as const)), [teams]);
   const teamColorById = useMemo(() => {
     const m = new Map<common.TaskId, string>();
     for (const t of tasks) {
@@ -294,11 +297,12 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
   const assigneeNameById = useMemo(() => {
     const m = new Map<common.TaskId, string>();
     for (const t of tasks) {
-      const name = t.assigneeId ? users.get(t.assigneeId)?.displayName : undefined;
+      // 担当 = 人 or チーム (#882): a team assignee shows as 「<チーム名>（チーム）」.
+      const name = assigneeLabel(t, (id) => users.get(id)?.displayName, teams);
       if (name) m.set(t.id, name);
     }
     return m;
-  }, [tasks, users]);
+  }, [tasks, users, teams]);
   // Displayed titles come from the store (task-service = the authority on title), so a
   // detail-panel rename reflects on every bar/row the SAME tick (optimistic) and is
   // reconciled by loadAll — never reverting to the gantt read model's denormalized,
@@ -773,6 +777,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         status: draft.status,
         priority: draft.priority,
         assigneeId: draft.assigneeId,
+        assigneeTeamId: draft.assigneeTeamId ?? null,
         teamId,
         startAt: draft.startAt,
         dueAt: draft.dueAt,
@@ -791,6 +796,7 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
         ...(draft.description ? { description: draft.description } : {}),
         ...(draft.priority ? { priority: draft.priority } : {}),
         ...(draft.assigneeId ? { assigneeId: draft.assigneeId } : {}),
+        ...(draft.assigneeTeamId ? { assigneeTeamId: draft.assigneeTeamId } : {}),
         ...(teamId ? { teamId } : {}),
         ...(draft.startAt ? { startAt: draft.startAt } : {}),
         ...(draft.dueAt ? { dueAt: draft.dueAt } : {}),
@@ -1319,6 +1325,8 @@ export function TaskWorkspacePage({ eventId, permissions, initialSelectedTaskId 
           onBulkMoveVertical={caps.canWrite ? onBulkMoveVertical : undefined}
           onBulkReorderTo={caps.canWrite ? onBulkReorderTo : undefined}
           canWrite={caps.canWrite}
+          openStateKey={eventId}
+          teamNameById={teamNameById}
         />
       )}
 

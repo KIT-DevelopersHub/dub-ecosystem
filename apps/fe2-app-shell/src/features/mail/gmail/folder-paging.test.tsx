@@ -71,6 +71,9 @@ function fakeServer(initialBlocks: string[]) {
     deleteDraft: vi.fn().mockResolvedValue(undefined),
     addDraftAttachment: vi.fn().mockResolvedValue({ id: "datt", filename: "f", contentType: "text/plain", sizeBytes: 1 }),
     removeDraftAttachment: vi.fn().mockResolvedValue(undefined),
+    listTemplates: vi.fn().mockResolvedValue([]),
+    saveTemplate: vi.fn().mockImplementation((id: string, t: object) => Promise.resolve({ ...t, id, updatedAt: "2026-01-01T00:00:00.000Z" })),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
     listBlocks: vi.fn().mockImplementation(() =>
       Promise.resolve([...blocks].map((v) => ({ value: v, kind: v.includes("@") ? "address" : "domain", createdAt: "2026-10-01T00:00:00.000Z" }))),
     ),

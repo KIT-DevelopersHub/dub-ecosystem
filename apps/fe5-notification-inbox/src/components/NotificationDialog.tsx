@@ -30,7 +30,7 @@ function NotificationDialogBody({ onClose }: { onClose: () => void }): ReactNode
       const target = resolveLinkUrl(itemLinkUrl(item));
       onClose();
       if (target) {
-        if (target.fellBack) toast.show("info", "Opening your inbox.");
+        if (target.fellBack) toast.show("info", "通知一覧を開きます。");
         navigate(target.path);
       }
     },

@@ -6,7 +6,8 @@
 //   <QueryClientProvider> + FE4 <ApiClientProvider> (adapting @dub/api-client) +
 //   <TaskRouteProvider> (currentUserId + effectivePermissions from FE2 auth).
 // Standalone dev keeps using App.tsx (dev-seed) — this module is the shell path.
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { useTaskRoute } from "./task-route-context";
 import type { common, identity, team } from "@dub/types";
 import { ToastProvider } from "@dub/ui";
 import { useApiClient } from "../api/client-context";
@@ -15,32 +16,9 @@ import { TaskWorkspacePage } from "../components/TaskWorkspacePage";
 import { MyTasksPage } from "../components/MyTasksPage";
 import styles from "../styles/app.module.css";
 
-export interface TaskRouteContextValue {
-  /** current user id (FE2 /me) — scopes the "マイタスク" route. */
-  currentUserId: common.UserId | null;
-  /** effectivePermissions from GET /api/v1/me (null = loading -> fail-closed). */
-  permissions: readonly identity.PermissionKey[] | null;
-  /** Active event id for the event-scoped gantt, supplied REACTIVELY by the shell
-   *  from the route param (`/events/:eventId/...`). Preferred over a one-off
-   *  window.location parse so the gantt reloads when the shell's global イベント
-   *  header switcher navigates the param (a same-route param change does NOT
-   *  re-run window.location parsing on its own). Optional/undefined for standalone
-   *  or the マイタスク route. */
-  eventId?: common.EventId | null;
-}
-
-const TaskRouteContext = createContext<TaskRouteContextValue>({
-  currentUserId: null,
-  permissions: null, // fail-closed default until the shell provides real values
-});
-
-export function TaskRouteProvider({ value, children }: { value: TaskRouteContextValue; children: ReactNode }) {
-  return <TaskRouteContext.Provider value={value}>{children}</TaskRouteContext.Provider>;
-}
-
-export function useTaskRoute(): TaskRouteContextValue {
-  return useContext(TaskRouteContext);
-}
+// Context lives in its own module so leaf components (AssigneePicker) can read the
+// current user without importing this route module (which imports the pages).
+export { TaskRouteProvider, useTaskRoute, type TaskRouteContextValue } from "./task-route-context";
 
 /** Derive the FE3-owned `:eventId` segment from `/events/:eventId/tasks*`. */
 export function parseEventIdFromPath(pathname: string): common.EventId | null {

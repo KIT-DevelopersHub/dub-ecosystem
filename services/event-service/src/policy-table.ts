@@ -79,6 +79,14 @@ export const POLICY_TABLE = definePolicyTable({
   "GET /events/:id/page-layout": appLevel("events", "view", "event:read"),
   "PUT /events/:id/page-layout": appLevel("events", "edit", "event:write"),
 
+  // ---- AI digest + Q&A (#879; feature flag default OFF) ----
+  // Reading the digest is a plain event read. 「今すぐ要約」 is admin-only: it fans out
+  // reads to other apps under the caller's identity and spends the Mac mini's time.
+  // Asking is a read too; the answer only cites sources the collectors may read.
+  "GET /events/:id/digest": appLevel("events", "view", "event:read"),
+  "POST /events/:id/digest/run": appLevel("events", "edit", "event:admin"),
+  "POST /events/:id/ask": appLevel("events", "view", "event:read"),
+
   // ---- actions under an event ----
   "GET /events/:id/actions": appLevel("events", "view", "event:read"),
   "POST /events/:id/actions": appLevel("events", "edit", "event:write"),

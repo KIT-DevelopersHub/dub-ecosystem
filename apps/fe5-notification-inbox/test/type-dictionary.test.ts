@@ -11,7 +11,7 @@ describe("resolveTypeDisplay", () => {
     expect(d.known).toBe(true);
     expect(d.icon).toBe("task");
     expect(d.group).toBe("task");
-    expect(d.label).toMatch(/assigned/i);
+    expect(d.label).toMatch(/割り当て/);
   });
 
   it("falls back to the group prefix label when only the prefix is known", () => {
@@ -44,6 +44,21 @@ describe("resolveTypeDisplay", () => {
 describe("resolveCategory (server type -> tab category)", () => {
   it("maps participation submissions to 参加届", () => {
     expect(resolveCategory("member.participation.submitted")).toBe("participation");
+  });
+
+  it("maps the LP sponsor inquiry to スポンサー with a Japanese label", () => {
+    expect(resolveCategory("lp.sponsor_inquiry")).toBe("sponsor");
+    expect(matchesCategoryFilter("lp.sponsor_inquiry", "sponsor")).toBe(true);
+    const d = resolveTypeDisplay("lp.sponsor_inquiry");
+    expect(d.known).toBe(true);
+    expect(d.label).toBe("スポンサーの資料請求");
+  });
+
+  it("labels mail.received in Japanese under メール (#869)", () => {
+    expect(resolveCategory("mail.received")).toBe("mail");
+    const d = resolveTypeDisplay("mail.received");
+    expect(d.known).toBe(true);
+    expect(d.label).toBe("新しいメールが届きました");
   });
 
   it("maps mail.* to メール", () => {

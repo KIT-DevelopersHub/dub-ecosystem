@@ -65,6 +65,15 @@ export const EVENT: AreaSpec = {
       hint: "{ data: { version, blocks[] }, version }。外側の version がロック用",
     }),
     read({
+      id: "events.digest.get",
+      area: "event",
+      path: "/events/:id/digest",
+      service: S,
+      requires: VIEW,
+      description: "イベントの AI のまとめ（出典リンクつき）と食い違いを取得する",
+      hint: "{ enabled, provider{id,status}, digest{lines[]{text,source,link}, discrepancies[], model, generatedAt} | null, preview?{lines[], discrepancies[], collectedAt} }。enabled=false は機能停止中(preview は LLM なしでイベント自身から集めた情報)",
+    }),
+    read({
       id: "events.actions.list",
       area: "event",
       path: "/events/:id/actions",
@@ -206,6 +215,8 @@ export const EVENT: AreaSpec = {
   excluded: [
     { service: S, route: "DELETE /events/:id", reason: "アーカイブすると元に戻す API が無く、紐づくタスクも一括でアーカイブされる（不可逆）" },
     { service: S, route: "DELETE /actions/:id", reason: "アーカイブすると元に戻す API が無い（不可逆）" },
+    { service: S, route: "POST /events/:id/digest/run", reason: "AI の要約を作り直す管理者の操作。他アプリを読みに行き Mac mini の時間を使うので、画面の「今すぐ要約」からだけ動かす" },
+    { service: S, route: "POST /events/:id/ask", reason: "AI への質問。個人情報に触れやすく、答えは画面で出典と一緒に読むものなので operate からは開けない" },
   ],
   pending: [],
   ownerOpenedIrreversible: {

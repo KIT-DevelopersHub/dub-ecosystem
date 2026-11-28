@@ -75,6 +75,15 @@ export interface MailApi {
   addDraftAttachment(id: string, input: mail.MailAttachmentInput): Promise<mail.MailAttachment>;
   /** Remove one file from a draft (mail:send). */
   removeDraftAttachment(id: string, attId: string): Promise<void>;
+  /** 定型文 (#867): the signed-in user's templates, newest first (mail:read). */
+  listTemplates(): Promise<mail.MailTemplate[]>;
+  /** Create or replace a template under a client-minted id (mail:send). */
+  saveTemplate(id: string, input: mail.MailTemplateInput): Promise<mail.MailTemplate>;
+  /** Idempotent (mail:send). */
+  deleteTemplate(id: string): Promise<void>;
+  /** 共用アドレス (0027): the Froms the user may pick, own address first (mail:read). Optional so
+   *  fakes without it simply offer no choice. */
+  listSendAs?(): Promise<mail.MailSendAsOption[]>;
   /** List sent messages, newest first (mail:read). */
   listSent(query?: SentQuery): Promise<Paginated<MailSentListItem>>;
   /** Fetch one sent message's full detail — body + recipients (mail:read). */
@@ -162,6 +171,12 @@ export function createMailApi(api: ApiClient): MailApi {
     removeDraftAttachment: async (id, attId) => {
       await api.request({ method: "DELETE", path: `${MAIL}/drafts/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attId)}` });
     },
+    listTemplates: () => api.request<mail.MailTemplateList>({ method: "GET", path: `${MAIL}/templates` }).then((r) => r.items),
+    saveTemplate: (id, input) => api.request<mail.MailTemplate, mail.MailTemplateInput>({ method: "PUT", path: `${MAIL}/templates/${encodeURIComponent(id)}`, body: input }),
+    deleteTemplate: async (id) => {
+      await api.request({ method: "DELETE", path: `${MAIL}/templates/${encodeURIComponent(id)}` });
+    },
+    listSendAs: () => api.request<mail.MailSendAsList>({ method: "GET", path: `${MAIL}/send-as` }).then((r) => r.items),
     listSent: (query) => {
       const q: Record<string, string | number | boolean | undefined> = {};
       if (query?.limit !== undefined) q.limit = query.limit;

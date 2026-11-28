@@ -85,6 +85,9 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
     "app:goals:view",
     "app:goals:edit",
     "goals:read",
+    "app:accounting:view",
+    "app:accounting:edit",
+    "accounting:read",
   ],
   maintainer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
   organizer: ["identity:read", "app:members:view", "members:roster_view", "app:participation:view"],
@@ -105,6 +108,10 @@ const ROLE_KEYS: Record<string, identity.PermissionKey[]> = {
   "goals-viewer": ["app:goals:view", "goals:read"],
   "goals-editor": ["app:goals:view", "app:goals:edit", "goals:read"],
   "goals-read-but-app-disabled": ["goals:read"],
+  // 会計: 閲覧だけ / 編集 / アプリ無効で accounting:read だけ持つ形。
+  "accounting-viewer": ["app:accounting:view", "accounting:read"],
+  "accounting-editor": ["app:accounting:view", "app:accounting:edit", "accounting:read"],
+  "accounting-read-but-app-disabled": ["accounting:read"],
 };
 
 /**
@@ -203,6 +210,9 @@ const SPONSOR_ADMIN = ["DELETE /members/sponsor/cards/:id", "DELETE /members/spo
 // 目標管理: 閲覧 (+goals:read) / 編集。
 const GOALS_READS = ["GET /members/goals"];
 const GOALS_WRITES = ["DELETE /members/goals/:teamId/:month", "PUT /members/goals/:teamId/:month"];
+// 会計: 閲覧 (+accounting:read) / 編集。
+const ACCOUNTING_READS = ["GET /members/accounting/issuer"];
+const ACCOUNTING_WRITES = ["PUT /members/accounting/issuer"];
 // チーム・役職ロールの一括付与: ロール管理と同格 (管理 編集 + identity:admin)。
 const ROLE_SYNC_ADMIN = ["POST /members/role-sync/backfill"];
 // Self-scoped, no key — every signed-in caller, by design (チームメンション).
@@ -210,11 +220,13 @@ const SELF = ["GET /members/me/mention-teams"];
 // Not reachable by ANY role: INTERNAL is a different axis from permissions entirely.
 const INTERNAL_ROUTES = [
   "GET /health",
+  "GET /members/internal/accounting/issuer",
   "GET /members/internal/hr/interview-form",
   "GET /members/internal/me/participation",
   "GET /members/internal/onboarding",
   "GET /members/internal/participation/:id/onboard-target",
   "GET /members/internal/team-members",
+  "GET /members/internal/team-names",
   "POST /members/internal/google-emails",
   "POST /members/internal/hr/applicants/:id/interview-result/claim",
   "POST /members/internal/hr/applicants/:id/interview-result/complete",
@@ -242,7 +254,7 @@ const FULL = [
   ...HR_ADMIN,
   ...SPONSOR_READS,
   ...SPONSOR_WRITES,
-  ...SPONSOR_ADMIN, ...GOALS_READS, ...GOALS_WRITES,
+  ...SPONSOR_ADMIN, ...GOALS_READS, ...GOALS_WRITES, ...ACCOUNTING_READS, ...ACCOUNTING_WRITES,
   ...ROLE_SYNC_ADMIN,
   ...SELF,
 ].sort();
@@ -283,6 +295,10 @@ describe("role x endpoint matrix (frozen)", () => {
     "goals-editor": [...GOALS_READS, ...GOALS_WRITES, ...SELF].sort(),
     // 詳細キーだけではアプリが無効のまま。
     "goals-read-but-app-disabled": [...SELF].sort(),
+    "accounting-viewer": [...ACCOUNTING_READS, ...SELF].sort(),
+    "accounting-editor": [...ACCOUNTING_READS, ...ACCOUNTING_WRITES, ...SELF].sort(),
+    // 詳細キーだけではアプリが無効のまま。
+    "accounting-read-but-app-disabled": [...SELF].sort(),
   };
 
   it("matches the committed matrix for every role", () => {

@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, lp as lpValues, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 
@@ -33,7 +33,8 @@ if (typeof window !== "undefined") (window as unknown as { __dubDemoHrMails?: ty
 import { createHrInterviewFormDemoStore } from "./demo-hr-interview-form.ts";
 import { createHrInterviewsDemoStore } from "./demo-hr-interviews.ts";
 import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
-import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
+import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, createTimesSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
+import { createDemoLpSponsorStore } from "./demo-lp-sponsor.ts";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -75,6 +76,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "chat:delete_channel",
   "chat:slack_import",
   "chat:emoji_import",
+  "chat:times",
   "chat:manage_sections",
   "chat:change_visibility",
   "audit:read",
@@ -86,6 +88,8 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "drive:settings_edit",
   // LP管理: 公開中の版の切り替え（「この版を公開」ボタンを demo で出すため）。
   "lp:publish",
+  // LP管理: チケットの当日受付（受付タブを demo で出すため）。
+  "lp:checkin",
   // カレンダー: 予定の登録（予定を作成ボタン）。
   "calendar:schedule_edit",
   // カレンダー > ミーティング: 定例の設定・編集・削除・招待同期まで demo で触れるように。
@@ -100,6 +104,7 @@ const DEMO_PERMISSIONS: identity.PermissionKey[] = [
   "sponsor:write",
   "sponsor:admin",
   "goals:read",
+  "accounting:read",
   // Per-app RBAC gate keys (added by the #270 launcher RBAC): every route is now gated
   // on its `app:<id>:view` key, so the "broad" demo admin must carry the view+edit key
   // for every app or the whole shell 403s. Sourced from the SoT manifest so new apps are
@@ -121,6 +126,34 @@ const EVENTS: event.EventSummary[] = [
   { id: "evt_3", title: "学生ハッカソン Hackit 秋", phase: "open", startsAt: "2026-09-01T00:00:00Z" },
 ];
 
+// AI のまとめ (#879) demo = the production default: flag OFF, no LLM. The server then
+// sends a preview built from the event's own rows (facts + actions) and deterministic
+// 食い違い; evt_1 carries one (the legacy free-text 定員 says 250).
+function demoDigestState(eventId: string): event.GetEventDigestResponse {
+  const ev = EVENT_DETAIL[eventId];
+  const link = `/events?eventId=${eventId}`;
+  const lines: event.EventDigestLine[] = ev
+    ? [
+        {
+          text: [`イベント「${ev.title}」`, ev.startsAt ? `開催日 ${ev.startsAt.slice(0, 10)}` : "", ev.venue ? `会場 ${ev.venue}` : "", typeof ev.capacity === "number" ? `定員 ${ev.capacity}人` : ""]
+            .filter((p) => p !== "")
+            .join("・"),
+          source: "event",
+          link,
+        },
+        ...ev.actions.map((a) => ({ text: `アクション「${a.title}」`, source: "actions" as const, link: `/events/${eventId}` })),
+      ]
+    : [];
+  const discrepancies: event.EventDigestDiscrepancy[] =
+    eventId === "evt_1" ? [{ field: "capacity", eventValue: "300", sourceValue: "250", source: "event", link }] : [];
+  return {
+    enabled: false,
+    provider: { id: "offline", status: "disabled" },
+    digest: null,
+    preview: { lines, discrepancies, collectedAt: isoNow() },
+  };
+}
+
 const EVENT_DETAIL: Record<string, event.EventDetail> = {
   evt_1: {
     version: 3,
@@ -131,6 +164,8 @@ const EVENT_DETAIL: Record<string, event.EventDetail> = {
     phase: "preparing",
     startsAt: "2026-08-05T01:00:00Z",
     endsAt: "2026-08-05T09:00:00Z",
+    venue: "金沢工業大学 扇が丘キャンパス",
+    capacity: 300,
     archivedAt: null,
     createdAt: "2026-05-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -477,9 +512,11 @@ function saveDemoSectionLayout(next: DemoSectionLayout): void {
 }
 
 // ── notifications ─────────────────────────────────────────────────────────────
+// 通知設定の上書き (in-session; a reload resets like the rest of the demo).
+const DEMO_NOTIF_PREFS = new Map<string, notification.PreferenceEntry>();
 const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_1", type: "task.assigned", title: "タスクが割り当てられました", body: "「登壇者スケジュール確定」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T02:00:00Z", resourceType: "task", resourceId: "tsk_1" },
-  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail", resourceId: "msg_1" },
+  { id: "ntf_2", type: "mail.received", title: "新着メール", body: "山田 花子さんからメールが届いています。", readAt: null, createdAt: "2026-08-02T01:00:00Z", resourceType: "mail_message", resourceId: "msg_1" },
   { id: "ntf_3", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「北陸ITカンファレンス 2026」が preparing になりました。", readAt: "2026-08-01T00:00:00Z", createdAt: "2026-08-01T00:00:00Z", resourceType: "event", resourceId: "evt_1" },
   // チャット (chat.mention / chat.dm, via chat.message.created -> notification, in_app
   // default-ON exception). resourceType "channel" deep-links into fe6-chat's own route
@@ -491,13 +528,13 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_6", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「会場レイアウト確定」の期限は明日です。", readAt: null, createdAt: "2026-08-02T00:50:00Z", resourceType: "task", resourceId: "tsk_2" },
   { id: "ntf_7", type: "chat.mention", title: "メンションされました", body: "#project-alpha で受付ボランティアの集合時間についてメンションされました。", readAt: null, createdAt: "2026-08-02T00:40:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_8", type: "task.assigned", title: "タスクが割り当てられました", body: "「スポンサー資料の最終確認」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-02T00:30:00Z", resourceType: "task", resourceId: "tsk_3" },
-  { id: "ntf_9", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんから登壇資料についてのメールが届いています。", readAt: null, createdAt: "2026-08-02T00:20:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_9", type: "mail.received", title: "新着メール", body: "佐藤 太郎さんから登壇資料についてのメールが届いています。", readAt: null, createdAt: "2026-08-02T00:20:00Z", resourceType: "mail_message", resourceId: "msg_2" },
   { id: "ntf_10", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」の運営ミーティングは本日 19:00 からです。", readAt: null, createdAt: "2026-08-02T00:10:00Z", resourceType: "event", resourceId: "evt_1" },
   { id: "ntf_11", type: "task.completed", title: "タスクが完了しました", body: "「受付名簿の作成」が完了になりました。", readAt: null, createdAt: "2026-08-02T00:00:00Z", resourceType: "task", resourceId: "tsk_4" },
   { id: "ntf_12", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから懇親会の会場についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T23:50:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_13", type: "event.invited", title: "イベントに招待されました", body: "「運営定例ミーティング」に招待されました。", readAt: null, createdAt: "2026-08-01T23:40:00Z", resourceType: "event", resourceId: "evt_2" },
   { id: "ntf_14", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「当日タイムテーブル作成」の期限は 3 日後です。", readAt: null, createdAt: "2026-08-01T23:30:00Z", resourceType: "task", resourceId: "tsk_5" },
-  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "会場担当者から搬入時間の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T23:20:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_15", type: "mail.received", title: "新着メール", body: "会場担当者から搬入時間の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T23:20:00Z", resourceType: "mail_message", resourceId: "msg_3" },
   { id: "ntf_16", type: "chat.mention", title: "メンションされました", body: "#project-alpha でノベルティの発注数についてメンションされました。", readAt: null, createdAt: "2026-08-01T23:10:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_17", type: "task.assigned", title: "タスクが割り当てられました", body: "「アンケートフォーム作成」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T23:00:00Z", resourceType: "task", resourceId: "tsk_10" },
   { id: "ntf_18", type: "event.phase_changed", title: "イベントのフェーズが変更されました", body: "「運営定例ミーティング」が planning になりました。", readAt: null, createdAt: "2026-08-01T22:50:00Z", resourceType: "event", resourceId: "evt_2" },
@@ -505,12 +542,12 @@ const NOTIFICATIONS: notification.InboxItem[] = [
   { id: "ntf_20", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから当日の集合場所についてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:30:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_21", type: "task.due_soon", title: "タスクの期限が近づいています", body: "「司会台本の作成」の期限は明日です。", readAt: null, createdAt: "2026-08-01T22:20:00Z", resourceType: "task", resourceId: "tsk_6" },
   { id: "ntf_22", type: "chat.mention", title: "メンションされました", body: "#project-alpha で懇親会の参加人数についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:18:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
-  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "スポンサー企業から協賛内容の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T22:16:00Z", resourceType: "mail", resourceId: "msg_2" },
+  { id: "ntf_23", type: "mail.received", title: "新着メール", body: "スポンサー企業から協賛内容の確認メールが届いています。", readAt: null, createdAt: "2026-08-01T22:16:00Z", resourceType: "mail_message", resourceId: "msg_2" },
   { id: "ntf_24", type: "event.reminder", title: "イベントのリマインダー", body: "「北陸ITカンファレンス 2026」のリハーサルは明日 10:00 からです。", readAt: null, createdAt: "2026-08-01T22:14:00Z", resourceType: "event", resourceId: "evt_1" },
   { id: "ntf_25", type: "task.assigned", title: "タスクが割り当てられました", body: "「名札の印刷」があなたに割り当てられました。", readAt: null, createdAt: "2026-08-01T22:12:00Z", resourceType: "task", resourceId: "tsk_12" },
   { id: "ntf_26", type: "chat.dm", title: "ダイレクトメッセージが届きました", body: "山田さんから備品リストについてメッセージが届きました。", readAt: null, createdAt: "2026-08-01T22:10:00Z", resourceType: "channel", resourceId: "chan_demo_dm_yamada" },
   { id: "ntf_27", type: "task.completed", title: "タスクが完了しました", body: "「会場の下見」が完了になりました。", readAt: null, createdAt: "2026-08-01T22:08:00Z", resourceType: "task", resourceId: "tsk_13" },
-  { id: "ntf_28", type: "mail.received", title: "新着メール", body: "登壇者からスライド提出のメールが届いています。", readAt: null, createdAt: "2026-08-01T22:06:00Z", resourceType: "mail", resourceId: "msg_3" },
+  { id: "ntf_28", type: "mail.received", title: "新着メール", body: "登壇者からスライド提出のメールが届いています。", readAt: null, createdAt: "2026-08-01T22:06:00Z", resourceType: "mail_message", resourceId: "msg_3" },
   { id: "ntf_29", type: "chat.mention", title: "メンションされました", body: "#project-alpha で配信機材の手配についてメンションされました。", readAt: null, createdAt: "2026-08-01T22:04:00Z", resourceType: "channel", resourceId: "chan_demo_alpha" },
   { id: "ntf_30", type: "event.invited", title: "イベントに招待されました", body: "「スタッフ打ち上げ」に招待されました。", readAt: null, createdAt: "2026-08-01T22:02:00Z", resourceType: "event", resourceId: "evt_2" },
 ];
@@ -826,6 +863,12 @@ const LEAD_INBOX: mail.MailMessageDetail[] = [
 // behavior). Stored on the sent row like the gateway, but hidden from the read responses
 // (hideArchiveCc) exactly as the gateway does — it is an internal mailbox, not a person.
 const DEMO_ARCHIVE_CC = "archive@developershub.jp";
+/** 共用アドレス the demo offers in compose (mirrors the 0027 seed for info@). */
+const DEMO_SEND_AS: mail.MailSendAsOption[] = [
+  { address: "info@developershub.jp", kind: "shared", displayName: "北陸ITカンファレンス 実行委員会", signature: "--\n北陸ITカンファレンス 実行委員会\ninfo@developershub.jp" },
+  // A team mailing list the demo account belongs to (0024), named and signed after the team.
+  { address: "design@developershub.jp", kind: "team_list", displayName: "デザインチーム", signature: "--\nデザインチーム\ndesign@developershub.jp" },
+];
 
 function hideArchiveCc<T extends { cc?: mail.MailAddress[] }>(item: T): T {
   if (!item.cc) return item;
@@ -1233,6 +1276,7 @@ function createMailStore() {
   // submit returns the first send's ack instead of appending a second Sent row.
   const idemAcks = new Map<string, mail.SendMailResponse>();
   const draftsByAccount: Record<string, mail.MailDraft[]> = {};
+  const templatesByAccount: Record<string, mail.MailTemplate[]> = {};
 
   function handle(method: string, pathname: string, url: URL, body: unknown, headers?: Headers): Response | null {
     // attachment download (messages|sent): stream the stored blob as a file.
@@ -1380,6 +1424,28 @@ function createMailStore() {
       }
       return json({ updated: hit.length });
     }
+    // 共用アドレス (0027): every demo account may send as info@ (運営メンバー全員, like the real seed).
+    if (pathname === "/api/v1/mail/send-as" && method === "GET") {
+      return json({ items: [{ address: me.email.toLowerCase(), kind: "self" }, ...DEMO_SEND_AS.filter((o) => o.address !== me.email.toLowerCase())] } satisfies mail.MailSendAsList);
+    }
+    // 定型文 (#867): per-account, in-session; one sample so the picker is not empty in the demo.
+    {
+      const list = (templatesByAccount[me.id] ??= [
+        { id: "tpl-demo-interview", title: "加入面談のご案内", subject: "【DevelopersHub】加入面談の日程について", body: "こんにちは、DevelopersHub 運営です。\n\n加入面談の候補日をお送りします。ご都合のよい日時をご返信ください。\n\nよろしくお願いいたします。", updatedAt: "2026-08-01T00:00:00.000Z" },
+      ]);
+      if (pathname === "/api/v1/mail/templates" && method === "GET") return json({ items: [...list].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) } satisfies mail.MailTemplateList);
+      const one = /^\/api\/v1\/mail\/templates\/([^/]+)$/.exec(pathname);
+      if (one && method === "PUT") {
+        const id = decodeURIComponent(one[1]!);
+        const saved: mail.MailTemplate = { ...(body as mail.MailTemplateInput), id, updatedAt: new Date().toISOString() };
+        templatesByAccount[me.id] = [saved, ...list.filter((t) => t.id !== id)];
+        return json(saved);
+      }
+      if (one && method === "DELETE") {
+        templatesByAccount[me.id] = list.filter((t) => t.id !== decodeURIComponent(one[1]!));
+        return json({ id: decodeURIComponent(one[1]!), deleted: true });
+      }
+    }
     // 下書き: per-account, in-session (a reload resets, like Sent).
     {
       const list = (draftsByAccount[me.id] ??= []);
@@ -1448,12 +1514,17 @@ function createMailStore() {
         return { id: attId, filename: a.filename, contentType: a.contentType, sizeBytes: bytes.byteLength };
       });
       // Auto-CC the archive address (dedup against To/Cc) — mirrors MAIL_ARCHIVE_CC.
-      const baseCc = req.cc ?? [];
+      const sharedPick = DEMO_SEND_AS.find((o) => o.address === req.fromAddress);
+      // Like the gateway: a From that is not the sender's own always Cc's the sender.
+      const meLower = me.email.toLowerCase();
+      const ccIn = req.cc ?? [];
+      const baseCc = sharedPick && ![...(req.to ?? []), ...ccIn].some((a) => a.email?.trim().toLowerCase() === meLower) ? [...ccIn, { email: meLower }] : ccIn;
       const alreadyArchived = [...(req.to ?? []), ...baseCc].some((a) => a.email?.trim().toLowerCase() === DEMO_ARCHIVE_CC);
       const cc = alreadyArchived ? baseCc : [...baseCc, { email: DEMO_ARCHIVE_CC }];
+      const sharedFrom = sharedPick;
       const detail: mail.MailSentDetail = {
         id,
-        from: { email: me.email, name: me.displayName },
+        from: sharedFrom ? { email: sharedFrom.address, name: sharedFrom.displayName ?? sharedFrom.address } : { email: me.email, name: me.displayName },
         to: req.to ?? [],
         ...(cc.length > 0 ? { cc } : {}),
         subject: req.subject ?? "(件名なし)",
@@ -2203,7 +2274,11 @@ function createRosterStore() {
     return { user, address };
   }
 
-  return { handle, addUsers, findUser, onboard };
+  /** Active, real members (times channels #850; Slack-import placeholders excluded). */
+  const activeMembers = (): { id: string; displayName: string; email: string }[] =>
+    users.filter((u) => u.status === "active" && !u.email.endsWith("@slack-import.invalid")).map((u) => ({ id: u.id, displayName: u.displayName, email: u.email }));
+
+  return { handle, addUsers, findUser, onboard, activeMembers };
 }
 
 // ── transport helpers ─────────────────────────────────────────────────────────
@@ -2231,7 +2306,13 @@ interface DemoChatChannel {
 
 type DemoMessage = Record<string, unknown> & { id: string; channelId: string; threadRootId: string | null };
 
-function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayName: string }[]) => void }) {
+function createChatStore({
+  addUsers,
+  activeMembers,
+}: {
+  addUsers: (list: { id: string; displayName: string }[]) => void;
+  activeMembers: () => { id: string; displayName: string; email: string }[];
+}) {
   const CH_TS = "2026-08-01T00:00:00.000Z";
   // 全体: everyone. announcements is the read-mostly 全体周知 channel.
   const overall: DemoChatChannel[] = [
@@ -2436,6 +2517,26 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
   });
   // カスタム絵文字 (Slack): the shared fe6 simulator (two pre-imported, the rest on import).
   const customEmoji = createCustomEmojiSim();
+  // times チャンネル (#850): one Dub chat channel per active member, owned by them.
+  const timesSim = createTimesSim({
+    members: activeMembers,
+    channels: () => all.filter((c) => c.type !== "dm").map((c) => ({ id: c.id, name: c.name, createdBy: null, archived: c.archived === true })),
+    createChannel: ({ ownerId, name, visibility, topic }) => {
+      const created: DemoChatChannel = {
+        id: `chn_times_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+        type: "topic",
+        name,
+        topic,
+        eventId: null,
+        memberCount: 1,
+        roster: [{ userId: ownerId, role: "admin", joinedAt: new Date().toISOString() }],
+        visibility,
+      };
+      all.push(created);
+      byId.set(created.id, created);
+      return created.id;
+    },
+  });
   const simResponse = (r: ReturnType<typeof slackImport.step>): Response =>
     r.ok ? json(r.value, r.status) : json({ error: { code: r.code, message: r.message, retryable: false } } satisfies ErrorResponse, r.status);
 
@@ -2480,6 +2581,19 @@ function createChatStore({ addUsers }: { addUsers: (list: { id: string; displayN
         target.reactions = reactions.filter((x) => x.userIds.length > 0);
         return json({ messageId: id, reactions: target.reactions });
       }
+    }
+    if (pathname.startsWith("/api/v1/chat/times/")) {
+      // Same gate as chat-service: 編集 + chat:times.
+      const perms = currentAccount().permissions;
+      if (!perms.includes("app:chat:edit") || !perms.includes("chat:times")) {
+        return json({ error: { code: "FORBIDDEN", message: "chat:times required", retryable: false } } satisfies ErrorResponse, 403);
+      }
+      if (method === "GET" && pathname === "/api/v1/chat/times/preview") return json(timesSim.preview());
+      if (method === "POST" && pathname === "/api/v1/chat/times/bulk") {
+        const ids = (body as { userIds?: unknown } | null)?.userIds;
+        return json(timesSim.bulk(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : undefined));
+      }
+      return null;
     }
     if (pathname.startsWith("/api/v1/chat/slack-import/")) {
       if (method === "GET" && pathname === "/api/v1/chat/slack-import/channels") return json({ items: slackImport.listChannels() });
@@ -2789,6 +2903,16 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     return json(next);
   }
 
+  // AI のまとめ (#879) — flag OFF like production: GET = preview, run = 409, ask = disabled.
+  {
+    const id = seg(/^\/api\/v1\/events\/([^/]+)\/digest$/);
+    if (id && method === "GET") return json(demoDigestState(id));
+    const runId = seg(/^\/api\/v1\/events\/([^/]+)\/digest\/run$/);
+    if (runId && method === "POST") return json({ error: { code: "EVENT_AI_DIGEST_DISABLED", message: "AI digest is disabled" } }, 409);
+    const askId = seg(/^\/api\/v1\/events\/([^/]+)\/ask$/);
+    if (askId && method === "POST") return json({ status: "disabled", answer: null, sources: [] } satisfies event.AskEventResponse);
+  }
+
   // Shared section layout save — version-locked (see DemoSectionLayout above).
   {
     const id = seg(/^\/api\/v1\/events\/([^/]+)\/section-layout$/);
@@ -2828,6 +2952,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         phase: b.phase ?? cur.phase,
         startsAt: b.startsAt !== undefined ? b.startsAt : cur.startsAt,
         endsAt: b.endsAt !== undefined ? b.endsAt : cur.endsAt,
+        venue: b.venue !== undefined ? b.venue : (cur.venue ?? null),
+        capacity: b.capacity !== undefined ? b.capacity : (cur.capacity ?? null),
         version: cur.version + 1,
         updatedAt: isoNow(),
       };
@@ -2868,9 +2994,15 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       // Honour the scopes the real task-service filters on, so the calendar's 個人/チーム
       // split (担当・依頼 vs チームのタスクを表示) reads true in the demo.
       const q = url.searchParams;
+      // 担当チーム (#882): assigneeTeamId (comma list) ORs with assigneeId, like task-service.
+      const teamIds = (q.get("assigneeTeamId") ?? "").split(",").filter(Boolean);
+      const assigneeOk = (t: task.Task): boolean =>
+        (!q.get("assigneeId") && teamIds.length === 0) ||
+        (!!q.get("assigneeId") && t.assigneeId === q.get("assigneeId")) ||
+        (!!t.assigneeTeamId && teamIds.includes(t.assigneeTeamId));
       const rows = TASKS.filter(
         (t) =>
-          (!q.get("assigneeId") || t.assigneeId === q.get("assigneeId")) &&
+          assigneeOk(t) &&
           // Older seed rows carry no createdBy; treat them as issued by the demo user.
           (!q.get("createdById") || (t.createdBy ?? ME_ID) === q.get("createdById")) &&
           (!q.get("teamId") || t.teamId === q.get("teamId")),
@@ -2908,6 +3040,8 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
     if (pathname === "/api/v1/notifications/inbox/unread-count") {
       return json({ count: NOTIFICATIONS.filter((n) => n.readAt === null).length });
     }
+    // 通知設定 (server shape: the overrides the demo user saved, e.g. 新着メール off).
+    if (pathname === "/api/v1/notifications/preferences") return json({ userId: "demo", entries: [...DEMO_NOTIF_PREFS.values()] });
     // admin: Notification管理 list (audience='admin' notifications to publish).
     if (pathname === "/api/v1/notifications/manage") {
       return json(page(ADMIN_NOTIFICATIONS.map((a) => ({ ...a }))));
@@ -2937,6 +3071,7 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
       const created: task.Task = {
         version: 1, id: `tsk_demo_${Date.now()}`, eventId: b.eventId ?? null, title: b.title, description: b.description ?? null,
         status: "todo", priority: b.priority ?? "medium", assigneeId: b.assigneeId ?? null, createdBy: ME_ID,
+        assigneeTeamId: b.assigneeId ? null : b.assigneeTeamId ?? null,
         teamId: b.teamId ?? null, startAt: b.startAt ?? null, dueAt: b.dueAt ?? null, origin: "internal",
         archivedAt: null, createdAt: now, updatedAt: now,
       };
@@ -3029,7 +3164,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         return json(null, 204);
       }
     }
-    if (pathname === "/api/v1/notifications/preferences") return json(null, 204);
+    if (pathname === "/api/v1/notifications/preferences") {
+      for (const e of ((body as { entries?: notification.PreferenceEntry[] } | null)?.entries ?? [])) DEMO_NOTIF_PREFS.set(e.type, e);
+      return json({ userId: "demo", entries: [...DEMO_NOTIF_PREFS.values()] });
+    }
     // Persist a bar's window after a leaf move/resize (Notion-style edit). Mutates the task
     // columns + the gantt row so the change survives a refetch/reload (in-session). Returns
     // the updated GanttRow. Parents never reach here (the client blocks a parent resize).
@@ -3066,6 +3204,10 @@ function matchDemoRoute(method: string, pathname: string, url: URL, body?: unkno
         if (b.status !== undefined) t.status = b.status;
         if (b.priority !== undefined) t.priority = b.priority;
         if (b.assigneeId !== undefined) t.assigneeId = b.assigneeId;
+        if (b.assigneeTeamId !== undefined) t.assigneeTeamId = b.assigneeTeamId;
+        // 人 XOR チーム (server rule): setting one side clears the other.
+        if (b.assigneeId) t.assigneeTeamId = null;
+        if (b.assigneeTeamId) t.assigneeId = null;
         if (b.teamId !== undefined) t.teamId = b.teamId;
         const datesChanged = b.startAt !== undefined || b.dueAt !== undefined;
         if (datesChanged) {
@@ -4283,18 +4425,44 @@ function createMembersStore() {
     mk("member_2", "佐藤 花子", "会場リーダー", "added", ["team_venue"], 21, null, "建築学科", "2年", null, "member_v1"),
     mk("member_v3", "田口 涼太", "メンバー", "added", ["team_venue"], 22, null, "建築学科", "1年", null, "member_2"),
     mk("member_v4", "谷 真央", "メンバー", "added", ["team_venue"], 23, null, "建築学科", "2年", null, "member_2"),
-    // 集客広報 — リーダー2人、各リーダーに配下2人。
+    // 集客広報 — 班が3つ(広報班はリーダー2人)。各リーダーに配下。
     mk("member_e1", "白木 彩", "オーガナイザー", "added", ["team_pr"], 24, null, "メディア情報学科", "3年"),
     mk("member_e2", "石井 里奈", "広報リーダー", "added", ["team_pr"], 25, null, "メディア情報学科", "2年", null, "member_e1"),
     mk("member_3", "鈴木 一郎", "広報担当", "invited", ["team_pr"], 26, "ichiro@example.com", "メディア情報学科", "1年", null, "member_e2"),
     mk("member_e4", "藤田 直人", "メンバー", "added", ["team_pr"], 27, null, "メディア情報学科", "1年", null, "member_e2"),
     mk("member_e5", "中田 桜", "デザインリーダー", "added", ["team_pr"], 28, null, "メディア情報学科", "3年", null, "member_e1"),
     mk("member_e6", "西村 拓", "メンバー", "added", ["team_pr"], 29, null, "メディア情報学科", "2年", null, "member_e5"),
+    // 組織図の「班」確認用: 広報班の共同リーダー(leaderId が同じチームのリーダー)と、3つ目の SNS 班。
+    mk("member_e7", "村上 千尋", "広報リーダー", "added", ["team_pr"], 30, null, "メディア情報学科", "2年", null, "member_e2"),
+    mk("member_e8", "森本 陽太", "SNSリーダー", "added", ["team_pr"], 31, null, "メディア情報学科", "2年", null, "member_e1"),
+    mk("member_e9", "長谷川 結衣", "メンバー", "invited", ["team_pr"], 32, null, "メディア情報学科", "1年", null, "member_e8"),
+    // ネットワーク — 本番の集客広報と同じ形(position 未設定・役割は roleTitle だけ)の確認用。
+    // リーダー4人に配下は居ない / メンバー3人はオーガナイザーを leaderId に持つ / 役割も役職も無い人。
+    mk("member_n1", "大西 修", "オーガナイザー", "added", ["team_network"], 33, null, "情報工学科", "3年"),
+    mk("member_n2", "片山 美咲", "オーガナイザー", "added", ["team_network"], 34, null, "情報工学科", "3年"),
+    mk("member_n3", "川口 隼", "リーダー", "added", ["team_network"], 35, null, "情報工学科", "2年"),
+    mk("member_n4", "北村 楓", "リーダー", "added", ["team_network"], 36, null, "電気電子工学科", "2年"),
+    mk("member_n5", "久保 蒼", "リーダー", "added", ["team_network"], 37, null, "情報工学科", "2年"),
+    mk("member_n6", "小松 遥", "リーダー", "added", ["team_network"], 38, null, "電気電子工学科", "2年"),
+    mk("member_n7", "斉藤 湊", "メンバー", "added", ["team_network"], 39, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n8", "坂本 杏", "メンバー", "added", ["team_network"], 40, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n9", "杉山 翔", "メンバー", "invited", ["team_network"], 41, null, "情報工学科", "1年", null, "member_n1"),
+    mk("member_n10", "関 美月", "メンバー", "added", ["team_network"], 42, null, "電気電子工学科", "1年"),
+    mk("member_n11", "高木 陸斗", null, "added", ["team_network"], 43, null, "情報工学科", "1年"),
+    mk("member_n12", "竹内 心", null, "added", ["team_network"], 44, null, "情報工学科", "1年"),
+    mk("member_n13", "千葉 悠真", null, "added", ["team_network"], 45, null, "電気電子工学科", "1年"),
+    mk("member_n14", "土屋 七海", null, "added", ["team_network"], 46, null, "電気電子工学科", "1年"),
     // 辞退 — 名簿一覧では既定で隠れ、辞退者フィルタでのみ表示される確認用。
-    mk("member_5", "山田 三郎", "デザイン", "declined", [], 30),
+    mk("member_5", "山田 三郎", "デザイン", "declined", [], 47),
     // チーム未割り当て(未所属)のメンバー — 「未所属」を擬似チームにせず控えめに扱うUIの確認用。
-    mk("member_6", "田村 未", "メンバー", "invited", [], 31, null, "情報工学科", "1年"),
+    mk("member_6", "田村 未", "メンバー", "invited", [], 48, null, "情報工学科", "1年"),
   ];
+
+  // ネットワークは本番と同じく役職(position)未設定。最後の2人だけ position=member。
+  for (const mem of members) {
+    if (!mem.id.startsWith("member_n")) continue;
+    mem.position = mem.id === "member_n13" || mem.id === "member_n14" ? "member" : null;
+  }
 
   // フリガナ(読み仮名)の seed。参加届からの流入を模して 姓/名 の分割カナを各メンバーへ付与し、
   // 名簿一覧の「フリガナ」列・カナ検索・(fe7 側の)五十音ソートを実データで確認できるようにする。
@@ -4329,6 +4497,9 @@ function createMembersStore() {
     member_e4: ["ふじた", "なおと"],
     member_e5: ["なかた", "さくら"],
     member_e6: ["にしむら", "たく"],
+    member_e7: ["むらかみ", "ちひろ"],
+    member_e8: ["もりもと", "ようた"],
+    member_e9: ["はせがわ", "ゆい"],
     member_5: ["やまだ", "さぶろう"],
     member_6: ["たむら", "み"],
   };
@@ -5474,6 +5645,7 @@ function createLpStore() {
 //   PATCH /api/v1/lp/tickets/types/:id   Partial<LpTicketTypeInput>
 //   GET   /api/v1/lp/tickets/orders      ?cursor&limit   newest first
 //   POST  /api/v1/lp/tickets/orders/:id/approve        needs_review -> paid (409 otherwise)
+//   POST  /api/v1/lp/tickets/orders/:id/refund         paid|needs_review -> refunded ({ result, order }; 0 円 = cancelled)
 //   GET   /api/v1/lp/tickets/coupons     newest first; used = held tickets (paid / pending / needs_review)
 //   POST  /api/v1/lp/tickets/coupons     { ticketTypeId, maxUses 1..1000, label? <=60, expiresAt? future }  201
 //   PATCH /api/v1/lp/tickets/coupons/:id { active }   no delete (orders reference coupons)
@@ -5666,6 +5838,25 @@ function createLpTicketsStore() {
     cp("cpn_press", "PRESS5YTN2", "メディア招待", 5, true, "2026-10-10T14:59:59.000Z", "2026-10-02T01:00:00.000Z"),
   ];
   const couponOf: Record<string, string> = { ord_011: "cpn_speakers", ord_005: "cpn_sponsor_a" };
+  // 当日受付の記録（demo はメモリだけ）。券は支払い済み/返金済みの注文から 1 席 1 枚で導く。
+  let checkins: { ticketId: string; eventDay: string; checkedInAt: string; checkedInBy: string }[] = [];
+  const demoTodayJst = (): string =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const demoTickets = () =>
+    orders
+      .filter((o) => o.status === "paid" || o.status === "refunded")
+      .flatMap((o) =>
+        o.items
+          .flatMap((it) => Array.from({ length: it.quantity }, () => it))
+          .map((it, n) => ({
+            ticketId: `${o.id}-${n + 1}`,
+            orderRef: o.id.slice(-8).toUpperCase(),
+            ticketTypeName: it.ticketTypeName,
+            dayLabel: it.dayLabel,
+            buyerName: o.buyerName,
+            valid: o.status === "paid",
+          })),
+      );
   const orders: DemoTicketOrder[] = seedOrders.map(([id, lines, buyerName, status, createdAt, aff, att], i) => {
     const couponId = couponOf[id] ?? null;
     const items = lines.map(([typeId, quantity]) => {
@@ -5896,6 +6087,70 @@ function createLpTicketsStore() {
       return json(o);
     }
 
+    // デモは Stripe を持たないので、有料も即「返金済み」（本番は Stripe の返金完了で反映）。
+    const refundMatch = method === "POST" ? /^\/api\/v1\/lp\/tickets\/orders\/([^/]+)\/refund$/.exec(pathname) : null;
+    if (refundMatch) {
+      const o = orders.find((x) => x.id === decodeURIComponent(refundMatch[1]!));
+      if (!o) return json({ error: { code: "NOT_FOUND", message: "order not found" } }, 404);
+      if (o.status !== "paid" && o.status !== "needs_review") {
+        return json({ error: { code: "LP_TICKET_REFUND_REFUSED", message: "この注文は返金・取消できません", details: { reason: "not_refundable" } } }, 409);
+      }
+      if (!lpTickets.isLpTicketRefundOpen(new Date().toISOString())) {
+        return json({ error: { code: "LP_TICKET_REFUND_REFUSED", message: "返金・取消の受付は開催最終日で終了しました", details: { reason: "refund_window_closed" } } }, 409);
+      }
+      o.status = "refunded";
+      return json({ result: o.amountJpy === 0 ? "cancelled" : "refunded", order: o });
+    }
+
+    // 当日受付（lp:checkin）。実サーバー（services/lp-tickets/src/checkin.ts）と同じ判定を簡略に。
+    //   券 ID = `<注文 ID>-<枚目>`（demo の手入力はこれ。例 ord_002-1）。QR の URL（…/t/<id>.<sig>）も読む。
+    if (method === "POST" && pathname === "/api/v1/lp/tickets/checkin") {
+      const day = typeof req.eventDay === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.eventDay) ? req.eventDay : demoTodayJst();
+      let code = typeof req.code === "string" ? req.code.normalize("NFKC").trim() : "";
+      const at = code.lastIndexOf("/t/");
+      if (at >= 0) code = code.slice(at + 3).split(/[/?#]/)[0] ?? "";
+      code = code.split(".")[0] ?? "";
+      const none = { checkedInAt: null, checkedInBy: null, dayCheck: null };
+      const t = demoTickets().find((x) => x.ticketId.toLowerCase() === code.toLowerCase());
+      if (!t) return json({ result: "unknown", eventDay: day, ticket: null, ...none });
+      const ticket = { ticketId: t.ticketId, orderRef: t.orderRef, ticketTypeName: t.ticketTypeName, dayLabel: t.dayLabel, holderName: null, buyerName: t.buyerName };
+      if (!t.valid) return json({ result: "void", eventDay: day, ticket, ...none });
+      const md = `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
+      const dated = /\d{1,2}\/\d{1,2}/.exec(t.dayLabel)?.[0];
+      const dayCheck = !t.dayLabel ? "all_days" : !dated ? "unverified" : dated === md ? "match" : null;
+      if (!dayCheck) return json({ result: "wrong_day", eventDay: day, ticket, ...none });
+      const prior = checkins.find((c) => c.ticketId === t.ticketId && c.eventDay === day);
+      if (prior) return json({ result: "already", eventDay: day, ticket, checkedInAt: prior.checkedInAt, checkedInBy: prior.checkedInBy, dayCheck });
+      const now = new Date().toISOString();
+      checkins.push({ ticketId: t.ticketId, eventDay: day, checkedInAt: now, checkedInBy: "usr_demo_admin" });
+      return json({ result: "ok", eventDay: day, ticket, checkedInAt: now, checkedInBy: "usr_demo_admin", dayCheck });
+    }
+
+    const undoMatch = method === "DELETE" ? /^\/api\/v1\/lp\/tickets\/checkin\/([^/]+)$/.exec(pathname) : null;
+    if (undoMatch) {
+      const ticketId = decodeURIComponent(undoMatch[1]!);
+      const day = url.searchParams.get("day") || demoTodayJst();
+      const before = checkins.length;
+      checkins = checkins.filter((c) => !(c.ticketId === ticketId && c.eventDay === day));
+      return json({ ticketId, eventDay: day, removed: checkins.length < before });
+    }
+
+    if (method === "GET" && pathname === "/api/v1/lp/tickets/checkins") {
+      const day = url.searchParams.get("day") || demoTodayJst();
+      const byId = new Map(demoTickets().map((t) => [t.ticketId, t]));
+      const items = checkins
+        .filter((c) => c.eventDay === day)
+        .sort((a, b) => (a.checkedInAt < b.checkedInAt ? 1 : -1))
+        .map((c) => {
+          const t = byId.get(c.ticketId)!;
+          return { ...c, orderRef: t.orderRef, ticketTypeName: t.ticketTypeName, dayLabel: t.dayLabel, holderName: null, buyerName: t.buyerName };
+        });
+      const counts = new Map<string, number>();
+      for (const c of checkins) counts.set(c.eventDay, (counts.get(c.eventDay) ?? 0) + 1);
+      const days = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([eventDay, count]) => ({ eventDay, count }));
+      return json({ eventDay: day, count: items.length, days, items, nextCursor: null });
+    }
+
     return null;
   }
 
@@ -6112,6 +6367,24 @@ function createLpProposalsStore() {
   }
 
   return { handle, settings };
+}
+
+// ── 会計 (member-service /members/accounting/issuer の demo) ─────────────────────
+// 発行者情報 1 件をメモリで持つ。検査・正規化は本物と同じ @dub/types accounting を使う。
+function createAccountingStore(me: () => { id: string; displayName: string }) {
+  let issuer: accountingValues.AccountingIssuer | null = null;
+  function handle(method: string, pathname: string, body: any): Response | null {
+    if (pathname !== "/api/v1/members/accounting/issuer") return null;
+    if (method === "GET") return json({ issuer } satisfies accountingValues.GetIssuerResponse);
+    if (method !== "PUT") return null;
+    if ((issuer?.version ?? 0) !== body?.expectedVersion) return json({ error: { code: "ACCOUNTING_VERSION_CONFLICT", message: "conflict" } }, 409);
+    const parsed = accountingValues.parseIssuerInput(body);
+    if (!parsed.ok) return json({ error: { code: "VALIDATION_FAILED", message: "Validation failed", details: parsed.errors } }, 400);
+    const u = me();
+    issuer = { ...parsed.value, version: body.expectedVersion + 1, updatedBy: u.id as accountingValues.AccountingIssuer["updatedBy"], updatedByName: u.displayName, updatedAt: new Date().toISOString() };
+    return json({ ...issuer, warnings: parsed.warnings } satisfies accountingValues.PutIssuerResponse);
+  }
+  return { handle };
 }
 
 // ── 目標管理 (member-service /members/goals の demo) ─────────────────────────────
@@ -6510,14 +6783,16 @@ export function createDemoFetch(): typeof fetch {
     cancelInterview: (id) => moveApplicant(id, "scheduling", null),
   });
   // Read-mostly chat channel set (全体 / チーム別 / 役割別) for the sidebar.
-  const chatStore = createChatStore({ addUsers: roster.addUsers });
+  const chatStore = createChatStore({ addUsers: roster.addUsers, activeMembers: roster.activeMembers });
   // LP流入ログ (90日分・固定シードで生成) + 発行済み流入URL — LP管理の流入URL/ログ管理タブ。
   const lpStore = createLpStore();
   // LP チケット販売（券種・入力項目・購入者）— LP管理のチケットタブ。
   const lpTicketsStore = createLpTicketsStore();
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
+  const lpSponsorStore = createDemoLpSponsorStore((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL);
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
+  const accountingStore = createAccountingStore(() => currentMe().user);
   const goalsStore = createGoalsStore(() => currentMe().user, () => membersStore.listTeams(), (m) => sponsorStore.actuals(m));
   const sponsorStore = createSponsorStore(() => currentMe().user, goalsStore.sponsorGoals);
   // LP 公開設定（下書き・本番反映）。本番の release は上の 3 つの store が正本。
@@ -6723,6 +6998,9 @@ export function createDemoFetch(): typeof fetch {
       }
       if (res) return res;
     }
+    const accountingHit = accountingStore.handle(method, url.pathname, parsedBody);
+    if (accountingHit) return accountingHit;
+
     const goalsHit = goalsStore.handle(method, url.pathname, url, parsedBody);
     if (goalsHit) return goalsHit;
 
@@ -6737,6 +7015,7 @@ export function createDemoFetch(): typeof fetch {
       lpStore.handle(method, url.pathname, url, parsedBody) ??
       lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
       lpProposalsStore.handle(method, url.pathname, url, parsedBody) ??
+      lpSponsorStore.handle(method, url.pathname, url, parsedBody) ??
       lpSiteConfigStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;

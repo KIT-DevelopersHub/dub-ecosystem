@@ -17,14 +17,16 @@ import { createEventPublisher, createAuditSink } from "./publisher";
 import { createD1Repo, type MailAutoRepo } from "./repo";
 import { type EventInfoClient, type PipelineDeps } from "./pipeline";
 import { eventHandlers } from "./events-async";
+import { publisherQueues } from "./outbox";
 
 export interface Env {
   DB: D1Database;
   SVC_MAIL_GATEWAY: Fetcher;
   SVC_IDENTITY: Fetcher;
   SVC_EVENT?: Fetcher;
-  EVT_NOTIFICATION: Queue<DubEventEnvelope>;
-  AUDIT_QUEUE: Queue<never>;
+  // Paid-tier Queue producers. Absent on the free plan -> freeq outbox (src/outbox.ts).
+  EVT_NOTIFICATION?: Queue<DubEventEnvelope>;
+  AUDIT_QUEUE?: Queue<never>;
   SELF_DOMAINS?: string; // comma-separated (α default: developershub.jp)
   SELF_ADDRESSES?: string; // comma-separated
 }
@@ -46,11 +48,12 @@ function eventClientOf(env: Env): EventInfoClient | undefined {
 
 function buildPipeline(env: Env, repo: MailAutoRepo): PipelineDeps {
   const eventClient = eventClientOf(env);
+  const queues = publisherQueues(env);
   return {
     repo,
     gateway: createMailGatewayClient(env.SVC_MAIL_GATEWAY),
-    publisher: createEventPublisher({ EVT_NOTIFICATION: env.EVT_NOTIFICATION }),
-    audit: createAuditSink({ AUDIT_QUEUE: env.AUDIT_QUEUE }),
+    publisher: createEventPublisher({ EVT_NOTIFICATION: queues.EVT_NOTIFICATION }),
+    audit: createAuditSink({ AUDIT_QUEUE: queues.AUDIT_QUEUE }),
     ...(eventClient ? { eventClient } : {}),
     now: nowIso,
     mintDecisionId: () => newId("mailauto_dec"),

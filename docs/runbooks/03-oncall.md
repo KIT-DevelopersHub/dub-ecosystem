@@ -66,7 +66,8 @@ api-gateway が全 `/api/v1/*` にレート制限を掛ける。外部契約は 
 
 切り分け:
 
-- 特定 IP のみ 429: `cf-connecting-ip` 単位の正常なスロットリング（限界値到達）。クライアント側のリトライ間隔を確認。
+- 数え方: ログイン済み（Bearer / `dub_session` cookie あり）は**セッション単位**（既定 600 回/分 `RATE_LIMIT_USER_MAX`）＋同じ IP 全体の上限（既定 6000 回/分 `RATE_LIMIT_IP_CEILING`）。未ログインは **IP 単位**（既定 300 回/分 `RATE_LIMIT_IP_MAX`）。会場 Wi-Fi のように同じ IP でも、メンバーごとに別々に数える。
+- 特定の人だけ 429: そのセッションの上限到達。特定 IP の全員が 429: IP 全体の上限（未ログインなら IP 単位）到達。値は env で変えられる。
 - 全体的に 429 急増: 現状の limiter は **Worker インメモリの固定窓**（`createInMemoryRateLimiter`）。CF native の `RATE_LIMITER` binding は P0 未結線のため、インスタンス跨ぎで挙動が揃わない点に留意。閾値見直しや native binding 結線は infra 側の対応。
 - UI に「レート制限」バナーが出る: フロントが 429 + `Retry-After` を受けて表示している。バックエンドの 429 発生元（gateway ログの request-id）を追う。
 
@@ -76,7 +77,7 @@ api-gateway が全 `/api/v1/*` にレート制限を掛ける。外部契約は 
 |---|---|
 | gateway 500 / bind エラー | gateway ログの request-id → どの `SVC_*` bind か。bind 先 Worker の liveness と、`service=` 名と `name=` 一致（deploy runbook 事前チェック）を確認 |
 | ログインできない | auth-service `/health`、Google OAuth secret の投入状況、`REDIRECT_ALLOWLIST`/`COOKIE_DOMAIN` の env 値 |
-| メールが飛ばない | mail-gateway `/internal/health/ready`（503 なら provider secret 未結線）→ `/health/quota` |
+| メールが飛ばない・届かない・画面が開かない | [12-mail-incident.md](./12-mail-incident.md)。mail-gateway `/internal/health/ready`（503 なら provider secret 未結線）→ `/health/quota` |
 | 通知が来ない | notification `/internal/health` と Queue consumer（`dub-q-evt-notification` / DLQ 滞留）を確認 |
 | Queue 滞留 / 再試行地獄 | 対象 DLQ（`*-dlq`）のメッセージ有無。consumer 側 Worker のログを request-id で追う |
 | DB エラー | D1 `dub-core` の migration 台帳（`wrangler d1 migrations list`）と、名前空間所有（`infra/d1/src/registry.ts`）の整合 |

@@ -87,6 +87,37 @@ describe("POST /notify recipientAudiences", () => {
   });
 });
 
+describe("POST /notify recipientPermissions", () => {
+  it("fans out to the holders of the permission (LP sponsor inquiry -> app:sponsor:edit)", async () => {
+    const h = makeTestEnv();
+    const identity = fakeIdentity({ byPermission: { "app:sponsor:edit": ["u_sp1", "u_sp2"] } });
+    const res = await reqOf(createApp({ identity }), h)(
+      "/notify",
+      internalPost({
+        type: "lp.sponsor_inquiry",
+        recipientIds: ["u_sp1"],
+        recipientPermissions: ["app:sponsor:edit"],
+        title: "スポンサーの資料請求が届きました",
+        body: "会社名: ACME",
+        channels: ["in_app"],
+      }),
+    );
+    expect(res.status).toBe(202);
+    expect(await unreadCount(h.db, "u_sp1")).toBe(1); // ids ∪ holders, de-duplicated
+    expect(await unreadCount(h.db, "u_sp2")).toBe(1);
+    expect(identity.permissionCalls).toEqual(["app:sponsor:edit"]);
+  });
+
+  it("accepts catalog keys only and counts them as a recipient source", () => {
+    const base = { type: "x.y", title: "t", body: "b", recipientIds: [] };
+    expect(parseNotifyRequest({ ...base, recipientPermissions: ["app:sponsor:edit", "app:sponsor:edit"] }).recipientPermissions).toEqual([
+      "app:sponsor:edit",
+    ]);
+    expect(() => parseNotifyRequest({ ...base, recipientPermissions: ["app:nope:edit"] })).toThrow();
+    expect(() => parseNotifyRequest({ ...base, recipientPermissions: [] })).toThrow();
+  });
+});
+
 describe("GET /notifications/audiences (誰に届くか)", () => {
   it("returns each audience with the roles holding its key and the recipient count", async () => {
     const h = makeTestEnv({ SVC_IDENTITY: fakeAuthzFetcher((u) => (u === "usr_admin" ? NOTIF_ADMIN_KEYS : BASE_KEYS)) });

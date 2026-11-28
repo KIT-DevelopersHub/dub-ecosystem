@@ -31,6 +31,8 @@ interface EventDbRow {
   phase: string;
   starts_at: string | null;
   ends_at: string | null;
+  venue?: string | null;
+  capacity?: number | null;
   archived_at: string | null;
   version: number;
   created_by: string;
@@ -130,6 +132,8 @@ function toEventRow(r: EventDbRow): EventRow {
     phase: r.phase as event.EventPhase,
     startsAt: r.starts_at,
     endsAt: r.ends_at,
+    venue: r.venue ?? null,
+    capacity: r.capacity ?? null,
     archivedAt: r.archived_at,
     version: r.version,
     createdBy: r.created_by,
@@ -157,10 +161,10 @@ export function createD1EventRepo(db: DbClient): EventRepo {
     async createEvent(row: EventRow): Promise<void> {
       await db.run(
         `INSERT INTO event_events
-          (id, org_id, title, description, phase, starts_at, ends_at, version, archived_at, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, org_id, title, description, phase, starts_at, ends_at, venue, capacity, version, archived_at, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         row.id, row.orgId, row.title, row.description, row.phase, row.startsAt, row.endsAt,
-        row.version, row.archivedAt, row.createdBy, row.createdAt, row.updatedAt,
+        row.venue ?? null, row.capacity ?? null, row.version, row.archivedAt, row.createdBy, row.createdAt, row.updatedAt,
       );
     },
 
@@ -214,10 +218,10 @@ export function createD1EventRepo(db: DbClient): EventRepo {
       const res = await db.run(
         `UPDATE event_events SET
            title = ?, description = ?, phase = ?, starts_at = ?, ends_at = ?,
-           archived_at = ?, version = ?, updated_at = ?
+           venue = ?, capacity = ?, archived_at = ?, version = ?, updated_at = ?
          WHERE id = ? AND version = ?`,
         next.title, next.description, next.phase, next.startsAt, next.endsAt,
-        next.archivedAt, next.version, next.updatedAt, next.id, expectedVersion,
+        next.venue ?? null, next.capacity ?? null, next.archivedAt, next.version, next.updatedAt, next.id, expectedVersion,
       );
       return res.meta.changes > 0;
     },

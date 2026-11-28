@@ -271,6 +271,8 @@ export interface LpRepo extends LpProposalRepo, LpSiteConfigRepo {
   setPublish(site: string, versionId: string, updatedBy: string, updatedAt: string): Promise<void>;
 }
 
+import type { SponsorDeps } from "./sponsor-inquiries";
+
 export interface ReqCtx {
   requestId: string;
   userId: common.UserId;
@@ -308,4 +310,6 @@ export interface AppDeps {
   newSiteConfigHistoryId: () => string;
   /** 1 日 (JST) に受け付ける登壇応募の上限。公開フォームからの書き込み濫用の天井。 */
   dailyProposalCap: number;
+  /** スポンサー募集（/sponsors の資料請求）。設定・受付・通知の依存をまとめて持つ。 */
+  sponsor: SponsorDeps;
 }
