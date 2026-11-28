@@ -17,12 +17,12 @@ import {
   requesterOf,
 } from "../domain/my-tasks";
 import { MyTasksFilterBar } from "./MyTasksFilterBar";
-import { MyTaskList } from "./MyTaskList";
+import { MyTaskKanban } from "./MyTaskKanban";
+import { makeCanEditTask } from "../domain/permissions";
+import { canMoveCard } from "../domain/task-hub-view";
 import { MyTaskCreateModal, type MyTaskDraft } from "./MyTaskCreateModal";
 import { TaskDetailDialog } from "./TaskDetailDialog";
 import styles from "../styles/app.module.css";
-
-const PAGE_SIZE = 25;
 
 const LENS_TABS: { key: MyTasksLens; label: string; hint: string }[] = [
   { key: "assigned", label: "担当", hint: "自分に割り当てられたタスク" },
@@ -35,6 +35,9 @@ export interface MyTasksPageProps {
   /** roster for the filter selects + create modal 依頼先. */
   people: readonly identity.UserSummary[];
   teams: readonly team.Team[];
+  /** effectivePermissions (#881 edit rights on the kanban). Omitted ⇒ every card is movable
+   *  (standalone hosts); the server still enforces per task. */
+  permissions?: readonly identity.PermissionKey[] | null;
 }
 
 /**
@@ -43,7 +46,7 @@ export interface MyTasksPageProps {
  * 「すべて」, unified into one list that shows 依頼→担当 (from→to). Create is
  * optimistic (the new task appears instantly, rolls back on error).
  */
-export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) {
+export function MyTasksPage({ currentUserId, people, teams, permissions }: MyTasksPageProps) {
   const client = useApiClient();
   const toast = useToast();
 
@@ -54,7 +57,6 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
   const [loading, setLoading] = useState(true);
   // A failed load is an error state + 再試行, never "タスクがありません" (#855).
   const [loadError, setLoadError] = useState<unknown>(null);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<task.Task | null>(null);
   const reqSeq = useRef(0);
@@ -124,11 +126,6 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
 
-  // reset the reveal window when the visible result set changes shape.
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [lens, filter]);
-
   const visible = useMemo(() => {
     const filtered = applyMyTasksFilter(tasks, filter);
     return sortMyTasks(filtered, filter.sort);
@@ -146,18 +143,26 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
     }
   };
 
-  // P11 delight UX — quick-complete from the list checkbox. Optimistic (the row
-  // flips to 完了 instantly so the checkmark/flash animation plays right away),
-  // rolled back with a toast on failure — same shape as `onCreate` above.
-  const onComplete = async (t: task.Task) => {
+  // #881 edit rights, same rule as the gantt. Optimistic rows (temp id) are not movable
+  // until the server has them.
+  const canEdit = useMemo(() => {
+    if (permissions === undefined) return (id: common.TaskId) => !id.startsWith("task_temp_");
+    const check = makeCanEditTask(tasks, currentUserId, permissions, myTeamIds ?? []);
+    return (id: common.TaskId) => !id.startsWith("task_temp_") && check(id);
+  }, [tasks, currentUserId, permissions, myTeamIds]);
+
+  // #880 kanban status change (drag or 「移動」). Optimistic: the card jumps column at once,
+  // reconciles with the server row, and rolls back with a toast on failure.
+  const onMove = async (t: task.Task, to: task.TaskStatus) => {
+    if (!canMoveCard(t, to, canEdit)) return;
     const prevTasks = tasks;
-    setTasks((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: "done" as const } : x)));
+    setTasks((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: to } : x)));
     try {
-      const updated = await updateTask(client, t.id, { version: t.version, status: "done" });
+      const updated = await updateTask(client, t.id, { version: t.version, status: to });
       setTasks((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
     } catch {
       setTasks(prevTasks);
-      toast.show({ kind: "error", title: "完了にできませんでした", description: "もう一度お試しください。" });
+      toast.show({ kind: "error", title: "状態を変更できませんでした", description: "もう一度お試しください。" });
     }
   };
 
@@ -244,7 +249,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
       <header className={styles.myHeader}>
         <div>
           <h1 className={styles.myTitle}>マイタスク</h1>
-          <p className={styles.mySubtitle}>自分に関わるタスクを、誰から誰へかが分かる一覧で管理できます。</p>
+          <p className={styles.mySubtitle}>自分に関わるタスクを状態ごとに並べます。カードをドラッグするか「移動」で状態を変えられます。</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} testId="fe4-mytasks-create-open">
           ＋ タスクを発行
@@ -275,7 +280,7 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         teams={teams}
       />
 
-      <MyTaskList
+      <MyTaskKanban
         tasks={visible}
         users={users}
         teamNames={teamNames}
@@ -283,9 +288,8 @@ export function MyTasksPage({ currentUserId, people, teams }: MyTasksPageProps) 
         loadError={loadError}
         onRetry={() => void load()}
         onSelect={setSelected}
-        onComplete={onComplete}
-        visibleCount={visibleCount}
-        onShowMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
+        onMove={(t, to) => void onMove(t, to)}
+        canEdit={canEdit}
       />
 
       <TaskDetailDialog

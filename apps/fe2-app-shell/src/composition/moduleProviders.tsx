@@ -26,7 +26,7 @@ import { forwardToasts, NavigationProvider, RosterProvider } from "@dub/admin-ro
 import { TaskApiClientProvider, TaskRouteProvider, ChatRuntimeProvider, WsChatClient, type ChatRuntime, type TaskRouteContextValue } from "./featureEntries.tsx";
 import type { ApiClient } from "../lib/api-client.tsx";
 import { useBffHome } from "../bff/useBffHome.tsx";
-import { useAuth, usePermissions } from "../auth/AuthProvider.tsx";
+import { useAppCapability, useAuth, usePermissions } from "../auth/AuthProvider.tsx";
 import { useToast } from "@dub/ui";
 import {
   createChatApiClient,
@@ -89,9 +89,16 @@ export function EventProviders({ api, children }: { api: ApiClient; children: Re
 export function TaskProviders({ api, children }: { api: ApiClient; children: ReactNode }): JSX.Element {
   const client = useMemo(() => createTaskApiClient(api), [api]);
   const me = useMe();
+  // #880: the ガント / カンバン tabs grey out a view whose launcher app is 無効 for this role.
+  const ganttEnabled = useAppCapability("gantt").enabled;
+  const tasksEnabled = useAppCapability("tasks").enabled;
   const routeValue = useMemo<TaskRouteContextValue>(
-    () => ({ currentUserId: me?.user.id ?? null, permissions: me?.permissions ?? null }),
-    [me],
+    () => ({
+      currentUserId: me?.user.id ?? null,
+      permissions: me?.permissions ?? null,
+      ...(me ? { views: { gantt: ganttEnabled, kanban: tasksEnabled } } : {}),
+    }),
+    [me, ganttEnabled, tasksEnabled],
   );
   return (
     <TaskApiClientProvider client={client}>

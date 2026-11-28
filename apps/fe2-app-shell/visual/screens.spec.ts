@@ -62,7 +62,7 @@ const SCREENS: Screen[] = [
     // Demo has no realtime socket; the banner's wording races connect/disconnect.
     mask: (page) => [page.getByTestId("fe6-channel-connection-banner")],
   },
-  { name: "tasks-my", path: "/me/tasks", ready: "fe4-mytasks-list", mobile: true },
+  { name: "tasks-my", path: "/me/tasks", ready: "fe4-mytasks-kanban", mobile: true },
   { name: "calendar", path: "/calendar", ready: "fe2-calendar" },
   { name: "notifications", path: "/notifications", ready: "fe5-inbox-list" },
 ];

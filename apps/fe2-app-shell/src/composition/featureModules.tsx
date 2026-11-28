@@ -14,7 +14,7 @@
 //      flatten() ANDs them onto every route (fail-closed authz).
 // The result is the array FE2's registerFeatureModules() consumes (main.tsx).
 import { createElement, Fragment, useMemo, type ComponentType, type ReactNode } from "react";
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { appRegistry, type identity } from "@dub/types";
 import type { IconName } from "@dub/ui";
 import { eventFeatureModule, routePaths } from "@dub/fe3-event-action";
@@ -153,8 +153,23 @@ function withModulePerms(source: { requiredPermissions?: readonly string[] }, mo
 function TaskEventIdBridge({ children }: { children: ReactNode }): JSX.Element {
   const params = useParams({ strict: false }) as Record<string, string>;
   const base = useTaskRoute();
+  const navigate = useTaskNavigate();
   const eventId = (params.eventId ?? null) as TaskRouteContextValue["eventId"];
-  const value = useMemo<TaskRouteContextValue>(() => ({ ...base, eventId }), [base, eventId]);
+  const value = useMemo<TaskRouteContextValue>(() => ({ ...base, eventId, navigate }), [base, eventId, navigate]);
+  return createElement(TaskRouteProvider, { value, children });
+}
+
+/** #880: shell-router navigation for FE4's ガント / カンバン tabs (no full page load). */
+function useTaskNavigate(): (to: string) => void {
+  const nav = useNavigate();
+  return useMemo(() => (to: string) => void nav({ to }), [nav]);
+}
+
+/** Adds `navigate` to the paramless マイタスク route (TaskProviders stays router-free). */
+function TaskNavigateBridge({ children }: { children: ReactNode }): JSX.Element {
+  const base = useTaskRoute();
+  const navigate = useTaskNavigate();
+  const value = useMemo<TaskRouteContextValue>(() => ({ ...base, navigate }), [base, navigate]);
   return createElement(TaskRouteProvider, { value, children });
 }
 
@@ -185,7 +200,8 @@ function adaptEvents(api: ApiClient): FeatureModule {
 
 // ── tasks (FE4 top-level /me/tasks) ───────────────────────────────────────────
 function adaptTasks(api: ApiClient): FeatureModule {
-  const wrap = providerWrapper(TaskProviders, api);
+  const wTask = providerWrapper(TaskProviders, api);
+  const wrap: ElementWrapper = (node) => wTask(createElement(TaskNavigateBridge, { children: node }));
   const routes = (taskModule.routes as readonly SourceRoute[]).map((r) => wrapRoute(r, wrap));
   const nav: NavEntry[] = (taskModule.nav as readonly SourceNav[]).map((n, i) => ({
     label: n.label,
