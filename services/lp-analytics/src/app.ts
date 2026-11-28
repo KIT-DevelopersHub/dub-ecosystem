@@ -87,6 +87,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: PolicyGateVars }> {
     await svc.ingestVisit(parseIngest(await readJson(c)));
     return c.body(null, 204);
   });
+  // アクセス解析ビーコン（gateway の POST /api/v1/public/lp-events が検証・分類して転送）。
+  app.post("/lp/internal/events", async (c) => {
+    await svc.ingestInsight(await readJson(c));
+    return c.body(null, 204);
+  });
   // The public LP Worker asks which version to serve (service binding, x-dub-internal only;
   // no user / request id needed). Read-only, one row.
   app.get("/lp/internal/publish", async (c) => c.json({ versionId: (await svc.getPublish()).versionId }));
@@ -111,6 +116,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: PolicyGateVars }> {
   // ---- user routes ----
   app.get("/lp/stats", async (c) => c.json(await svc.getStats(c.req.query())));
   app.get("/lp/site-traffic", async (c) => c.json(await svc.getSiteTraffic(c.req.query())));
+  app.get("/lp/insights", async (c) => c.json(await svc.getInsights(c.req.query())));
   app.get("/lp/visits", async (c) => c.json(await svc.listVisits(c.req.query())));
   app.get("/lp/links", async (c) => c.json(await svc.listLinks(c.req.query())));
   app.post("/lp/links", async (c) => c.json(await svc.createLink(reqCtx(c), await readJson(c), c.req.query()), 201));

@@ -620,6 +620,22 @@ CREATE TABLE member_accounting_issuer (
 `.trim(),
 };
 
+export const MEMBER_ACCOUNTING_PRIVACY_POLICY_MIGRATION: Migration = {
+  id: "0031_accounting_privacy_policy",
+  namespace: "member",
+  up: `
+CREATE TABLE member_accounting_privacy_policy (
+  org_id           TEXT NOT NULL,
+  version          INTEGER NOT NULL,
+  body             TEXT NOT NULL,
+  updated_by       TEXT NOT NULL,
+  updated_by_name  TEXT,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (org_id, version)
+);
+`.trim(),
+};
+
 // All member-namespace migrations in apply order (mirrors infra/d1/migrations/member).
 export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_SCHEMA_MIGRATION,
@@ -650,4 +666,5 @@ export const MEMBER_MIGRATIONS: readonly Migration[] = [
   MEMBER_HR_INTERVIEW_RESULTS_MIGRATION,
   MEMBER_HR_BOOKED_BACKFILL_MIGRATION,
   MEMBER_ACCOUNTING_ISSUER_MIGRATION,
+  MEMBER_ACCOUNTING_PRIVACY_POLICY_MIGRATION,
 ];

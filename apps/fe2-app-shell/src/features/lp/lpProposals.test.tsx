@@ -58,6 +58,7 @@ function fakeApi(overrides: Partial<LpApi> = {}): LpApi {
   return {
     getStats: unused,
     getSiteTraffic: unused,
+    getInsights: unused,
     listVisits: unused,
     listLinks: unused,
     createLink: unused,

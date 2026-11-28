@@ -293,6 +293,7 @@ const PUBLIC_ROUTES = [
   "POST /api/v1/public/hr-interview-booking/view",
   "POST /api/v1/public/hr-interview-form",
   "POST /api/v1/public/inquiries",
+  "POST /api/v1/public/lp-events",
   "POST /api/v1/public/lp-visits",
   "POST /api/v1/public/participation",
   "POST /api/v1/public/webhooks/resend",

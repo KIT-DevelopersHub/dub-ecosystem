@@ -100,6 +100,7 @@ export const NAMESPACE_REGISTRY: readonly NamespaceEntry[] = [
       "lp_site_config_history",
       "lp_sponsor_inquiry_settings",
       "lp_sponsor_inquiries",
+      "lp_metrics_daily",
     ],
   },
 ];

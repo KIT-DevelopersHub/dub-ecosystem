@@ -10,6 +10,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { lpInsights } from "@dub/types";
 import { createApiClient } from "../../lib/api-client.tsx";
 import { createDemoFetch } from "../../lib/demo-seed.tsx";
 import { createLpApi, type LpApi } from "./lpApi.tsx";
@@ -94,6 +95,7 @@ function emptyApi(): LpApi {
   return {
     ...linksStubs,
     getSiteTraffic: () => Promise.resolve(UNCONFIGURED_SITE),
+    getInsights: (q) => Promise.resolve(lpInsights.buildInsights([], q, [])),
     getStats: () =>
       Promise.resolve({
         range: { from: "2026-09-01", to: "2026-09-28" },
@@ -283,6 +285,7 @@ describe("LpVisitLogScreen", () => {
     const failing: LpApi = {
       ...linksStubs,
       getSiteTraffic: () => Promise.reject(new Error("boom")),
+      getInsights: () => Promise.reject(new Error("boom")),
       getStats: () => Promise.reject(new Error("boom")),
       listVisits: () => Promise.reject(new Error("boom")),
     };

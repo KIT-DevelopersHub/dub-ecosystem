@@ -51,6 +51,7 @@ import {
   toDayKey,
   type LpRangeDays,
 } from "./lpRange.ts";
+import { LpInsightsCard } from "./LpInsightsCard.tsx";
 import { LpTabs } from "./LpTabs.tsx";
 import { SourceBars } from "./SourceBars.tsx";
 import { TrafficLineChart } from "./TrafficLineChart.tsx";
@@ -493,7 +494,7 @@ export function LpVisitLogScreen(): JSX.Element {
             testId="fe2-lp-kpi-uniques"
             label="一意訪問者(人)"
             value={totals.uniques}
-            hint="同じ端末からの再訪は1人として数えた推定人数"
+            hint="同じ端末からの再訪は1人として数えた推定人数。2026年11月末からは端末に ID を残さない計測に変えたため、それ以降の分は訪問の回数に近い値になります"
           />
           <KpiCard
             testId="fe2-lp-kpi-sources"
@@ -565,6 +566,7 @@ export function LpVisitLogScreen(): JSX.Element {
       <LpTabs active="visits" />
       {rangePicker}
       <SiteTrafficCard range={range} />
+      <LpInsightsCard range={range} />
       <span className={styles.sectionTitle}>流入URLの計測</span>
       <SourceSelect
         id="fe2-lp-source"

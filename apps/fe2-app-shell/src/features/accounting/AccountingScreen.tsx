@@ -1,9 +1,11 @@
-// 会計: 団体の発行者情報 (法人名・所在地・インボイス登録番号・税率)。チケットの領収書はここを読んで発行者欄を印字する。
+// 会計: 団体の発行者情報 (法人名・所在地・インボイス登録番号・税率) と公式サイトのプライバシーポリシー。
+// チケットの領収書は発行者情報を、公式サイトの /privacy はポリシー本文をここから読む。
 import { useState, type FormEvent } from "react";
-import { Badge, Button, ErrorState, FormField, PageHeader, Select, SkeletonCard, Stack, TextField } from "@dub/ui";
+import { Badge, Button, ErrorState, FormField, PageHeader, SegmentedControl, Select, SkeletonCard, Stack, TextField } from "@dub/ui";
 import { accounting } from "@dub/types";
 import { useAppCapability } from "../../auth/AuthProvider.tsx";
 import { useIssuer, useSaveIssuer } from "./accountingHooks.ts";
+import { PrivacyPolicyPanel } from "./PrivacyPolicyPanel.tsx";
 import styles from "./accounting.module.css";
 
 type Form = Record<Exclude<accounting.IssuerField, "taxRatePercent">, string> & { taxRatePercent: string };
@@ -135,34 +137,61 @@ function IssuerForm({ issuer, canEdit }: { issuer: accounting.AccountingIssuer |
   );
 }
 
+type Tab = "issuer" | "privacy";
+const TABS: { value: Tab; label: string; testId: string }[] = [
+  { value: "issuer", label: "発行者情報", testId: "fe2-accounting-tab-issuer" },
+  { value: "privacy", label: "プライバシーポリシー", testId: "fe2-accounting-tab-privacy" },
+];
+// ?tab=privacy で直接開ける（公式サイトの文言を直してほしい時にリンクで渡せる）。
+const initialTab = (): Tab => (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "privacy" ? "privacy" : "issuer");
+
+function IssuerPanel({ canEdit }: { canEdit: boolean }): JSX.Element {
+  const q = useIssuer();
+  if (q.isPending) {
+    return (
+      <div className={styles.form} data-testid="fe2-accounting-skeleton">
+        {[0, 1, 2].map((i) => <SkeletonCard key={i} lines={3} />)}
+      </div>
+    );
+  }
+  if (q.isError) {
+    return <ErrorState testId="fe2-accounting-error" error={{ code: "INTERNAL", message: "発行者情報を読み込めませんでした。" }} onRetry={() => void q.refetch()} />;
+  }
+  return (
+    <>
+      <div className={styles.cardHead}>
+        <p className={styles.note}>チケットの領収書の発行者欄（法人名・所在地・登録番号・税率）はここから印字されます。</p>
+        {q.data.issuer ? <Badge tone="success">設定済み</Badge> : <Badge tone="warning">未設定</Badge>}
+      </div>
+      {!q.data.issuer && (
+        <p className={styles.note} data-testid="fe2-accounting-unset">
+          まだ保存されていません。保存するまで、領収書は既定の発行者（所在地・登録番号は「未設定」）で出ます。
+        </p>
+      )}
+      <IssuerForm issuer={q.data.issuer} canEdit={canEdit} />
+    </>
+  );
+}
+
 export function AccountingScreen(): JSX.Element {
   const { canEdit } = useAppCapability("accounting");
-  const q = useIssuer();
+  const [tab, setTab] = useState<Tab>(initialTab);
   return (
     <div className={styles.page}>
       <Stack gap={6} testId="fe2-accounting-screen">
         <PageHeader
           testId="fe2-accounting-header"
           title="会計"
-          description="発行者情報。チケットの領収書の発行者欄（法人名・所在地・登録番号・税率）はここから印字されます。"
-          {...(q.data ? { actions: q.data.issuer ? <Badge tone="success">設定済み</Badge> : <Badge tone="warning">未設定</Badge> } : {})}
+          description="領収書の発行者情報と、公式サイトのプライバシーポリシーを管理します。"
         />
-        {q.isPending ? (
-          <div className={styles.form} data-testid="fe2-accounting-skeleton">
-            {[0, 1, 2].map((i) => <SkeletonCard key={i} lines={3} />)}
-          </div>
-        ) : q.isError ? (
-          <ErrorState testId="fe2-accounting-error" error={{ code: "INTERNAL", message: "発行者情報を読み込めませんでした。" }} onRetry={() => void q.refetch()} />
-        ) : (
-          <>
-            {!q.data.issuer && (
-              <p className={styles.note} data-testid="fe2-accounting-unset">
-                まだ保存されていません。保存するまで、領収書は既定の発行者（所在地・登録番号は「未設定」）で出ます。
-              </p>
-            )}
-            <IssuerForm issuer={q.data.issuer} canEdit={canEdit} />
-          </>
-        )}
+        <SegmentedControl<Tab>
+          testId="fe2-accounting-tabs"
+          aria-label="会計の設定"
+          options={TABS}
+          value={tab}
+          onChange={setTab}
+        />
+        {tab === "issuer" ? <IssuerPanel canEdit={canEdit} /> : <PrivacyPolicyPanel canEdit={canEdit} />}
       </Stack>
     </div>
   );

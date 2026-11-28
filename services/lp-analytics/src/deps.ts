@@ -36,6 +36,7 @@ export function buildDeps(env: Env, requestId?: string): AppDeps {
     now: nowIso,
     newLinkId: () => newId("lnk"),
     newVisitId: () => newId("lpv"),
+    ...(Number(env.LP_DAILY_INSIGHT_CAP) > 0 ? { dailyInsightCap: Number(env.LP_DAILY_INSIGHT_CAP) } : {}),
     dailyVisitCap: Number(env.LP_DAILY_VISIT_CAP) > 0 ? Number(env.LP_DAILY_VISIT_CAP) : DEFAULT_DAILY_VISIT_CAP,
     siteTraffic: siteTrafficFrom(env),
     ticketRelease: createTicketReleaseClient(env.SVC_LP_TICKETS, requestId ?? ""),

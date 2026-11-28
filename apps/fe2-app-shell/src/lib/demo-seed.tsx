@@ -23,7 +23,7 @@
 import type { ErrorResponse } from "@dub/errors";
 import type { auditLog, auth as authTypes, event, gantt, gateway, identity, mail, meeting, notification, task } from "@dub/types";
 // Value import (namespace) for the frozen RBAC catalog served to the admin screen.
-import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
+import { auth as authValues, identity as identityValues, notification as notificationValues, meeting as meetingValues, appRegistry, mail as mailValues, member as memberValues, hr, hrForm as hrFormValues, hrResult as hrResultValues, sponsor as sponsorValues, goal as goalValues, accounting as accountingValues, privacyPolicy as privacyPolicyValues, lp as lpValues, lpTickets, common as commonValues } from "@dub/types";
 import { createMockFetch } from "./mock-api-client.tsx";
 import { INQUIRY_KIND_SPECS } from "../shell/inquiry/inquiryKinds.ts";
 
@@ -35,6 +35,7 @@ import { createHrInterviewsDemoStore } from "./demo-hr-interviews.ts";
 import { createSponsorMailDemo } from "./demo-sponsor-mail.ts";
 import { buildForwardBody, createCustomEmojiSim, createSlackImportSim, createTimesSim, demoMessageLink, mockUnfurl, seedLaterDemoPrefs, type ImportedChannel } from "../composition/featureEntries";
 import { createDemoLpSponsorStore } from "./demo-lp-sponsor.ts";
+import { createDemoLpInsightsStore } from "./demo-lp-insights.ts";
 
 const ORG = "org_demo";
 const ME_ID = "usr_demo";
@@ -6397,7 +6398,26 @@ function createLpProposalsStore() {
 // 発行者情報 1 件をメモリで持つ。検査・正規化は本物と同じ @dub/types accounting を使う。
 function createAccountingStore(me: () => { id: string; displayName: string }) {
   let issuer: accountingValues.AccountingIssuer | null = null;
+  // プライバシーポリシーは版ごとに積む（本物と同じく最新 = 末尾）。
+  const policies: accountingValues.PrivacyPolicy[] = [];
+  function handlePolicy(method: string, body: any): Response | null {
+    const latest = policies[policies.length - 1] ?? null;
+    if (method === "GET") {
+      const history = policies.slice().reverse().slice(0, accountingValues.PRIVACY_POLICY_HISTORY_LIMIT)
+        .map(({ version, updatedByName, updatedAt }) => ({ version, updatedByName, updatedAt }));
+      return json({ policy: latest, history } satisfies accountingValues.GetPrivacyPolicyResponse);
+    }
+    if (method !== "PUT") return null;
+    if ((latest?.version ?? 0) !== body?.expectedVersion) return json({ error: { code: "ACCOUNTING_PRIVACY_POLICY_VERSION_CONFLICT", message: "conflict" } }, 409);
+    const parsed = privacyPolicyValues.parsePrivacyPolicyBody(body?.body);
+    if (!parsed.ok) return json({ error: { code: "VALIDATION_FAILED", message: "Validation failed", details: [{ field: "body", reason: parsed.reason }] } }, 400);
+    const u = me();
+    const saved: accountingValues.PrivacyPolicy = { body: parsed.value, version: body.expectedVersion + 1, updatedBy: u.id as accountingValues.PrivacyPolicy["updatedBy"], updatedByName: u.displayName, updatedAt: new Date().toISOString() };
+    policies.push(saved);
+    return json(saved satisfies accountingValues.PutPrivacyPolicyResponse);
+  }
   function handle(method: string, pathname: string, body: any): Response | null {
+    if (pathname === "/api/v1/members/accounting/privacy-policy") return handlePolicy(method, body);
     if (pathname !== "/api/v1/members/accounting/issuer") return null;
     if (method === "GET") return json({ issuer } satisfies accountingValues.GetIssuerResponse);
     if (method !== "PUT") return null;
@@ -6814,6 +6834,7 @@ export function createDemoFetch(): typeof fetch {
   const lpTicketsStore = createLpTicketsStore();
   // LP 登壇者募集（入力項目・応募の選考）— LP管理の登壇者募集タブ。
   const lpProposalsStore = createLpProposalsStore();
+  const lpInsightsStore = createDemoLpInsightsStore();
   const lpSponsorStore = createDemoLpSponsorStore((import.meta.env.VITE_LP_PUBLIC_URL as string | undefined) || DEMO_LP_URL);
   // スポンサー: 名刺 (写真は生バイトで受けて、そのまま返す)。
   const accountingStore = createAccountingStore(() => currentMe().user);
@@ -7040,6 +7061,7 @@ export function createDemoFetch(): typeof fetch {
       lpTicketsStore.handle(method, url.pathname, url, parsedBody) ??
       lpProposalsStore.handle(method, url.pathname, url, parsedBody) ??
       lpSponsorStore.handle(method, url.pathname, url, parsedBody) ??
+      lpInsightsStore.handle(method, url.pathname, url) ??
       lpSiteConfigStore.handle(method, url.pathname, url, parsedBody) ??
       matchDemoRoute(method, url.pathname, url, parsedBody);
     if (hit) return hit;

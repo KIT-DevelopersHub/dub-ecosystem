@@ -30,6 +30,7 @@ export * as lp from "./lp"; // lp-analytics (LP管理: 公開版切り替え)
 export * as lpTickets from "./lp-tickets"; // lp-tickets (LP チケット販売: 券種・注文・クーポン) — fe2 LP管理と共有
 export * as lpMarkdown from "./lp-markdown"; // LP お知らせ詳細の Markdown 描画・Google ドライブ画像 URL の正規化（LP Worker と LP管理で共用）
 export * as lpSponsor from "./lp-sponsor"; // LP スポンサー募集（/sponsors の資料請求）— lp-analytics・fe2 LP管理・LP Worker で共有
+export * as lpInsights from "./lp-insights"; // LP アクセス解析（cookie なし・日次集計）— LP Worker・api-gateway・lp-analytics・fe2 LP管理で共有
 export * as meeting from "./meeting"; // drive-share-service /meetings (カレンダー > ミーティング)
 export * as hr from "./hr"; // member-service /members/hr/* (人事: 応募→選考→参加→オンボーディング)
 export * as hrForm from "./hr-interview-form"; // 人事: 面談申し込みフォーム (編集できる質問 + 回答 → 応募者)
@@ -37,6 +38,7 @@ export * as hrInterview from "./hr-interview"; // 人事: 面談の日程調整 
 export * as hrResult from "./hr-interview-result"; // 人事: 面談結果の登録 (合否メール・合格のアカウント発行)
 export * as goal from "./goal"; // member-service /members/goals (目標管理: チームの月間目標と KPI)
 export * as accounting from "./accounting"; // member-service /members/accounting/issuer (会計: 団体の発行者情報・領収書が読む)
+export * as privacyPolicy from "./privacy-policy"; // 公式サイト /privacy の既定の文案と本文の検査 (会計アプリで編集・LP Worker が描く)
 export * as sponsor from "./sponsor"; // member-service /members/sponsor/* (スポンサー: 名刺の共有)
 
 export const CONTRACT_VERSION = "1.0.0";

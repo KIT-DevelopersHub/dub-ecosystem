@@ -49,6 +49,8 @@ import { createSiteConfigSource, draftCookie, draftPreview, htmlAttributes, supp
 import { bridgeScript, parseExtraOrigins, shouldInjectBridge } from "./preview-bridge.ts";
 import { contentInjections, contentSelector } from "./lp-content.ts";
 import { joinTicketsAttributes } from "../src/lib/join-tickets.ts";
+import { insightsApiBase, insightsTag, LEGACY_VID_CLEANUP_TAG } from "./insights.ts";
+import { createPolicySource, FOOTER_LINK_TAG, handlePrivacy, isPrivacyPath } from "./privacy.ts";
 import type { LpContentSectionId } from "../../../packages/types/src/lp.ts";
 
 interface Fetcher {
@@ -63,6 +65,12 @@ interface Env {
   TICKETS_DEMO?: string;
   /** LP管理のミニプレビュー連動で許可する追加の親オリジン（カンマ区切り・https のみ）。 */
   PREVIEW_PARENT_ORIGINS?: string;
+  /** アクセス解析ビーコンの送り先（Dub api-gateway）。未設定 = 本番の gateway（デモでは差し込まない）。 */
+  DUB_API_BASE?: string;
+  /** "off" でアクセス解析スクリプトを差し込まない。 */
+  LP_INSIGHTS?: string;
+  /** member-service（dub-member-service）。/privacy の本文（会計アプリで編集）を読む。無ければ既定の文案。 */
+  SVC_MEMBER?: Fetcher;
 }
 interface RewriterElement {
   append(content: string, opts: { html: boolean }): void;
@@ -190,6 +198,16 @@ function siteLayout(env: Env, draft: boolean) {
   return siteConfigSource(draft);
 }
 
+// プライバシーポリシー（会計アプリで編集）。isolate ごとに 1 つ・60 秒キャッシュ。
+let policySource: ReturnType<typeof createPolicySource> | null = null;
+function privacyPolicy(env: Env) {
+  if (!policySource) {
+    const svc = env.SVC_MEMBER;
+    policySource = createPolicySource(svc ? (u, init) => svc.fetch(u, init) : null);
+  }
+  return policySource();
+}
+
 function ticketsInternal(env: Env): ((path: string, init: RequestInit) => Promise<Response>) | null {
   return internalFetch(env.LP_TICKETS, "lp-tickets", env.TICKETS_DEMO === "1");
 }
@@ -197,6 +215,13 @@ function ticketsInternal(env: Env): ((path: string, init: RequestInit) => Promis
 // 登壇者募集は lp-analytics のまま（チケットとは別の binding）。
 function proposalsInternal(env: Env): ((path: string, init: RequestInit) => Promise<Response>) | null {
   return internalFetch(env.LP_FLAG, "lp-analytics", env.TICKETS_DEMO === "1");
+}
+
+/** Worker が描いたページ（チケット・登壇者募集・スポンサー募集）にもアクセス解析を足す。プレビュー表示には足さない。 */
+function withInsights(res: Response, apiBase: string | null): Response {
+  if (!apiBase || res.status !== 200 || !(res.headers.get("content-type") ?? "").includes("text/html")) return res;
+  const tag = insightsTag(apiBase);
+  return new HTMLRewriter().on("body", { element: (el) => el.append(tag, { html: true }) }).transform(res);
 }
 
 async function notFound(env: Env, origin: string, version: string, req: Request): Promise<Response> {
@@ -232,13 +257,19 @@ export default {
     // 下書きの公開設定プレビュー（?config=draft）。この閲覧者にだけ効く。
     const cfgDraft = draftPreview(url, req.headers.get("cookie"), req.headers.get("referer"));
     const cfgCookie = draftCookie(url);
+    // LP管理のプレビュー（?tickets= / ?proposals= / ?config=draft / テスト購入）は数えない。
+    const insights = mode || spMode || cfgDraft || tkToken ? null : insightsApiBase(env);
+    // プライバシーポリシー（全ての版で同じページ。会計アプリで編集した本文）。
+    if (isPrivacyPath(url.pathname)) {
+      return withInsights(await handlePrivacy(req, () => privacyPolicy(env), env.TICKETS_DEMO === "1"), insights);
+    }
     if (proposalsPath) {
       const handled = await handleProposals(req, {
         demo: env.TICKETS_DEMO === "1",
         getConfig: getProposals,
         internal: proposalsInternal(env),
       });
-      if (handled) return handled;
+      if (handled) return withInsights(handled, insights);
     }
     // スポンサー募集（/sponsors の資料請求）。公開中だけ応答し、それ以外は通常の 404。
     const sponsorsPath = isSponsorsPath(url.pathname);
@@ -248,7 +279,7 @@ export default {
         getConfig: () => sponsorConfig(env),
         internal: proposalsInternal(env),
       });
-      if (handled) return handled;
+      if (handled) return withInsights(handled, insights);
     }
     if (ticketsPath) {
       const handled = await handleTickets(req, {
@@ -261,7 +292,7 @@ export default {
         previewToken: tkToken,
       });
       if (handled) {
-        if (!tkTokenCookie) return handled;
+        if (!tkTokenCookie) return withInsights(handled, insights);
         const h = new Headers(handled.headers);
         h.append("set-cookie", tkTokenCookie);
         return new Response(handled.body, { status: handled.status, statusText: handled.statusText, headers: h });
@@ -327,7 +358,16 @@ export default {
     const bridge = shouldInjectBridge({ page, siteConfig, previewing: r.preview || !!mode || !!spMode || cfgDraft })
       ? bridgeScript(parseExtraOrigins(env.PREVIEW_PARENT_ORIGINS))
       : "";
+    // アクセス解析（公開表示の 200 ページだけ。版のプレビュー・LP管理のプレビューには足さない）。
+    const tracking = page && !r.preview && insights ? insightsTag(insights) : "";
+    // 古い版の流入 URL 計測（VisitBeacon）が端末に残した訪問者 ID を消す（公開・プレビューを問わず・DNT でも）。
+    const cleanup = page ? LEGACY_VID_CLEANUP_TAG : "";
+    // フッターの「プライバシーポリシー」リンク（全ての版に足す。hydration の後に足すのでスクリプト）。
+    const footerLink = page ? FOOTER_LINK_TAG : "";
     const inject =
+      cleanup +
+      footerLink +
+      tracking +
       bridge +
       (r.preview ? previewBanner(r.version, published) : "") +
       previewBar(previewing, hidden) +

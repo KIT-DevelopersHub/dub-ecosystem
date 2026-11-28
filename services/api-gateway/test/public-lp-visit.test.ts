@@ -43,16 +43,28 @@ describe("POST /api/v1/public/lp-visits", () => {
     expect(JSON.stringify(row)).not.toContain("abcDEF123456");
   });
 
-  it("same vid → same visitorKey (uniques); different vid → different", async () => {
+  it("ignores a client id (older builds' long-lived vid): every beacon gets a fresh key", async () => {
     const lp = lpBinding();
     const app = createApp(NO_RL);
     const env = makeEnv({ SVC_LP_ANALYTICS: lp.fetcher });
-    for (const vid of ["visitorAAAA1", "visitorAAAA1", "visitorBBBB2"]) {
+    for (const vid of ["visitorAAAA1", "visitorAAAA1"]) {
       await app.fetch(beacon({ source: "x", vid }), env, execCtx);
     }
     const keys = await Promise.all(lp.requests.map(async (r) => ((await r.json()) as { visitorKey: string }).visitorKey));
-    expect(keys[0]).toBe(keys[1]);
-    expect(keys[2]).not.toBe(keys[0]);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("drops Do Not Track / Global Privacy Control requests with the same 204 (nothing recorded)", async () => {
+    const lp = lpBinding();
+    const app = createApp(NO_RL);
+    const env = makeEnv({ SVC_LP_ANALYTICS: lp.fetcher });
+    expect((await app.fetch(beacon({ source: "x" }, { dnt: "1" }), env, execCtx)).status).toBe(204);
+    expect((await app.fetch(beacon({ source: "x" }, { "sec-gpc": "1" }), env, execCtx)).status).toBe(204);
+    expect(lp.requests).toHaveLength(0);
+    // DNT: 0 は拒否ではない。
+    await app.fetch(beacon({ source: "x" }, { dnt: "0" }), env, execCtx);
+    expect(lp.requests).toHaveLength(1);
   });
 
   it("drops beacons from a non-LP origin with the same 204 (nothing recorded)", async () => {

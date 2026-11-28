@@ -2,7 +2,7 @@
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import type { DbClient } from "@dub/db";
-import { createD1AccountingRepo, type IssuerRow } from "../src/accounting-repo";
+import { createD1AccountingRepo, type IssuerRow, type PrivacyPolicyRow } from "../src/accounting-repo";
 import { MEMBER_MIGRATIONS } from "../src/schema";
 import { call, createApp, makeDeps } from "./harness";
 
@@ -109,5 +109,78 @@ describe("createD1AccountingRepo", () => {
     const next = { ...row, version: 2, name: "変更", officeName: "事務局" };
     expect(await repo.saveIssuer(next, 1)).toBe(true);
     expect(await repo.getIssuer("org_x")).toEqual(next);
+  });
+});
+
+describe("会計 プライバシーポリシー", () => {
+  const BODY = "## 1. 取得する情報\r\n\r\n- 氏名\r\n  ";
+
+  it("starts empty, saves versions with history, and serves only body + date to the LP", async () => {
+    const app = createApp(makeDeps({ now: NOW }));
+    expect((await call(app, "GET", "/members/accounting/privacy-policy")).json).toEqual({ policy: null, history: [] });
+    expect((await call(app, "GET", "/members/internal/accounting/privacy-policy", { internal: true, userId: null })).json).toEqual({ policy: null });
+
+    const first = await call(app, "PUT", "/members/accounting/privacy-policy", { body: { body: BODY, expectedVersion: 0 } });
+    expect(first.status).toBe(200);
+    expect(first.json).toEqual({ body: "## 1. 取得する情報\n\n- 氏名", version: 1, updatedBy: "user_caller", updatedByName: null, updatedAt: NOW() });
+    const second = await call(app, "PUT", "/members/accounting/privacy-policy", { body: { body: "改定", expectedVersion: 1 } });
+    expect(second.json).toMatchObject({ body: "改定", version: 2 });
+
+    const got = await call(app, "GET", "/members/accounting/privacy-policy");
+    expect(got.json.policy).toEqual(second.json);
+    expect(got.json.history.map((h: { version: number }) => h.version)).toEqual([2, 1]);
+    expect(Object.keys(got.json.history[0]).sort()).toEqual(["updatedAt", "updatedByName", "version"]);
+
+    const pub = await call(app, "GET", "/members/internal/accounting/privacy-policy", { internal: true, userId: null });
+    expect(pub.json).toEqual({ policy: { body: "改定", updatedAt: NOW() } });
+  });
+
+  it("rejects an empty / too long body and a stale version", async () => {
+    const app = createApp(makeDeps({ now: NOW }));
+    const empty = await call(app, "PUT", "/members/accounting/privacy-policy", { body: { body: "  \n ", expectedVersion: 0 } });
+    expect(empty.status).toBe(400);
+    expect(empty.json.error.details).toEqual([{ field: "body", reason: "required" }]);
+    const long = await call(app, "PUT", "/members/accounting/privacy-policy", { body: { body: "あ".repeat(20_001), expectedVersion: 0 } });
+    expect(long.json.error.details).toEqual([{ field: "body", reason: "too_long" }]);
+    expect((await call(app, "PUT", "/members/accounting/privacy-policy", { body: { body: "x" } })).status).toBe(400);
+    expect((await call(app, "PUT", "/members/accounting/privacy-policy", { body: { body: "x", expectedVersion: 0 } })).status).toBe(200);
+    const stale = await call(app, "PUT", "/members/accounting/privacy-policy", { body: { body: "y", expectedVersion: 0 } });
+    expect(stale.status).toBe(409);
+    expect(stale.json.error.code).toBe("ACCOUNTING_PRIVACY_POLICY_VERSION_CONFLICT");
+  });
+
+  it("the internal reader is not reachable from outside", async () => {
+    const app = createApp(makeDeps({ now: NOW }));
+    expect((await call(app, "GET", "/members/internal/accounting/privacy-policy")).status).toBe(403);
+  });
+});
+
+describe("createD1AccountingRepo privacy policy", () => {
+  it("appends versions only on top of the expected latest one", async () => {
+    const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+    type Bind = string | number | null;
+    const raw = new DatabaseSync(":memory:");
+    for (const m of MEMBER_MIGRATIONS) raw.exec(m.up);
+    const db = {
+      namespace: "member",
+      first: async (sql: string, ...b: Bind[]) => raw.prepare(sql).get(...b) ?? null,
+      all: async (sql: string, ...b: Bind[]) => raw.prepare(sql).all(...b),
+      run: async (sql: string, ...b: Bind[]) => {
+        const r = raw.prepare(sql).run(...b);
+        return { success: true, meta: { changes: Number(r.changes), durationMs: 0 } };
+      },
+    } as unknown as DbClient;
+    const repo = createD1AccountingRepo(db);
+    const v1: PrivacyPolicyRow = { orgId: "org_x", body: "初版", version: 1, updatedBy: "usr_1" as PrivacyPolicyRow["updatedBy"], updatedByName: "佐藤", updatedAt: NOW() };
+    expect(await repo.getPrivacyPolicy("org_x")).toBeNull();
+    expect(await repo.addPrivacyPolicy({ ...v1, version: 2 }, 1)).toBe(false);
+    expect(await repo.addPrivacyPolicy(v1, 0)).toBe(true);
+    expect(await repo.addPrivacyPolicy({ ...v1, body: "別" }, 0)).toBe(false);
+    const v2 = { ...v1, version: 2, body: "改定", updatedByName: null };
+    expect(await repo.addPrivacyPolicy(v2, 1)).toBe(true);
+    expect(await repo.getPrivacyPolicy("org_x")).toEqual(v2);
+    expect(await repo.getPrivacyPolicy("org_other")).toBeNull();
+    expect(await repo.listPrivacyPolicyHistory("org_x", 1)).toEqual([{ version: 2, updatedByName: null, updatedAt: NOW() }]);
+    expect((await repo.listPrivacyPolicyHistory("org_x", 20)).map((h) => h.version)).toEqual([2, 1]);
   });
 });

@@ -370,6 +370,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
   // 領収書 (lp-tickets) が発行者欄を読む s2s 口。中身は公開の領収書に印字する情報だけ。
   app.get("/members/internal/accounting/issuer", async (c) => c.json(await accountingSvc.getIssuer()));
+  // 会計: 公式サイト (LP /privacy) のプライバシーポリシー本文。1 保存 1 版 (変更履歴)。LP Worker は内部口で本文だけ読む。
+  app.get("/members/accounting/privacy-policy", async (c) => c.json(await accountingSvc.getPrivacyPolicy()));
+  app.put("/members/accounting/privacy-policy", async (c) => {
+    const body = await readJson<accounting.PutPrivacyPolicyRequest>(c);
+    return c.json(await accountingSvc.putPrivacyPolicy(reqCtx(c), body));
+  });
+  app.get("/members/internal/accounting/privacy-policy", async (c) => c.json(await accountingSvc.getPublicPrivacyPolicy()));
 
   // 目標管理。認可は表、入力の検証と楽観ロックは goal-service。
   app.get("/members/goals", async (c) => c.json(await goalSvc.list(reqCtx(c), c.req.query("month"))));

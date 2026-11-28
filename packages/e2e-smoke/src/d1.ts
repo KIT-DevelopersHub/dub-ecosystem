@@ -37,6 +37,8 @@ export function allSchemas(): string[] {
     // SELECT/INSERTs start_at, so the seeded smoke D1 must apply this physical migration.
     sqlFile("../../../infra/d1/migrations/task/0005_task_start_at.sql"),
     sqlFile("../../../infra/d1/migrations/task/0006_task_assignee_team.sql"),
+    // #904: LP アクセス解析の日次集計（lp_metrics_daily）。他の lp_* と独立した 1 表なので単独で足せる。
+    sqlFile("../../../infra/d1/migrations/lp/0012_metrics_daily.sql"),
     sqlFile("../../../services/notification/db/0001_notif.sql"),
     sqlFile("../../../services/notification/db/0002_feedback.sql"),
     sqlFile("../../../services/notification/db/0003_freeq_outbox.sql"),

@@ -1,6 +1,6 @@
 // POST /api/v1/public/lp-visits — public (unauthenticated) LP pageview beacon.
 // The conference LP (hokuriku-it-conf.com) sends one navigator.sendBeacon per page load
-// with { source (utm_source), path, lpVersion, referrer, vid }. sendBeacon posts
+// with { source (utm_source), path, lpVersion, referrer }. sendBeacon posts
 // text/plain, so this is a CORS "simple request" (no preflight, response unread).
 //
 // The gateway does the edge-only work, then forwards a sanitized row to lp-analytics'
@@ -9,9 +9,11 @@
 //     dropped (no signal for a scraper to tune against).
 //   * UA → device (bots are recorded as `bot` and excluded from totals downstream).
 //   * country from the Cloudflare edge (request.cf), never from the client.
-//   * visitorKey = SHA-256 of the client's random anonymous id. Without one (storage
-//     blocked) a fresh random key is used — never anything derived from IP / UA, which
-//     an unsalted hash would make reversible. Raw IP / UA are never forwarded or stored.
+//   * DNT: 1 / Sec-GPC: 1 → dropped (the current LP stays silent; this also covers older
+//     published builds that still send).
+//   * visitorKey = a fresh random key per beacon. Older builds still send a long-lived
+//     localStorage id (`vid`); it is ignored, so nothing ties two visits together. Never
+//     anything derived from IP / UA either. Raw IP / UA are never forwarded or stored.
 // Global rate limiting (middleware) bounds abuse per IP.
 import type { Context } from "hono";
 import type { GatewayEnv } from "../env";
@@ -25,7 +27,6 @@ const SYSTEM_ACTOR = "system:public-lp-visit";
 export const DEFAULT_LP_ORIGINS = ["https://hokuriku-it-conf.com", "https://www.hokuriku-it-conf.com"];
 const MAX_BODY_CHARS = 2048;
 const FIELD_MAX = 200;
-const VID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const BOT_RE =
   /bot|crawl|spider|slurp|bingpreview|facebookexternalhit|embedly|quora link preview|whatsapp|headless|lighthouse|pagespeed|phantomjs|python-requests|curl\/|wget\//i;
 const MOBILE_RE = /mobi|android|iphone|ipad|ipod/i;
@@ -36,6 +37,11 @@ export function classifyDevice(ua: string | undefined): LpDevice {
   if (!ua) return "unknown";
   if (BOT_RE.test(ua)) return "bot";
   return MOBILE_RE.test(ua) ? "mobile" : "desktop";
+}
+
+/** Do Not Track / Global Privacy Control が有効なリクエストか。 */
+export function optedOut(dnt: string | undefined, gpc: string | undefined): boolean {
+  return dnt === "1" || gpc === "1";
 }
 
 export function lpOrigins(env: GatewayEnv): string[] {
@@ -72,6 +78,7 @@ export async function publicLpVisitHandler(
 ): Promise<Response> {
   const origin = c.req.header("origin");
   if (!origin || !lpOrigins(c.env).includes(origin)) return c.body(null, 204);
+  if (optedOut(c.req.header("dnt"), c.req.header("sec-gpc"))) return c.body(null, 204);
 
   if (Number(c.req.header("content-length") ?? 0) > MAX_BODY_CHARS) {
     throw errors.validationFailed([{ field: "body", reason: "too_large" }]);
@@ -88,8 +95,8 @@ export async function publicLpVisitHandler(
   }
 
   const ua = c.req.header("user-agent");
-  const vid = typeof b.vid === "string" && VID_RE.test(b.vid) ? b.vid : null;
-  const visitorKey = await sha256Hex(vid ? `vid:${vid}` : `anon:${crypto.randomUUID()}`);
+  // 端末をまたいで訪問を結び付けない: クライアントの id（古い版の vid）は使わず、毎回新しい乱数。
+  const visitorKey = await sha256Hex(`anon:${crypto.randomUUID()}`);
   const cf = (c.req.raw as unknown as { cf?: { country?: unknown } }).cf;
   const country = str(cf?.country) ?? str(c.req.header("cf-ipcountry"));
 

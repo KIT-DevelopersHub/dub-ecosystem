@@ -295,7 +295,7 @@ function renderBlocks(lines: readonly string[], depth: number): string {
  * Markdown → 安全な HTML（見出し・段落・太字・斜体・取り消し線・コード・箇条書き・番号付き・引用・区切り線・リンク・画像）。
  * 段落の中の改行はそのまま改行（<br>）にする（note のように書いたとおりに見せる）。
  */
-export function renderLpMarkdown(src: string): string {
-  const text = src.slice(0, RENDER_MAX).replace(/\r\n?/g, "\n");
+export function renderLpMarkdown(src: string, opts: { max?: number } = {}): string {
+  const text = src.slice(0, opts.max ?? RENDER_MAX).replace(/\r\n?/g, "\n");
   return renderBlocks(text.split("\n"), 0);
 }

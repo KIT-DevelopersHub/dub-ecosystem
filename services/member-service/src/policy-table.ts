@@ -246,9 +246,14 @@ export const POLICY_TABLE = definePolicyTable({
   // 会計: 団体の発行者情報。閲覧 + accounting:read で読める。変更は 編集 のみ (領収書に印字されるので詳細キーで絞らずアプリ単位)。
   "GET /members/accounting/issuer": appLevel("accounting", "view", "accounting:read"),
   "PUT /members/accounting/issuer": appLevel("accounting", "edit"),
+  // 公式サイトのプライバシーポリシー。発行者情報と同じ (閲覧 + accounting:read で読める・変更は 編集)。
+  "GET /members/accounting/privacy-policy": appLevel("accounting", "view", "accounting:read"),
+  "PUT /members/accounting/privacy-policy": appLevel("accounting", "edit"),
   // 領収書 (lp-tickets) が発行者欄を読む。購入者の公開ページ経由で呼ばれ、操作する本人がいないのでキー無しの INTERNAL
   // (team-members と同じ理由)。返すのは領収書に印字する公開情報だけ。gateway は /members/internal/ を 404 にする。
   "GET /members/internal/accounting/issuer": INTERNAL,
+  // LP Worker (lp-conference-next の SVC_MEMBER) が /privacy を描くために本文だけ読む。
+  "GET /members/internal/accounting/privacy-policy": INTERNAL,
 
   // 目標管理。閲覧 + goals:read で全チームの進捗 (件数だけで個人情報は含まない) を読める。編集は 編集 のみ。
   "GET /members/goals": appLevel("goals", "view", "goals:read"),

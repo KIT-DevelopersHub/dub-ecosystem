@@ -1045,7 +1045,7 @@ export function shell(
     '<a class="back" href="/"><span aria-hidden="true">←</span>トップへ戻る</a></div></header>' +
     `<main>${body}</main></div>` +
     `<footer><div class="wrap"><a class="brand" href="/" aria-label="トップへ">${BRAND}</a>` +
-    `<a class="fl" href="/">公式サイトへ</a><span>&copy; ${CONF_NAME}</span></div></footer>` +
+    `<a class="fl" href="/">公式サイトへ</a><a class="fl" href="/privacy">プライバシーポリシー</a><span>&copy; ${CONF_NAME}</span></div></footer>` +
     `<script>${SCRIPT}</script></body></html>`
   );
 }
@@ -1485,7 +1485,7 @@ export function renderThanksPage(o: {
   return shell(
     "お申し込み",
     hero({ title: ok ? 'Thank <span class="g">you!</span>' : "お申し込み", ghost: ok ? "THANKS" : "TICKETS", step, small: true }) +
-      `<div class="body"><div class="wrap"><section class="card done rv">${inner}<div class="acts">${acts}</div></section></div></div>${share}`,
+      `<div class="body"><div class="wrap"><section class="card done rv"${ok ? " data-lp-purchase" : ""}>${inner}<div class="acts">${acts}</div></section></div></div>${share}`,
     !!o.demo,
     !!o.test,
     undefined,

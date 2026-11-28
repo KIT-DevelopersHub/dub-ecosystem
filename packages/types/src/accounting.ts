@@ -189,3 +189,41 @@ export function issuerWarningMessage(w: IssuerWarning): string {
       return "登録番号の確認用の数字が合いません。法人の場合は番号をご確認ください（個人事業者の番号はこの確認に当てはまらないことがあります）";
   }
 }
+
+// ---- プライバシーポリシー (公式サイト /privacy の本文) ----
+// GET/PUT /members/accounting/privacy-policy (会計アプリ) と GET /members/internal/accounting/privacy-policy (LP Worker)。
+// 1 回の保存 = 1 版。版ごとの本文を全部残す (変更履歴)。本文の検査・既定の文案は privacy-policy.ts。
+
+export interface PrivacyPolicy {
+  /** Markdown。LP は lp-markdown の安全な描画で出す。 */
+  body: string;
+  version: number;
+  updatedBy: UserId;
+  updatedByName: string | null;
+  updatedAt: ISODateTime;
+}
+
+/** 変更履歴の 1 行 (本文は含めない)。新しい順。 */
+export type PrivacyPolicyRevision = Pick<PrivacyPolicy, "version" | "updatedByName" | "updatedAt">;
+
+/** 履歴は直近この件数だけ返す。 */
+export const PRIVACY_POLICY_HISTORY_LIMIT = 20;
+
+/** GET /members/accounting/privacy-policy。policy null = まだ一度も保存していない (LP は既定の文案)。 */
+export interface GetPrivacyPolicyResponse {
+  policy: PrivacyPolicy | null;
+  history: PrivacyPolicyRevision[];
+}
+
+/** PUT /members/accounting/privacy-policy。新規は expectedVersion 0 (楽観ロック)。 */
+export interface PutPrivacyPolicyRequest {
+  body: string;
+  expectedVersion: number;
+}
+
+export type PutPrivacyPolicyResponse = PrivacyPolicy;
+
+/** GET /members/internal/accounting/privacy-policy (LP Worker)。更新者は出さない。 */
+export interface GetPublicPrivacyPolicyResponse {
+  policy: { body: string; updatedAt: ISODateTime } | null;
+}
