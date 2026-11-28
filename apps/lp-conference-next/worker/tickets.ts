@@ -39,6 +39,8 @@ export interface PublicTicketType {
   soldOut: boolean;
   /** 0-yen type that needs a coupon code: hidden from the normal list. */
   couponOnly: boolean;
+  /** 0-yen type anyone can sign up for without a coupon (無料で参加登録): 1 per order, 1 per email. */
+  openRegistration: boolean;
 }
 export type PaymentMethod = "card" | "paypay";
 
@@ -129,11 +131,11 @@ export const DEMO_CONFIG: TicketConfig = {
     { id: "attendance", label: "参加区分", type: "select", required: true, options: ["現地", "オンライン"] },
   ],
   types: [
-    { id: "demo-general-d1", name: "一般", description: "Day 1 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY1, maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false },
-    { id: "demo-student-d1", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY1, maxPerOrder: 10, remaining: 3, soldOut: false, couponOnly: false },
-    { id: "demo-invite-d1", name: "招待", description: "招待コードをお持ちの方向け", priceJpy: 0, dayLabel: DAY1, maxPerOrder: 5, remaining: 20, soldOut: false, couponOnly: true },
-    { id: "demo-general-d2", name: "一般", description: "Day 2 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY2, maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false },
-    { id: "demo-student-d2", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY2, maxPerOrder: 10, remaining: 0, soldOut: true, couponOnly: false },
+    { id: "demo-general-d1", name: "一般", description: "Day 1 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY1, maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false, openRegistration: false },
+    { id: "demo-student-d1", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY1, maxPerOrder: 10, remaining: 3, soldOut: false, couponOnly: false, openRegistration: false },
+    { id: "demo-invite-d1", name: "招待", description: "招待コードをお持ちの方向け", priceJpy: 0, dayLabel: DAY1, maxPerOrder: 5, remaining: 20, soldOut: false, couponOnly: true, openRegistration: false },
+    { id: "demo-general-d2", name: "一般", description: "Day 2 の全セッションに参加できます", priceJpy: 3000, dayLabel: DAY2, maxPerOrder: 10, remaining: null, soldOut: false, couponOnly: false, openRegistration: false },
+    { id: "demo-student-d2", name: "学生", description: "学生の方向け（当日学生証をご提示ください）", priceJpy: 1000, dayLabel: DAY2, maxPerOrder: 10, remaining: 0, soldOut: true, couponOnly: false, openRegistration: false },
   ],
 };
 /** Demo only (no lp-analytics): codes -> what the real coupon endpoint would answer. */
@@ -184,8 +186,13 @@ export function quantityCap(t: PublicTicketType, paymentReady: boolean, coupon?:
     return Math.max(0, Math.min(t.maxPerOrder, t.remaining ?? ORDER_MAX, coupon.remainingUses, ORDER_MAX));
   }
   if (t.couponOnly) return 0;
+  if (t.openRegistration) return Math.min(1, maxQuantity(t, paymentReady));
   return maxQuantity(t, paymentReady);
 }
+
+/** Submit label: 無料で参加登録 when every chosen (or, with nothing chosen, every offered) type is a free sign-up. */
+export const FREE_SIGNUP_LABEL = "無料で参加登録";
+export const BUY_LABEL = "購入手続きへ";
 
 /** Types shown on the page: coupon-only ones stay hidden unless a coupon unlocked them. */
 export function visibleTypes(types: PublicTicketType[], coupon?: AppliedCoupon | null): PublicTicketType[] {
@@ -275,7 +282,8 @@ export function parseConfig(raw: unknown): TicketConfig | null {
       remaining,
       soldOut: r.soldOut === true || remaining === 0,
       // Explicit only: an older lp-analytics without the flag still sells 0-yen types openly.
-      couponOnly: r.couponOnly === true,
+      couponOnly: r.couponOnly === true && r.openRegistration !== true,
+      openRegistration: r.openRegistration === true && r.priceJpy <= 0,
     });
   }
   return {
@@ -452,6 +460,9 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
       }
     }
     errors._form = "入力内容に誤りがあります。各項目をご確認ください。";
+  } else if (status === 409 && isAlreadyRegistered(body)) {
+    errors.email = "このメールアドレスはすでに参加登録されています";
+    errors._form = "このメールアドレスでは参加登録済みです。お申し込み時の確認メールをご確認ください。";
   } else if (status === 409 && isCouponUsedUp(body)) {
     errors[COUPON_FIELD] = COUPON_MSG.usedUp;
     errors._form = "このクーポンの残り枚数が足りなくなりました。枚数を減らすか、クーポンを解除してお申し込みください。";
@@ -473,6 +484,7 @@ export function mapCheckoutError(status: number, body: unknown, config: TicketCo
 function itemReasonMessage(key: string, reason: string): string {
   if (key === COUPON_FIELD) return reason === "not_applicable" ? COUPON_MSG.notApplicable : COUPON_MSG.invalid;
   if (reason === "coupon_required") return COUPON_MSG.couponRequired;
+  if (key === "items" && reason === "free_with_paid") return "無料参加登録の券種は、有料の券種とは別にお申し込みください";
   if (key === "items" && reason === "too_many") return `1 回のお申し込みは合計${ORDER_MAX}枚までです`;
   if (key === "items") return "チケットを 1 枚以上選んでください";
   if (!key.startsWith("qty_")) return "入力内容を確認してください";
@@ -482,6 +494,16 @@ function itemReasonMessage(key: string, reason: string): string {
 }
 
 /** 409 { error: { code: "LP_TICKET_COUPON_USED_UP", details: { reason: "coupon_used_up" } } }. */
+function isAlreadyRegistered(body: unknown): boolean {
+  const err = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
+  if (!err || typeof err !== "object") return false;
+  if ((err as { code?: unknown }).code === "LP_TICKET_ALREADY_REGISTERED") return true;
+  const details = (err as { details?: unknown }).details;
+  return (Array.isArray(details) ? details : [details]).some(
+    (d) => !!d && typeof d === "object" && (d as { reason?: unknown }).reason === "already_registered",
+  );
+}
+
 function isCouponUsedUp(body: unknown): boolean {
   const err = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
   if (!err || typeof err !== "object") return false;
@@ -915,6 +937,7 @@ function mk(c,x){var e=d.createElement("span");e.className=c;e.textContent=x;ret
 function up(){var c=0,t=0;if(L)L.textContent="";[].forEach.call(f.querySelectorAll(".tk[data-id]"),function(k){var s=k.querySelector("select"),on=s&&!s.disabled,q=on?+s.value||0:0,p=+k.getAttribute("data-price")||0,m=k.querySelector(".qb[data-step='-1']"),P=k.querySelector(".qb[data-step='1']");
 k.classList.toggle("on",q>0);if(m)m.disabled=!on||s.selectedIndex<=0;if(P)P.disabled=!on||s.selectedIndex>=s.options.length-1;
 if(q>0&&L){c+=q;t+=p*q;var li=d.createElement("li"),dy=k.getAttribute("data-day");li.appendChild(mk("n",k.getAttribute("data-name")));li.appendChild(mk("s",yen(p*q)));li.appendChild(mk("q",(dy?dy+" · ":"")+yen(p)+" × "+q+"枚"));L.appendChild(li)}});
+var SB=f.querySelector(".submit[data-buy-label]"),SL=SB&&SB.querySelector("[data-submit-label]");if(SL){var al=c>0;[].forEach.call(f.querySelectorAll(".tk.on"),function(k){if(!k.hasAttribute("data-open"))al=false});SL.textContent=SB.getAttribute(al?"data-free-label":"data-buy-label")}
 if(E)E.hidden=c>0;if(C)C.textContent=c+"枚";if(T)T.textContent=c>0?yen(t):"¥0";if(W)W.hidden=c<=MX}
 f.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".qb"):null;if(!b||b.disabled)return;var s=b.closest(".tk").querySelector("select");if(!s||s.disabled)return;var i=s.selectedIndex+(+b.getAttribute("data-step"));if(i<0||i>=s.options.length)return;s.selectedIndex=i;up()});
 f.addEventListener("change",up);up();f.addEventListener("submit",function(){var b=f.querySelector(".submit");if(b){b.classList.add("is-busy");b.setAttribute("aria-busy","true")}})})();`;
@@ -1072,7 +1095,9 @@ function renderType(t: PublicTicketType, config: TicketConfig, coupon: AppliedCo
           ? '<span class="badge">決済準備中</span>'
           : t.remaining !== null && t.remaining <= LOW_STOCK
             ? `<span class="badge low">残りわずか ${t.remaining}枚</span>`
-            : "";
+            : t.openRegistration
+              ? `<span class="badge cp">${FREE_SIGNUP_LABEL}</span>`
+              : "";
   const unit = shownPrice(t, coupon);
   const price = formatPrice(unit);
   const label = typeLabel(t);
@@ -1091,7 +1116,7 @@ function renderType(t: PublicTicketType, config: TicketConfig, coupon: AppliedCo
   const day = t.dayLabel ? splitDayLabel(t.dayLabel) : null;
   const cls = `tk${max === 0 ? " off" : ""}${q > 0 ? " on" : ""}${errors[key] ? " bad" : ""}`;
   return (
-    `<div class="${cls}" data-id="${escapeHtml(t.id)}" data-name="${escapeHtml(t.name)}" data-day="${escapeHtml(day ? day.main : "")}" data-price="${unit}">` +
+    `<div class="${cls}" data-id="${escapeHtml(t.id)}" data-name="${escapeHtml(t.name)}" data-day="${escapeHtml(day ? day.main : "")}" data-price="${unit}"${t.openRegistration && !coupon ? ' data-open="1"' : ""}>` +
     `<div class="tk-main"><div class="tk-name">${escapeHtml(t.name)}${badge}</div>` +
     (t.description ? `<span class="tk-desc">${escapeHtml(t.description)}</span>` : "") +
     (day ? `<div class="tk-meta"><span class="tk-day">${CAL}対象日 ${escapeHtml(t.dayLabel)}</span></div>` : "") +
@@ -1138,6 +1163,26 @@ function renderDayGroups(
 }
 
 /** Server-side order summary (same markup the inline script rebuilds live). */
+/** Initial label from the server-side state; the inline script keeps it in step with the selection. */
+export function submitLabel(config: TicketConfig, types: PublicTicketType[], coupon: AppliedCoupon | null, values: FormValues): string {
+  if (coupon) return "申し込む";
+  const offered = types.filter((t) => quantityCap(t, config.paymentReady, null) > 0);
+  const chosen = offered.filter((t) => chosenQty(t, quantityCap(t, config.paymentReady, null), values) > 0);
+  const basis = chosen.length > 0 ? chosen : offered;
+  return basis.length > 0 && basis.every((t) => t.openRegistration) ? FREE_SIGNUP_LABEL : BUY_LABEL;
+}
+
+function renderSubmit(config: TicketConfig, types: PublicTicketType[], coupon: AppliedCoupon | null, values: FormValues): string {
+  const label = submitLabel(config, types, coupon, values);
+  const offered = types.filter((t) => quantityCap(t, config.paymentReady, null) > 0);
+  // Only free sign-ups on offer: the label never needs to change, so no data-* for the script.
+  const live = !coupon && offered.some((t) => t.openRegistration) && offered.some((t) => !t.openRegistration);
+  return (
+    `<button class="submit" type="submit"${live ? ` data-free-label="${FREE_SIGNUP_LABEL}" data-buy-label="${BUY_LABEL}"` : ""}>` +
+    `<span data-submit-label>${label}</span><span class="ar" aria-hidden="true">→</span></button>`
+  );
+}
+
 function renderSummary(config: TicketConfig, types: PublicTicketType[], coupon: AppliedCoupon | null, values: FormValues): string {
   let count = 0;
   let total = 0;
@@ -1372,7 +1417,7 @@ export function renderTicketsPage(o: TicketsPageOptions): string {
     '<p class="sum-k">YOUR ORDER</p>' +
     `<p class="sum-ev">${CONF_NAME}<br>${EVENT_DATE}</p>` +
     renderSummary(config, types, coupon, values) +
-    `<button class="submit" type="submit">${coupon ? "申し込む" : "購入手続きへ"}<span class="ar" aria-hidden="true">→</span></button>` +
+    renderSubmit(config, types, coupon, values) +
     (hasPaid ? `<p class="secure">${LOCK}${securePaymentCopy(config)}</p>` : "") +
     "</div>" +
     (hasPaid

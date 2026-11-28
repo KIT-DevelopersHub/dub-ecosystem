@@ -28,6 +28,8 @@ interface TicketTypeDbRow {
   day_label: string;
   max_per_order: number;
   active: number;
+  /** 0003 migration. NULL / 0 = coupon required for a 0-yen type. */
+  open_registration?: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -152,6 +154,7 @@ const toTicketType = (r: TicketTypeDbRow): TicketTypeRow => ({
   dayLabel: r.day_label,
   maxPerOrder: r.max_per_order,
   active: r.active === 1,
+  openRegistration: r.open_registration === 1,
   sortOrder: r.sort_order,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -319,8 +322,8 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
     async insertTicketType(t) {
       await db.run(
         `INSERT INTO lp_ticket_types (id, site, name, description, price_jpy, capacity, day_label, max_per_order, active,
-                                      sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                      open_registration, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         t.id,
         t.site,
         t.name,
@@ -330,6 +333,7 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
         t.dayLabel,
         t.maxPerOrder,
         t.active ? 1 : 0,
+        t.openRegistration ? 1 : 0,
         t.sortOrder,
         t.createdAt,
         t.updatedAt,
@@ -338,7 +342,7 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
     async updateTicketType(t) {
       await db.run(
         `UPDATE lp_ticket_types SET name = ?, description = ?, price_jpy = ?, capacity = ?, day_label = ?, max_per_order = ?,
-                active = ?, sort_order = ?, updated_at = ?
+                active = ?, open_registration = ?, sort_order = ?, updated_at = ?
          WHERE site = ? AND id = ?`,
         t.name,
         t.description,
@@ -347,6 +351,7 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
         t.dayLabel,
         t.maxPerOrder,
         t.active ? 1 : 0,
+        t.openRegistration ? 1 : 0,
         t.sortOrder,
         t.updatedAt,
         t.site,
@@ -384,7 +389,18 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
       );
       return r?.n ?? 0;
     },
-    async insertOrderIfAvailable(o, capacities, pendingSince) {
+    async countFreeSignupsByClient(site, clientKey, since) {
+      const r = await db.first<{ n: number | null }>(
+        `SELECT COUNT(*) AS n FROM lp_ticket_orders
+         WHERE client_key = ? AND site = ? AND created_at >= ? AND amount_jpy = 0 AND coupon_id IS NULL`,
+        clientKey,
+        site,
+        since,
+      );
+      return r?.n ?? 0;
+    },
+    async insertOrderIfAvailable(o, capacities, pendingSince, opts) {
+      const unique = opts?.uniqueFreeEmail ? 1 : 0;
       // One batch (= one transaction): the order, each item only if its type still has room, then
       // (still in the same batch) drop the order + its items when any item was short. No second
       // write = no ghost partial order if the Worker dies in between.
@@ -397,12 +413,18 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
           sql: `INSERT INTO lp_ticket_orders (id, site, quantity, amount_jpy, status, buyer_name, buyer_email, answers_json,
                                              stripe_session_id, created_at, paid_at, client_key, coupon_id, receipt_name)
                 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                WHERE ? IS NULL OR EXISTS (
+                WHERE (? IS NULL OR EXISTS (
                   SELECT 1 FROM lp_ticket_coupons c
                   WHERE c.id = ? AND c.site = ? AND c.active = 1 AND (c.expires_at IS NULL OR c.expires_at > ?)
                     AND ? = 1 AND c.ticket_type_id = ?
                     AND (SELECT COALESCE(SUM(o.quantity), 0) FROM lp_ticket_orders o WHERE o.coupon_id = c.id AND ${HELD}) + ? <= c.max_uses
-                )`,
+                ))
+                AND (? = 0 OR NOT EXISTS (
+                  -- 無料参加登録: 1 email = 1 sign-up per site (0 yen, no coupon, not a preview, still held).
+                  SELECT 1 FROM lp_ticket_orders o
+                  WHERE o.site = ? AND o.amount_jpy = 0 AND o.coupon_id IS NULL AND COALESCE(o.preview, 0) = 0
+                    AND lower(o.buyer_email) = lower(?) AND ${HELD}
+                ))`,
           binds: [
             o.id,
             o.site,
@@ -426,6 +448,10 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
             o.items[0]?.ticketTypeId ?? null,
             pendingSince,
             o.quantity,
+            unique,
+            o.site,
+            o.buyerEmail,
+            pendingSince,
           ],
         },
         ...o.items.map((i) => {
@@ -463,7 +489,9 @@ export function createD1TicketRepo(db: DbClient): LpTicketRepo {
           binds: [o.id, o.id],
         },
       ]);
-      if ((results[0]?.meta.changes ?? 0) === 0) return { ok: false, reason: "coupon_used_up" };
+      if ((results[0]?.meta.changes ?? 0) === 0) {
+        return o.couponId === null ? { ok: false, reason: "already_registered" } : { ok: false, reason: "coupon_used_up" };
+      }
       const short = o.items.find((_, idx) => (results[idx + 1]?.meta.changes ?? 0) === 0);
       return short ? { ok: false, reason: "sold_out", ticketTypeId: short.ticketTypeId } : { ok: true };
     },

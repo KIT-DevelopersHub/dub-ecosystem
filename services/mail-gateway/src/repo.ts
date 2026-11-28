@@ -3,6 +3,7 @@
 import { type DbClient, newId, nowIso } from "@dub/db";
 import { errors } from "@dub/errors";
 import type { common, mail } from "@dub/types";
+import type { InboundMailView } from "./types";
 
 // ---- row shapes ----
 export interface SendLogRow {
@@ -726,6 +727,23 @@ function rowToDetail(r: InboundRow, viewer?: string): mail.MailMessageDetail {
 export async function getInboundById(db: DbClient, id: string): Promise<mail.MailMessage | null> {
   const row = await db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE id = ?`, id);
   return row ? rowToMailMessage(row) : null;
+}
+
+/** The automation view of one inbound message — backs INTERNAL GET /internal/messages/:id
+ *  (mail-automation, system origin, no owner scope). `key` is the mail_inbound id OR the RFC
+ *  Message-Id: mail.message.received carries the latter as `messageId`. Loop headers that
+ *  ingress persisted (Auto-Submitted, X-Dub-Mail-Loop) are restored as the lower-cased
+ *  `headers` map the consumer's loop guard reads. */
+export async function getInboundForAutomation(db: DbClient, key: string): Promise<InboundMailView | null> {
+  const row = await db.first<InboundRow>(`SELECT * FROM mail_inbound WHERE id = ? OR message_id = ? LIMIT 1`, key, key);
+  if (!row) return null;
+  const view: InboundMailView = rowToMailMessage(row);
+  if (row.mailbox) view.mailbox = row.mailbox;
+  const headers: Record<string, string> = {};
+  if (row.auto_submitted) headers["auto-submitted"] = row.auto_submitted;
+  if (row.loop_marker) headers["x-dub-mail-loop"] = row.loop_marker;
+  if (Object.keys(headers).length > 0) view.headers = headers;
+  return view;
 }
 
 /** Full detail (body + read state) — backs GET /messages/:id. Account-scoped: another
