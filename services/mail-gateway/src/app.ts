@@ -46,7 +46,7 @@ import { attachmentsFor, parkScheduledAttachments, releaseScheduledAttachments }
 import { isCompanyAddress, requiredSelfCc, resolveSendIdentity, withSelfCc } from "./from";
 import { sendMail } from "./send";
 import { deriveRateLimitStatus, parseCooldownSec } from "./rate-limit";
-import { getAttachment, getInboundDetail, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, setInboundReadState, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
+import { getAttachment, getInboundDetail, getInboundForAutomation, getSentDetail, latestFailedSend, listInbound, listSent, listMailboxes, listThread, listUserFlags, markInboundRead, setInboundReadState, upsertMailbox, upsertUserFlags, cancelScheduled, getScheduledDetail, insertScheduled, listScheduled, newScheduledId, updateScheduled, findScheduledRow, type InboundScope, type MailScope } from "./repo";
 import { parseBulkRequest, parseListMessagesQuery, parseReadStateRequest, parseScheduleMailPatch, parseScheduleMailRequest, parseSendMailRequest } from "./validation";
 import { applyBulkAction, countFolders, listInboundFolder } from "./folders";
 import { assertTargetAllowed, getForwardSetting, parseForwardPatch, parseRegisterRequest, registerForwardTarget, removeForwardSetting, setForwardEnabled } from "./user-forward";
@@ -667,6 +667,15 @@ export function createApp() {
   // provider's own 429 already carries the exact Retry-After to the caller; this endpoint
   // reports whether we are still inside the cooldown window plus an ETA estimate.
   app.get("/internal/status", (c) => sendStatus(c));
+
+  // mail-automation's message fetch (INTERNAL in the table). mail.message.received carries the
+  // RFC Message-Id, and the consumer is system-origin (no user), so the user-facing
+  // /mail/messages/:id (mail_inbound.id + owner scope) cannot serve it.
+  app.get("/internal/messages/:id", async (c) => {
+    const msg = await getInboundForAutomation(dbOf(c), c.req.param("id"));
+    if (!msg) throw new DubError("MAIL_MESSAGE_NOT_FOUND", `message not found: ${c.req.param("id")}`, { status: 404 });
+    return c.json(msg);
+  });
 
   // スポンサーのメール連携 (member-service → ここ, s2s のみ)。登録アドレスとのメールの集計。
   app.post("/internal/sponsor/contacts", async (c) => {

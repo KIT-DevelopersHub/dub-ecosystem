@@ -12,7 +12,10 @@ export interface GatewaySendOptions {
 }
 
 export interface MailGatewayClient {
-  /** GET /messages/:id?mailbox= — full message (design: mail-automation holds no body). */
+  /** GET /internal/messages/:id — the inbound message by mail_inbound id or RFC Message-Id
+   *  (mail.message.received carries the latter). Bare /messages/:id does not exist on
+   *  mail-gateway (its user-facing copy is /mail/messages/:id, owner-scoped), which 404'd
+   *  every event in prod (#852). */
   getMessage(ctx: RequestContext, id: string, mailbox?: string): Promise<InboundMail>;
   /** POST /send — internal-only; idempotencyKey + mailbox required by contract. */
   send(ctx: RequestContext, req: mail.SendMailRequest, opts: GatewaySendOptions): Promise<mail.SendMailResponse>;
@@ -29,7 +32,7 @@ export function createMailGatewayClient(binding: Fetcher): MailGatewayClient {
   const client = createServiceClient(binding, { service: "mail-gateway", caller: "mail-automation" });
   return {
     getMessage(ctx, id, mailbox) {
-      return client.get<InboundMail>(ctx, `/messages/${encodeURIComponent(id)}`, mailbox ? { query: { mailbox } } : undefined);
+      return client.get<InboundMail>(ctx, `/internal/messages/${encodeURIComponent(id)}`, mailbox ? { query: { mailbox } } : undefined);
     },
     send(ctx, req, opts) {
       return client.post<mail.SendMailResponse, mail.SendMailRequest>(ctx, "/send", req, {

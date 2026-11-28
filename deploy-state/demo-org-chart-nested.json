@@ -1,0 +1,14 @@
+{
+  "kind": "demo-feature",
+  "slug": "org-chart-nested",
+  "worker": "dub-demo-org-chart-nested",
+  "url": "https://dub-demo-org-chart-nested.developershub-site.workers.dev",
+  "deployedSha": "567dfe22",
+  "branch": "fix/org-chart-nested-horizontal",
+  "actor": "ko-tarou",
+  "markers": ["members-orgchart-view-legacy"],
+  "live": true,
+  "verifiedAt": "2026-11-26T15:38:44Z",
+  "updatedAt": "2026-11-26T15:38:44Z",
+  "note": ""
+}

@@ -133,6 +133,7 @@
       "DELETE /mail/blocks/{}",
       "DELETE /mail/forward",
       "DELETE /mail/scheduled/{}",
+      "GET /internal/messages/{}",
       "GET /internal/monitor/heartbeat",
       "GET /mail/admin/canary/probes",
       "GET /mail/admin/monitor",
