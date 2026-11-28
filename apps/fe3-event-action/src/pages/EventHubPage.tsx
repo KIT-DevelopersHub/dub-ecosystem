@@ -1,42 +1,24 @@
 // EventHubPage — the Event app's home. The current event is picked from the shell's
 // always-visible global イベント switcher (GCP-style header widget); the body shows
-// that event as the primary subject: a hero (title / phase / schedule / description)
-// plus the free-form detail store where anything about the event can be kept.
+// that event as the primary subject: EventHubOverview (4 facts / apps / actions, #879),
+// then the free layout, the AI digest and the free-form detail store.
 // NOTE: this page does NOT render its own event switcher — the shell header already
 // carries the global one, so an in-body switcher would double the header (判断36⑤).
 // The standalone dev harness (main.tsx) supplies EventAppHeader itself.
 import { useMemo, useState } from "react";
-import { Button, Icon, EmptyState, SkeletonLoader } from "@dub/ui";
+import { EmptyState, SkeletonLoader } from "@dub/ui";
 import { EventContextProvider, useEventContext } from "../context/EventContext";
 import { EventDetailsPanel } from "../components/EventDetailsPanel";
 import { EventEditForm } from "../components/EventEditForm";
-import { PhaseBadge } from "../components/PhaseBadge";
 import { sampleEventDoc } from "../blockeditor";
 import { EventPageLayout } from "../components/EventPageLayout";
 import { EventAiDigestPanel } from "../components/EventAiDigestPanel";
+import { EventHubOverview } from "../components/EventHubOverview";
 import { useCurrentEventId } from "../lib/currentEvent";
-import { useNavigation } from "../contracts/navigation";
-import { eventRoutes, chatHref } from "../lib/routes";
 import styles from "../components/components.module.css";
-
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
-}
-
-function scheduleText(startsAt: string | null, endsAt: string | null): string | null {
-  const s = formatDate(startsAt);
-  const e = formatDate(endsAt);
-  if (s && e && s !== e) return `${s} 〜 ${e}`;
-  return s ?? e;
-}
 
 function HubBody({ eventId }: { eventId: string }) {
   const { event: ev, permissions } = useEventContext();
-  const nav = useNavigation();
-  const schedule = scheduleText(ev.startsAt, ev.endsAt);
   // Title / schedule / description edit happens IN PLACE here, same pattern as
   // EventDetailsPanel below (edit toggle, no route change) — a dedicated
   // settings-page round trip for these fields used to strand the user on a
@@ -55,110 +37,24 @@ function HubBody({ eventId }: { eventId: string }) {
 
   return (
     <div className={styles.page}>
-      <div className={styles.hero} data-testid="fe3-hub-hero">
-        {editing ? (
-          <div data-testid="fe3-hub-edit-form">
-            <EventEditForm
-              event={ev}
-              canWrite={permissions.write}
-              onCancel={() => setEditing(false)}
-              onSaved={() => setEditing(false)}
-            />
-          </div>
-        ) : (
-          <div className={styles.heroTop}>
-            <div>
-              <div className={styles.heroTitle}>{ev.title}</div>
-              <div className={styles.heroMeta}>
-                <span className={styles.heroMetaItem}>
-                  <PhaseBadge phase={ev.phase} testId="fe3-hub-phase" />
-                </span>
-                {schedule ? (
-                  <span className={styles.heroMetaItem}>
-                    <Icon name="calendar" /> {schedule}
-                  </span>
-                ) : null}
-                {ev.venue ? (
-                  <span className={styles.heroMetaItem} data-testid="fe3-hub-venue">
-                    <Icon name="flag" /> {ev.venue}
-                  </span>
-                ) : null}
-                {typeof ev.capacity === "number" ? (
-                  <span className={styles.heroMetaItem} data-testid="fe3-hub-capacity">
-                    <Icon name="users" /> 定員 {ev.capacity.toLocaleString("ja-JP")}人
-                  </span>
-                ) : null}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {permissions.write ? (
-                pageEditing ? (
-                  <Button
-                    iconLeft={<Icon name="check" />}
-                    variant="primary"
-                    onClick={() => setPageEditing(false)}
-                    testId="fe3-hub-edit-page-done"
-                  >
-                    編集を終了
-                  </Button>
-                ) : (
-                  <Button
-                    iconLeft={<Icon name="edit" />}
-                    variant="primary"
-                    onClick={() => setPageEditing(true)}
-                    testId="fe3-hub-edit-page"
-                  >
-                    イベント編集
-                  </Button>
-                )
-              ) : null}
-              {permissions.write && !pageEditing ? (
-                <Button
-                  iconLeft={<Icon name="edit" />}
-                  variant="secondary"
-                  onClick={() => setEditing(true)}
-                  testId="fe3-hub-edit-event"
-                >
-                  基本情報
-                </Button>
-              ) : null}
-              <Button
-                iconLeft={<Icon name="list" />}
-                variant="secondary"
-                onClick={() => nav.navigate(eventRoutes.detail(eventId))}
-                testId="fe3-hub-open-actions"
-              >
-                アクション
-              </Button>
-              <Button
-                iconLeft={<Icon name="check-square" />}
-                variant="secondary"
-                onClick={() => nav.navigate(eventRoutes.tasks(eventId))}
-                testId="fe3-hub-open-tasks"
-              >
-                タスク・ガント
-              </Button>
-              <Button
-                iconLeft={<Icon name="message-circle" />}
-                variant="secondary"
-                onClick={() => nav.navigate(chatHref(eventId))}
-                testId="fe3-hub-open-chat"
-              >
-                チャット
-              </Button>
-              <Button
-                iconLeft={<Icon name="settings" />}
-                variant="secondary"
-                onClick={() => nav.navigate(eventRoutes.settings(eventId))}
-                testId="fe3-hub-open-settings"
-              >
-                設定・使うアプリ
-              </Button>
-            </div>
-          </div>
-        )}
-        {!editing && ev.description ? <p className={styles.heroDesc}>{ev.description}</p> : null}
-      </div>
+      {editing ? (
+        <div className={styles.hero} data-testid="fe3-hub-edit-form">
+          <EventEditForm
+            event={ev}
+            canWrite={permissions.write}
+            onCancel={() => setEditing(false)}
+            onSaved={() => setEditing(false)}
+          />
+        </div>
+      ) : (
+        <EventHubOverview
+          event={ev}
+          canWrite={permissions.write}
+          pageEditing={pageEditing}
+          onEditInfo={() => setEditing(true)}
+          onTogglePageEdit={setPageEditing}
+        />
+      )}
 
       {pageEditing ? (
         // Page-edit mode: the event screen becomes a widget canvas. The
